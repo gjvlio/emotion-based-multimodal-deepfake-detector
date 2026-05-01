@@ -6,6 +6,66 @@ instructions below to set them up before running any pipeline scripts.
 
 ---
 
+## Wav2Lip (required for Track 2)
+
+Wav2Lip reanimates the lip movements of a face video to sync with a target
+audio file. Track 2 uses it to close the lip-sync gap left by Track 1, making
+fakes significantly harder to detect.
+
+### 1. Clone Wav2Lip
+
+```bash
+git clone https://github.com/Rudrabha/Wav2Lip.git tools/Wav2Lip
+cd tools/Wav2Lip
+pip install -r requirements.txt
+```
+
+### 2. Download model checkpoints
+
+Wav2Lip requires a pretrained GAN checkpoint. Download it from the official
+release and place it at `tools/Wav2Lip/checkpoints/wav2lip_gan.pth`.
+
+```bash
+mkdir -p tools/Wav2Lip/checkpoints
+
+# Download wav2lip_gan.pth from the official Google Drive link:
+# https://github.com/Rudrabha/Wav2Lip#getting-the-weights
+# Place it at: tools/Wav2Lip/checkpoints/wav2lip_gan.pth
+```
+
+A face detection model is also required:
+
+```bash
+# Download s3fd face detection model:
+# https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth
+mkdir -p tools/Wav2Lip/face_detection/detection/sfd
+# Place s3fd-619a316812.pth at:
+# tools/Wav2Lip/face_detection/detection/sfd/s3fd.pth
+```
+
+### 3. Verify setup
+
+```bash
+cd tools/Wav2Lip
+python inference.py --help
+```
+
+### Directory structure after setup
+
+```
+tools/Wav2Lip/
+├── inference.py                        ← entry point used by track2_generate.py
+├── checkpoints/
+│   └── wav2lip_gan.pth                 ← pretrained GAN model (download manually)
+└── face_detection/
+    └── detection/sfd/
+        └── s3fd.pth                    ← face detector (download manually)
+```
+
+---
+
+---
+
 ## Applio (RVC v2 — required for Track 1 Method B)
 
 Applio provides the RVC voice-conversion CLI used to train per-actor voice
