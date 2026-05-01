@@ -1,0 +1,38 @@
+# ── Core ──────────────────────────────────────────────────────────────────────
+torch
+torchvision
+torchaudio
+numpy
+pandas
+scipy
+tqdm
+
+# ── Audio ─────────────────────────────────────────────────────────────────────
+librosa
+soundfile
+
+# ── Vision ────────────────────────────────────────────────────────────────────
+opencv-python
+Pillow
+
+# ── Models (thesis backbone) ──────────────────────────────────────────────────
+transformers          # Wav2Vec2 + BERT
+timm                  # ViT
+
+# ── Track 1: Audio tampering ──────────────────────────────────────────────────
+speechbrain           # x-vector speaker verification filter
+styletts2             # emotion-controllable TTS
+infer-rvc-python      # RVC v2 speaker voice transfer (rvc-python is broken on Python 3.11)
+
+# ── Track 2: Video tampering (SadTalker) ─────────────────────────────────────
+# SadTalker is cloned and run directly; no pip install needed
+moviepy               # video editing helpers
+
+# ── Track 3: AV tampering (LatentSync) ───────────────────────────────────────
+diffusers             # HuggingFace diffusers (LatentSync backbone)
+accelerate
+
+# ── Training / evaluation ─────────────────────────────────────────────────────
+scikit-learn
+tensorboard
+mediapipe             # optional: face landmark QA
