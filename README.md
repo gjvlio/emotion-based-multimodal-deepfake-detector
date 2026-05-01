@@ -123,30 +123,47 @@ Thesis_G10/
 │   │
 │   ├── processed/
 │   │   ├── track1_manifests/
-│   │   │   ├── swap_pairs.csv         ← 6,532 emotion-swap pairs (all actors)
+│   │   │   ├── swap_pairs.csv           ← 6,532 emotion-swap pairs (all actors)
 │   │   │   ├── test_pairs_1001_1003.csv ← 215 pairs (actors 1001–1003 only)
-│   │   │   ├── clips.csv              ← per-clip metadata
-│   │   │   └── actor_stats.csv        ← clip counts per actor
-│   │   └── rvc_datasets/
-│   │       └── actor_XXXX/            ← WAVs resampled to 40 kHz for RVC training
+│   │   │   ├── clips.csv                ← per-clip metadata
+│   │   │   └── actor_stats.csv          ← clip counts per actor
+│   │   ├── rvc_datasets/
+│   │   │   └── actor_XXXX/              ← WAVs resampled to 40 kHz for RVC training
+│   │   └── actor_portraits/             ← output of extract_actor_frames.py (not in git)
+│   │       └── actor_XXXX/
+│   │           ├── portrait.png         ← best neutral portrait frame for SadTalker
+│   │           └── finetune/            ← additional diverse frames (10 by default)
 │   │
 │   └── synthetic/
-│       └── track1_fakes/
-│           ├── videos/                ← generated fake MP4 files (not in git)
-│           ├── metadata.csv           ← label, method, and path per fake
-│           └── failed.csv             ← clips that failed with error details
+│       ├── track1_fakes/
+│       │   ├── videos/                  ← generated fake MP4 files (not in git)
+│       │   ├── metadata.csv             ← label, method, and path per fake
+│       │   └── failed.csv               ← clips that failed with error details
+│       ├── track2_fakes/
+│       │   ├── videos/                  ← Wav2Lip reanimated fakes (not in git)
+│       │   ├── metadata.csv
+│       │   └── failed.csv
+│       └── track3_fakes/
+│           ├── videos/                  ← SadTalker talking head fakes (not in git)
+│           ├── metadata.csv
+│           └── failed.csv
 │
 ├── src/
 │   ├── track1/
 │   │   ├── parse_cremad.py        ← parses CREMA-D and builds pair manifests
 │   │   ├── train_rvc_voices.py    ← trains one RVC voice model per actor
 │   │   └── track1_generate.py     ← generates Track 1 fake videos
-│   ├── track2/                    ← (not started)
-│   └── track3/                    ← (not started)
+│   ├── track2/
+│   │   └── track2_generate.py     ← Wav2Lip lip reenactment on Track 1 output
+│   └── track3/
+│       ├── extract_actor_frames.py ← extracts portrait + finetune frames per actor
+│       └── track3_generate.py     ← SadTalker talking head generation
 │
 ├── tools/
-│   ├── README.md                  ← Applio setup + Windows patch instructions
-│   └── Applio/                    ← RVC v2 training tool (not in git, clone separately)
+│   ├── README.md                  ← setup instructions for all external tools
+│   ├── Applio/                    ← RVC v2 training tool (not in git, clone separately)
+│   ├── Wav2Lip/                   ← lip reenactment tool (not in git, clone separately)
+│   └── SadTalker/                 ← talking head generation (not in git, clone separately)
 │
 ├── scripts/
 │   ├── setup_track1.sh            ← environment setup script
@@ -331,4 +348,6 @@ python track1_generate.py --resume [... same args ...]
 | Track 1 Method B — test actors | ✅ Done | 214 / 215 clips (1 RVC timeout) |
 | RVC training — all 91 actors | ⏳ Pending | Full run not started |
 | Track 1 — all 91 actors | ⏳ Pending | Blocked on full training |
-| Track 2 / Track 3 | ⏳ Not started | TBD |
+| Actor portrait extraction | ⏳ Pending | `extract_actor_frames.py` → `data/processed/actor_portraits/` |
+| Track 2 (Wav2Lip) | ⏳ Pending | Script ready; blocked on Track 1 full run |
+| Track 3 (SadTalker) | ⏳ Pending | Script ready; blocked on portrait extraction |
