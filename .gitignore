@@ -35,6 +35,7 @@ data/synthetic/
 # Third-party tools  (clone separately — see tools/README.md)
 # =============================================================================
 tools/Applio/
+tools/Wav2Lip/
 
 # =============================================================================
 # Audio / video files anywhere in the repo

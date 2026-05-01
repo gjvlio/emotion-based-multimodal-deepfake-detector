@@ -43,7 +43,69 @@ mkdir -p tools/Wav2Lip/face_detection/detection/sfd
 # tools/Wav2Lip/face_detection/detection/sfd/s3fd.pth
 ```
 
-### 3. Verify setup
+### 3. Apply compatibility patches
+
+Three fixes are required to run Wav2Lip with Python 3.11 / PyTorch 2.6 / librosa ≥0.10:
+
+---
+
+#### Patch A — `audio.py`: librosa API change
+
+`librosa.filters.mel()` no longer accepts positional arguments in librosa ≥0.10.
+
+```python
+# Before (line ~100):
+return librosa.filters.mel(hp.sample_rate, hp.n_fft, n_mels=hp.num_mels,
+                           fmin=hp.fmin, fmax=hp.fmax)
+
+# After:
+return librosa.filters.mel(sr=hp.sample_rate, n_fft=hp.n_fft, n_mels=hp.num_mels,
+                           fmin=hp.fmin, fmax=hp.fmax)
+```
+
+---
+
+#### Patch B — `inference.py`: PyTorch 2.6 `torch.load` default change
+
+`torch.load()` defaults to `weights_only=True` in PyTorch 2.6, breaking old checkpoints.
+
+```python
+# Before (in _load(), ~line 161):
+checkpoint = torch.load(checkpoint_path)
+# and:
+checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+
+# After — add weights_only=False to both branches:
+checkpoint = torch.load(checkpoint_path, weights_only=False)
+# and:
+checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage,
+                        weights_only=False)
+```
+
+---
+
+#### Patch C — `inference.py`: `wav2lip_gan.pth` is a TorchScript archive
+
+`wav2lip_gan.pth` is saved as a TorchScript archive, so `torch.load` dispatches
+to `torch.jit.load` and `checkpoint["state_dict"]` raises `NotImplementedError`.
+
+```python
+# Before (load_model function, ~line 172):
+checkpoint = _load(path)
+s = checkpoint["state_dict"]
+
+# After — add fallback for TorchScript archives:
+try:
+    checkpoint = _load(path)
+    s = checkpoint["state_dict"]
+except (TypeError, NotImplementedError, KeyError):
+    jit_model = torch.jit.load(path, map_location=device)
+    s = jit_model.state_dict()
+```
+
+---
+
+### 4. Verify setup
 
 ```bash
 cd tools/Wav2Lip
