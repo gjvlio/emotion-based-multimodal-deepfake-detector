@@ -146,41 +146,133 @@ pip install -r requirements.txt
 
 ### 2. Download pretrained models
 
-SadTalker provides a download script:
+Linux/Mac:
 
 ```bash
 cd tools/SadTalker
-# Linux/Mac:
 bash scripts/download_models.sh
-# Windows — run the commands inside download_models.sh manually, or:
-python scripts/download_correct_model.py  # if available
 ```
 
-Alternatively download manually and place in `tools/SadTalker/checkpoints/`:
-- SadTalker models: ~400 MB total
-- (Optional) GFPGAN face enhancer: ~340 MB — place in `tools/SadTalker/gfpgan/weights/`
+Windows — `wget` is not available; use Python instead:
 
-See the [SadTalker README](https://github.com/OpenTalker/SadTalker#usage) for
-direct download links.
+```python
+import urllib.request, os
 
-### 3. Verify setup
+files = [
+    ("https://github.com/OpenTalker/SadTalker/releases/download/v0.0.2-rc/mapping_00109-model.pth.tar",
+     "tools/SadTalker/checkpoints/mapping_00109-model.pth.tar"),
+    ("https://github.com/OpenTalker/SadTalker/releases/download/v0.0.2-rc/mapping_00229-model.pth.tar",
+     "tools/SadTalker/checkpoints/mapping_00229-model.pth.tar"),
+    ("https://github.com/OpenTalker/SadTalker/releases/download/v0.0.2-rc/SadTalker_V0.0.2_256.safetensors",
+     "tools/SadTalker/checkpoints/SadTalker_V0.0.2_256.safetensors"),
+    ("https://github.com/xinntao/facexlib/releases/download/v0.1.0/alignment_WFLW_4HG.pth",
+     "tools/SadTalker/gfpgan/weights/alignment_WFLW_4HG.pth"),
+    ("https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth",
+     "tools/SadTalker/gfpgan/weights/detection_Resnet50_Final.pth"),
+    ("https://github.com/xinntao/facexlib/releases/download/v0.2.2/parsing_parsenet.pth",
+     "tools/SadTalker/gfpgan/weights/parsing_parsenet.pth"),
+]
+os.makedirs("tools/SadTalker/checkpoints", exist_ok=True)
+os.makedirs("tools/SadTalker/gfpgan/weights", exist_ok=True)
+for url, dest in files:
+    if not os.path.exists(dest):
+        print(f"Downloading {url.split('/')[-1]}...")
+        urllib.request.urlretrieve(url, dest)
+print("Done.")
+```
+
+### 3. Apply compatibility patches
+
+Four fixes are required for Python 3.11 / numpy 2.x / torchvision 0.21:
+
+---
+
+#### Patch A — `src/face3d/util/preprocess.py`: `np.VisibleDeprecationWarning` removed
+
+```python
+# Before (line ~12):
+warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
+
+# After:
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+```
+
+---
+
+#### Patch B — `src/face3d/util/preprocess.py`: `lstsq` returns (N,1) solution, not (N,)
+
+numpy 2.x rejects `float()` on non-0-d arrays. `k.ravel()` normalises the shape.
+
+```python
+# Before (POS function, ~line 30):
+k, _, _, _ = np.linalg.lstsq(A, b)
+
+# After — add ravel() immediately after:
+k, _, _, _ = np.linalg.lstsq(A, b)
+k = k.ravel()
+```
+
+---
+
+#### Patch C — `src/utils/preprocess.py`: `float()` on 1-element arrays fails
+
+```python
+# Before (generate(), ~line 148):
+trans_params = np.array([float(item) for item in np.hsplit(trans_params, 5)]).astype(np.float32)
+
+# After:
+trans_params = trans_params.ravel().astype(np.float32)
+```
+
+---
+
+#### Patch D — `src/face3d/util/my_awing_arch.py`: `np.float` alias removed
+
+```python
+# Before (calculate_points(), ~line 18):
+preds = preds.astype(np.float, copy=False)
+
+# After:
+preds = preds.astype(float, copy=False)
+```
+
+---
+
+#### Patch E — `basicsr/data/degradations.py` (site-packages): `functional_tensor` removed
+
+```python
+# Before:
+from torchvision.transforms.functional_tensor import rgb_to_grayscale
+
+# After:
+from torchvision.transforms.functional import rgb_to_grayscale
+```
+
+---
+
+### 4. Verify setup
 
 ```bash
 cd tools/SadTalker
 python inference.py \
   --driven_audio examples/driven_audio/bus_chinese.wav \
-  --source_image examples/source_image/full_body_1.png \
+  --source_image examples/source_image/art_0.png \
   --result_dir results \
   --still --preprocess full --size 256
 ```
+
+Expected output: video file in `results/` with face animated from the portrait.
 
 ### Directory structure after setup
 
 ```
 tools/SadTalker/
 ├── inference.py             <- entry point used by track3_generate.py
-├── checkpoints/             <- pretrained SadTalker models (~400 MB)
-├── gfpgan/weights/          <- optional face enhancer (~340 MB)
+├── checkpoints/
+│   ├── SadTalker_V0.0.2_256.safetensors   <- main model (~692 MB, download)
+│   ├── mapping_00109-model.pth.tar         <- head motion (~149 MB, download)
+│   └── mapping_00229-model.pth.tar         <- head motion (~149 MB, download)
+├── gfpgan/weights/          <- face detection models (auto-downloaded on first run)
 └── src/                     <- SadTalker source modules
 ```
 
