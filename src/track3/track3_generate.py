@@ -151,10 +151,10 @@ def run_sadtalker(
     tmp_result.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, str(infer_script),
-        "--driven_audio", str(audio_wav),
-        "--source_image", str(portrait),
-        "--result_dir",   str(tmp_result),
+        sys.executable, "inference.py",
+        "--driven_audio", str(audio_wav.resolve()),
+        "--source_image", str(portrait.resolve()),
+        "--result_dir",   str(tmp_result.resolve()),
         "--preprocess",   "full",
         "--size",         str(size),
     ]
