@@ -1,0 +1,17 @@
+# Normalize line endings: store as LF in git, checkout as native on each OS
+* text=auto
+
+# Force LF for shell scripts (always run on Linux/Mac even if dev is on Windows)
+*.sh text eol=lf
+
+# Explicitly binary — no line-ending conversion
+*.pth binary
+*.pt binary
+*.onnx binary
+*.bin binary
+*.npy binary
+*.wav binary
+*.mp4 binary
+*.flv binary
+*.png binary
+*.jpg binary
