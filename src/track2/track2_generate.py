@@ -200,6 +200,18 @@ def find_wav2lip_model(wav2lip_dir: Path) -> Path | None:
     return None
 
 
+def load_filter_stems(filter_csv: str | None) -> set | None:
+    """Return set of base output_stems to process, or None to process all."""
+    if filter_csv is None:
+        return None
+    import csv as _csv
+    stems = set()
+    with open(filter_csv, newline="", encoding="utf-8") as f:
+        for row in _csv.DictReader(f):
+            stems.add(row["output_stem"])
+    return stems
+
+
 def generate(args):
     track1_videos = Path(args.track1_dir) / "videos"
     cremad_dir    = Path(args.cremad_dir)
@@ -219,11 +231,18 @@ def generate(args):
     log.info(f"Using Wav2Lip model: {model_path.name}")
 
     # Collect Track 1 Method B source files
-    styletts_files = sorted(track1_videos.glob("*_styletts.mp4"))
+    filter_stems = load_filter_stems(args.filter_csv)
+    all_styletts = sorted(track1_videos.glob("*_styletts.mp4"))
+    if filter_stems is not None:
+        styletts_files = [f for f in all_styletts
+                          if f.stem.replace("_styletts", "") in filter_stems]
+        log.info(f"Filter: {len(styletts_files)}/{len(all_styletts)} clips selected via --filter_csv.")
+    else:
+        styletts_files = all_styletts
     if not styletts_files:
-        log.error(f"No _styletts.mp4 files found in {track1_videos}. Run Track 1 Method B first.")
+        log.error(f"No _styletts.mp4 files to process in {track1_videos}.")
         sys.exit(1)
-    log.info(f"Found {len(styletts_files)} Track 1 Method B clips to process.")
+    log.info(f"Processing {len(styletts_files)} Track 1 clips.")
 
     # Resume support
     done = load_checkpoint(out_dir) if args.resume else set()
@@ -354,6 +373,9 @@ def main():
                         help="Output directory for Track 2 fakes")
     parser.add_argument("--resume",      action="store_true",
                         help="Skip clips already present in the checkpoint file")
+    parser.add_argument("--filter_csv",  default=None,
+                        help="Only process clips whose output_stem appears in this pairs CSV "
+                             "(e.g. track2_pairs.csv from sample_by_track.py)")
     args = parser.parse_args()
     generate(args)
 
