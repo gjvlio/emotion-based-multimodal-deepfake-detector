@@ -12,12 +12,11 @@ Deepfakes are created by **mismatching the emotional content of audio and video*
 - [Quick Start](#quick-start)
 - [Dataset: CREMA-D](#dataset-crema-d)
 - [Project Structure](#project-structure)
-- [Track 1 — Emotion Audio Swap](#track-1--emotion-audio-swap)
-  - [Method A: Direct Swap](#method-a-direct-swap-no-ai)
-  - [Method B: AI Voice Conversion](#method-b-ai-voice-conversion-styletts2--rvc)
+- [Track 1 — StyleTTS2+RVC Deepfake Generation](#track-1--styletts2rvc-deepfake-generation)
   - [Step 1 — Parse the dataset](#step-1--parse-the-dataset)
-  - [Step 2 — Train voice models](#step-2--train-voice-models-method-b-only)
-  - [Step 3 — Generate fakes](#step-3--generate-fake-videos)
+  - [Step 2 — Sample by track](#step-2--sample-by-track)
+  - [Step 3 — Train voice models](#step-3--train-voice-models)
+  - [Step 4 — Generate fakes](#step-4--generate-fake-videos)
 - [Pipeline Status](#pipeline-status)
 
 ---
@@ -43,39 +42,34 @@ pip install -r requirements.txt
 
 ```bash
 # 1. Download CREMA-D (see data/raw/README.md)
-# 2. Clone and configure Applio (see tools/README.md)
+# 2. Clone and configure Applio, Wav2Lip, SadTalker (see tools/README.md)
 
-# 3. Parse CREMA-D and build the swap-pair manifest
+# 3. Parse CREMA-D and build the pair manifest
 python src/track1/parse_cremad.py \
   --cremad_dir data/raw/CREMA-D \
   --out_dir    data/processed/track1_manifests
 
-# 4a. Generate Method A fakes (no AI needed, ~0.5 s/clip)
-cd src/track1
-python track1_generate.py \
-  --pairs_csv ../../data/processed/track1_manifests/test_pairs_1001_1003.csv \
-  --out_dir   ../../data/synthetic/track1_fakes \
-  --method    swap
+# 4. Split pairs across tracks (20% T1 / 30% T2 / 50% T3, stratified by actor)
+python scripts/sample_by_track.py \
+  --pairs_csv data/processed/track1_manifests/swap_pairs.csv \
+  --out_dir   data/processed/track1_manifests
 
-# 4b. Generate Method B fakes (requires trained voice models — run step 5 first)
-python track1_generate.py \
-  --pairs_csv  ../../data/processed/track1_manifests/test_pairs_1001_1003.csv \
-  --out_dir    ../../data/synthetic/track1_fakes \
-  --method     styletts \
-  --cremad_dir ../../data/raw/CREMA-D \
-  --applio_dir ../../tools/Applio
-
-# 5. (Method B only) Train RVC voice models for target actors
-cd ../..
+# 5. Train RVC voice models (test actors — ~1 hr on RTX 3060)
 python src/track1/train_rvc_voices.py \
   --cremad_dir   data/raw/CREMA-D \
   --applio_dir   tools/Applio \
   --datasets_dir data/processed/rvc_datasets \
   --actors 1001 1002 1003
+
+# 6. Generate Track 1 fakes (StyleTTS2+RVC)
+python src/track1/track1_generate.py \
+  --pairs_csv  data/processed/track1_manifests/track1_pairs.csv \
+  --out_dir    data/synthetic/track1_fakes \
+  --applio_dir tools/Applio \
+  --cremad_dir data/raw/CREMA-D
 ```
 
-> **Note:** Steps 4b and 5 can be run in any order — run 5 first (training), then 4b (generation).  
-> Add `--resume` to any generation command to continue an interrupted run without reprocessing completed clips.
+> Add `--resume` to any generation command to continue an interrupted run.
 
 ---
 
@@ -178,31 +172,13 @@ Thesis_G10/
 
 ---
 
-## Track 1 — Emotion Audio Swap
+## Track 1 — StyleTTS2+RVC Deepfake Generation
 
-Track 1 creates the simplest class of fake: the audio track of a real video is replaced with audio of the **same actor saying the same sentence but with a different emotion**. The result is a clip where the face and voice express conflicting emotions — a labeled fake that preserves speaker identity and lip-sync plausibility.
+Track 1 creates emotional-mismatch fakes: the audio of a real video is replaced with **AI-synthesised speech expressing a different emotion, cloned to match the actor's voice**. The face still shows the original emotion; the voice expresses a different one.
 
-Two methods are provided, producing two separate sets of fakes from the same pair manifest:
+### How it works
 
-### Method A: Direct Swap (no AI)
-
-`ffmpeg` strips the original audio track and replaces it with the target WAV file directly. No model is trained or invoked.
-
-**Example:**
-
-| | File | Emotion shown |
-|-|------|---------------|
-| Input video | `1001_IEO_ANG_HI.mp4` | Angry face |
-| Replacement audio | `1001_IEO_HAP_MD.wav` | Happy voice |
-| Output fake | `FAKE_T1_1001_IEO_ANG_HI__AUDIO_1001_IEO_HAP_MD.mp4` | Angry face + Happy voice |
-
-This method is fast (~0.5 s/clip) and produces a perfectly valid fake for detection experiments, but the audio is unmodified real speech — making it easier for detectors that look for audio synthesis artifacts.
-
----
-
-### Method B: AI Voice Conversion (StyleTTS2 + RVC)
-
-Method B produces a more challenging fake by **synthesising the target emotion from scratch and then transferring the actor's vocal identity onto it**. This makes both the emotion and the voice identity convincing while keeping the audio-visual mismatch intact.
+Track 1 **synthesises the target emotion from scratch and then transfers the actor's vocal identity onto it**. This makes both the emotion and the voice identity convincing while keeping the audio-visual mismatch intact.
 
 **Pipeline:**
 
@@ -224,7 +200,7 @@ Method B produces a more challenging fake by **synthesising the target emotion f
   audio into video           the source video file
 ```
 
-**Why this is harder to detect:** The synthesised audio contains real neural TTS artifacts and a real voice identity, unlike Method A where the audio is completely unaltered original speech.
+**Why Track 1 is harder to detect than naive swaps:** The synthesised audio carries real neural TTS artifacts and a genuine voice identity match, so simple audio-forensic detectors fail.
 
 ---
 
@@ -249,7 +225,33 @@ python src/track1/parse_cremad.py \
 
 ---
 
-### Step 2 — Train voice models (Method B only)
+### Step 2 — Sample by track
+
+`scripts/sample_by_track.py` splits the 6,532 swap pairs into three non-overlapping, actor-stratified manifests for the three pipeline tracks:
+
+| Track | Fraction | Pairs | Rationale |
+|-------|----------|-------|-----------|
+| Track 1 | 20% | 1,271 | Simplest fakes — fewer needed for baseline |
+| Track 2 | 30% | 1,994 | Medium difficulty |
+| Track 3 | 50% | 3,267 | Hardest to detect — largest share |
+
+```bash
+python scripts/sample_by_track.py \
+  --pairs_csv data/processed/track1_manifests/swap_pairs.csv \
+  --out_dir   data/processed/track1_manifests
+```
+
+**Outputs:**
+
+| File | Description |
+|------|-------------|
+| `track1_pairs.csv` | 1,271 pairs → Track 1 generation |
+| `track2_pairs.csv` | 1,994 pairs → Track 2 filter |
+| `track3_pairs.csv` | 3,267 pairs → Track 3 filter |
+
+---
+
+### Step 3 — Train voice models
 
 `src/track1/train_rvc_voices.py` trains a **per-actor RVC v2 voice model** using Applio's CLI. The model learns the actor's unique vocal characteristics (timbre, prosody pattern) from their CREMA-D clips, so that RVC can later transfer those characteristics onto any synthesised speech.
 
@@ -286,42 +288,29 @@ python src/track1/train_rvc_voices.py \
 
 ---
 
-### Step 3 — Generate fake videos
+### Step 4 — Generate fake videos
 
-`src/track1/track1_generate.py` reads the pair manifest and produces one fake video per row.
-
-> **Important:** Run from the `src/track1/` directory — the CSV uses paths relative to that location.
+`src/track1/track1_generate.py` reads `track1_pairs.csv` and produces one `_styletts.mp4` per row. These outputs are also the audio source for Track 2 and Track 3.
 
 ```bash
-cd src/track1
+python src/track1/track1_generate.py \
+  --pairs_csv  data/processed/track1_manifests/track1_pairs.csv \
+  --out_dir    data/synthetic/track1_fakes \
+  --applio_dir tools/Applio \
+  --cremad_dir data/raw/CREMA-D
 
-# Method A — no models required, processes all pairs in the CSV
-python track1_generate.py \
-  --pairs_csv ../../data/processed/track1_manifests/swap_pairs.csv \
-  --out_dir   ../../data/synthetic/track1_fakes \
-  --method    swap
-
-# Method B — requires trained .pth models (run Step 2 first)
-python track1_generate.py \
-  --pairs_csv  ../../data/processed/track1_manifests/swap_pairs.csv \
-  --out_dir    ../../data/synthetic/track1_fakes \
-  --method     styletts \
-  --cremad_dir ../../data/raw/CREMA-D \
-  --applio_dir ../../tools/Applio
-
-# Add --resume to any command to skip already-completed clips
-python track1_generate.py --resume [... same args ...]
+# Add --resume to skip already-completed clips
+python src/track1/track1_generate.py --resume [... same args ...]
 ```
 
 **CLI flags:**
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--pairs_csv` | Yes | Path to the swap-pair manifest CSV |
+| `--pairs_csv` | Yes | `track1_pairs.csv` from `sample_by_track.py` |
 | `--out_dir` | Yes | Directory for output videos and logs |
-| `--method` | Yes | `swap` (Method A) or `styletts` (Method B) |
-| `--cremad_dir` | Method B | Root CREMA-D directory (for reference audio) |
-| `--applio_dir` | Method B | Applio tool directory (for RVC inference) |
+| `--applio_dir` | Yes | Applio tool directory (for RVC inference) |
+| `--cremad_dir` | Yes | Root CREMA-D directory (for StyleTTS reference audio) |
 | `--resume` | No | Skip clips already present in the checkpoint file |
 
 **Output files:**
@@ -341,12 +330,13 @@ python track1_generate.py --resume [... same args ...]
 |-------|--------|-------|
 | CREMA-D dataset | ✅ Ready | 7,442 videos + 7,400 WAVs |
 | Swap pairs manifest | ✅ Done | 6,532 pairs → `swap_pairs.csv` |
-| Test pairs manifest | ✅ Done | 215 pairs (actors 1001–1003) |
+| Track split manifest | ✅ Done | 20/30/50 → `track1/2/3_pairs.csv` |
 | RVC training — actors 1001–1003 | ✅ Done | 40-epoch models in `tools/Applio/logs/` |
-| Track 1 Method A — test actors | ✅ Done | 215 / 215 clips |
-| Track 1 Method B — test actors | ✅ Done | 214 / 215 clips (1 RVC timeout) |
+| Track 1 — test actors (1001–1003) | ✅ Done | 214 / 214 clips (_styletts.mp4) |
+| Track 2 — test actors | ⚠️ Partial | 48 / 214 done; resume with `--resume` |
+| Track 3 — test actors | ✅ Done | 214 / 214 clips (_sadtalker.mp4) |
+| Actor portrait extraction — all 91 | ✅ Done | `data/processed/actor_portraits/` |
 | RVC training — all 91 actors | ⏳ Pending | Full run not started |
-| Track 1 — all 91 actors | ⏳ Pending | Blocked on full training |
-| Actor portrait extraction | ⏳ Pending | `extract_actor_frames.py` → `data/processed/actor_portraits/` |
-| Track 2 (Wav2Lip) | ⏳ Pending | Script ready; blocked on Track 1 full run |
-| Track 3 (SadTalker) | ⏳ Pending | Script ready; blocked on portrait extraction |
+| Track 1 — all 91 actors (1,271 clips) | ⏳ Pending | Blocked on full RVC training |
+| Track 2 — all 91 actors (1,994 clips) | ⏳ Pending | Blocked on Track 1 full run |
+| Track 3 — all 91 actors (3,267 clips) | ⏳ Pending | Blocked on Track 1 full run |

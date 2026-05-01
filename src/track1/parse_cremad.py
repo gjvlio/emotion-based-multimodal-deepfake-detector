@@ -144,9 +144,9 @@ def scan_cremad(cremad_dir: Path) -> pd.DataFrame:
 
 def build_swap_pairs(clips: pd.DataFrame) -> pd.DataFrame:
     """
-    Build the emotion-swap pairing table for Method A.
+    Build the emotion-swap pairing table.
 
-    For each genuine clip (video_clip), we find another clip from the
+    For each genuine clip (video_clip), find another clip from the
     SAME ACTOR and SAME SENTENCE but a DIFFERENT EMOTION, and pair its
     audio as the fake audio track.
 
@@ -154,9 +154,8 @@ def build_swap_pairs(clips: pd.DataFrame) -> pd.DataFrame:
         face shows emotion A  ←  video from clip X
         voice says emotion B  ←  audio from clip Y  (same actor, sentence, ≠ emotion)
 
-    Strategy: for each source clip, cycle through target emotions
-    so each source emotion maps to a unique target emotion, keeping
-    the training set balanced across all six emotion classes.
+    Strategy: deterministic emotion rotation so each source emotion maps to
+    a unique target emotion, keeping the set balanced across all six emotion classes.
     """
     emotions = list(EMOTION_MAP.keys())
     # Deterministic emotion rotation: ANG→DIS, DIS→FEA, FEA→HAP, HAP→NEU, NEU→SAD, SAD→ANG
@@ -209,7 +208,6 @@ def build_swap_pairs(clips: pd.DataFrame) -> pd.DataFrame:
                 # Output
                 'output_stem':       f"FAKE_T1_{src_row['stem']}__AUDIO_{tgt_row['stem']}",
                 'label':             1,  # 1 = fake
-                'method':            'emotion_swap',
                 'status':            'pending',
             })
 
@@ -267,7 +265,7 @@ def main():
         has_video=('video_path', lambda x: x.notna().sum()),
     ).reset_index()
 
-    # 3. Build swap pairs (Method A — no model needed)
+    # 3. Build swap pairs
     pairs = build_swap_pairs(clips)
 
     # 4. Save all manifests
@@ -284,7 +282,7 @@ def main():
     print(f"  {clips_path.name}:    {len(clips)} rows")
     print(f"  {pairs_path.name}: {len(pairs)} rows")
     print(f"  {actors_path.name}: {len(actor_stats)} rows")
-    print(f"\nNext step: python track1_generate.py --pairs_csv {pairs_path} --out_dir ./track1_fakes")
+    print(f"\nNext step: python scripts/sample_by_track.py --pairs_csv {pairs_path} --out_dir {out_dir}")
 
 
 if __name__ == '__main__':
