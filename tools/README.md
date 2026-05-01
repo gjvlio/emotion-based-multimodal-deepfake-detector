@@ -126,6 +126,97 @@ tools/Wav2Lip/
 
 ---
 
+## Hallo (required for Track 3)
+
+Hallo is a diffusion-based talking head model from Fudan University. Track 3
+uses it to generate fully synthesised face videos with emotion-driven lip sync,
+head motion, and facial expression from a single portrait + audio file.
+
+### 1. Clone Hallo
+
+```bash
+git clone https://github.com/fudan-generative-vision/hallo.git tools/Hallo
+```
+
+### 2. Install Python dependencies
+
+Hallo requires `insightface` which needs Microsoft C++ Build Tools on Windows.
+Install the hallo package only (without build-failing deps):
+
+```bash
+pip install -e tools/Hallo --no-deps
+pip install diffusers transformers omegaconf einops accelerate face_alignment
+pip install imageio-ffmpeg decord av librosa
+```
+
+### 3. Download pretrained models
+
+Models are stored via git-lfs in HuggingFace. Run in the Hallo directory:
+
+```bash
+cd tools/Hallo
+git clone https://huggingface.co/fudan-generative-ai/hallo pretrained_models
+```
+
+If git-lfs isn't installed (`git lfs version`), install it first:
+- Windows: https://git-lfs.com
+- Then re-run the clone or `git lfs pull` inside the pretrained_models directory
+
+Total model size: ~12 GB across 12 LFS files.
+
+### 4. Extract component weights (required for per-actor fine-tuning)
+
+`train_stage2.py` expects individual `.pth` files, but HuggingFace ships a
+single `net.pth`. Run the splitter once:
+
+```bash
+python src/track3/extract_hallo_components.py \
+  --net_pth tools/Hallo/pretrained_models/hallo/net.pth \
+  --out_dir tools/Hallo/pretrained_models/hallo
+```
+
+This writes `reference_unet.pth`, `denoising_unet.pth`, `face_locator.pth`,
+`imageproj.pth`, and `audioproj.pth` into `pretrained_models/hallo/`.
+
+### 5. Verify inference
+
+```bash
+cd tools/Hallo
+python scripts/inference.py \
+  --config configs/inference/default.yaml \
+  --source_image examples/reference_images/1.jpg \
+  --driving_audio examples/driving_audios/1.wav \
+  --output .cache/test_output.mp4
+```
+
+### Directory structure after setup
+
+```
+tools/Hallo/
+├── hallo/                  <- Python package (pip install -e . --no-deps)
+├── scripts/
+│   ├── inference.py        <- entry point used by track3_generate.py
+│   ├── train_stage2.py     <- entry point used by finetune_hallo.py
+│   └── data_preprocess.py  <- data pipeline for fine-tuning
+├── configs/
+│   ├── inference/default.yaml
+│   └── train/stage2.yaml
+└── pretrained_models/      <- downloaded via git-lfs (12 GB)
+    ├── hallo/
+    │   ├── net.pth                     <- combined checkpoint (4.9 GB)
+    │   ├── reference_unet.pth          <- extracted by extract_hallo_components.py
+    │   ├── denoising_unet.pth          <- extracted
+    │   ├── face_locator.pth            <- extracted
+    │   ├── imageproj.pth               <- extracted
+    │   └── audioproj.pth               <- extracted
+    ├── face_analysis/models/           <- InsightFace ONNX models
+    ├── motion_module/mm_sd_v15_v2.ckpt <- AnimateDiff motion module (1.8 GB)
+    ├── sd-vae-ft-mse/                  <- Stable Diffusion VAE (335 MB)
+    ├── stable-diffusion-v1-5/unet/    <- SD1.5 UNet (3.4 GB)
+    ├── wav2vec/wav2vec2-base-960h/    <- Audio encoder (378 MB)
+    └── audio_separator/Kim_Vocal_2.onnx <- Vocal separator (67 MB)
+```
+
 ---
 
 ## Applio (RVC v2 — required for Track 1 Method B)
