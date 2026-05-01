@@ -1,33 +1,35 @@
 """
-Track 3 — High-Quality Emotion Talking Head Generation
+Track 3 — Emotion Talking Head Generation (SadTalker)
 
 Generates the most convincing class of deepfake in the pipeline:
-both audio AND video are fully synthesised with the target emotion,
-and the face is generated (not reanimated) using a per-actor fine-tuned
-Hallo model — making it the hardest to detect.
+both audio AND video are fully synthesised with the target emotion.
+SadTalker generates a complete new face video from a single portrait image
+driven by audio — identity and lip sync both synthesised, not reanimated.
 
 Difference from previous tracks:
-  Track 1 — synthetic audio only, original face, lip mismatch visible
+  Track 1 — synthetic audio only, original face video, lip mismatch visible
   Track 2 — synthetic audio, original face, lips reanimated (Wav2Lip)
-  Track 3 — synthetic audio + fully generated face video, emotion-consistent,
-             per-actor LoRA ensures identity fidelity
+  Track 3 — synthetic audio + fully generated face video (SadTalker),
+             driven by audio; face is generated from actor portrait, not
+             reanimated from original footage
 
 Pipeline per clip:
-  1. Load per-actor LoRA weights for Hallo (identity fine-tune)
-  2. Extract synthesised audio from Track 1 _styletts.mp4
+  1. Extract synthesised audio from Track 1 _styletts.mp4
      (reuses Track 1 Method B audio; avoids re-running StyleTTS2/RVC)
-  3. Load actor's best portrait frame as reference image
-  4. Run Hallo inference: portrait + audio + LoRA → full face video
-     with lip sync AND facial emotion expression
-  5. Write output to data/synthetic/track3_fakes/videos/
+  2. Load actor's best portrait frame as reference image
+  3. Run SadTalker inference: portrait + audio -> full face video
+     with lip sync and 3D head motion
+  4. Write output to data/synthetic/track3_fakes/videos/
 
 Usage:
   python src/track3/track3_generate.py \
     --track1_dir    data/synthetic/track1_fakes \
     --portraits_dir data/processed/actor_portraits \
-    --hallo_dir     tools/Hallo \
-    --lora_dir      tools/Hallo/lora \
+    --sadtalker_dir tools/SadTalker \
     --out_dir       data/synthetic/track3_fakes \
+    [--size         256]      # output resolution: 256 or 512 (default: 256)
+    [--still]                 # minimal head motion (default: on)
+    [--enhancer     gfpgan]   # face enhancer: gfpgan or none (default: none)
     [--resume]
 """
 
@@ -35,7 +37,7 @@ import argparse
 import csv
 import json
 import logging
-import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,7 +57,7 @@ FAILED_FILE     = "failed.csv"
 METADATA_COLS   = [
     "output_stem", "track1_source", "portrait_used",
     "face_emotion", "audio_emotion", "actor_id", "sentence",
-    "lora_path", "hallo_model", "timestamp",
+    "sadtalker_size", "timestamp",
 ]
 
 
@@ -112,70 +114,75 @@ def find_portrait(portraits_dir: Path, actor_id: str) -> Path | None:
     return p if p.exists() else None
 
 
-def find_actor_ckpt(ckpt_dir: Path, actor_id: str) -> Path | None:
-    """Return per-actor fine-tuned Hallo checkpoint dir if it exists."""
-    p = ckpt_dir / f"actor_{actor_id}"
-    return p if p.exists() else None
-
-
 # ---------------------------------------------------------------------------
-# Hallo inference
+# SadTalker inference
 # ---------------------------------------------------------------------------
 
-def run_hallo(
-    hallo_dir:    Path,
-    portrait:     Path,
-    audio_wav:    Path,
-    out_video:    Path,
-    actor_ckpt:   Path | None,
+def run_sadtalker(
+    sadtalker_dir: Path,
+    portrait:      Path,
+    audio_wav:     Path,
+    out_path:      Path,
+    size:          int  = 256,
+    still:         bool = True,
+    enhancer:      str  = "none",
 ) -> bool:
     """
-    Call Hallo's inference script to generate a talking head video.
+    Call SadTalker's inference.py to generate a talking head video.
 
-    Hallo takes a YAML config (configs/inference/default.yaml) with model paths,
-    plus CLI overrides for the per-clip inputs:
-      --source_image  : actor portrait PNG (reference identity)
-      --driving_audio : synthesised WAV with target emotion
-      --output        : output MP4 path
-      --audio_ckpt_dir: optional per-actor fine-tuned checkpoint dir
+    SadTalker takes a single portrait image + driving audio and generates
+    a full face video with 3D head motion and lip sync. Unlike Wav2Lip
+    (Track 2) which reanimates an existing face video, SadTalker generates
+    a completely new face sequence from the portrait.
 
-    The model generates a video where:
-      - Face identity is anchored to the portrait via InsightFace embeddings
-      - Lip movements are driven by audio via wav2vec features
-      - Facial expression and head motion emerge from audio prosody,
-        making the synthesised emotion visible in the generated face
+    --still:   keeps head mostly stable, focuses motion on face/lips
+    --preprocess full: processes the entire image (not just the face crop)
+    --size:    output resolution (256 = faster, 512 = higher quality)
     """
-    infer_script = hallo_dir / "scripts" / "inference.py"
+    infer_script = sadtalker_dir / "inference.py"
     if not infer_script.exists():
         raise FileNotFoundError(
-            f"Hallo inference script not found at {infer_script}. "
-            "Clone Hallo to tools/Hallo — see tools/README.md."
+            f"SadTalker inference script not found at {infer_script}. "
+            "Clone SadTalker to tools/SadTalker — see tools/README.md."
         )
+
+    # SadTalker writes to result_dir with auto-generated filename
+    tmp_result = out_path.parent / f"_tmp_{out_path.stem}"
+    tmp_result.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         sys.executable, str(infer_script),
-        "--config",         str(hallo_dir / "configs" / "inference" / "default.yaml"),
-        "--source_image",   str(portrait),
-        "--driving_audio",  str(audio_wav),
-        "--output",         str(out_video),
-        "--pose_weight",    "1.0",
-        "--face_weight",    "1.0",
-        "--lip_weight",     "1.0",
-        "--face_expand_ratio", "1.2",
+        "--driven_audio", str(audio_wav),
+        "--source_image", str(portrait),
+        "--result_dir",   str(tmp_result),
+        "--preprocess",   "full",
+        "--size",         str(size),
     ]
-
-    # If a per-actor fine-tuned checkpoint exists, use it instead of the base model
-    if actor_ckpt and actor_ckpt.exists():
-        cmd += ["--audio_ckpt_dir", str(actor_ckpt)]
+    if still:
+        cmd.append("--still")
+    if enhancer and enhancer.lower() != "none":
+        cmd += ["--enhancer", enhancer]
 
     result = subprocess.run(
         cmd,
-        cwd=str(hallo_dir),
-        capture_output=True, text=True, timeout=600,
+        cwd=str(sadtalker_dir),
+        capture_output=True, text=True, timeout=300,
     )
+
     if result.returncode != 0:
-        log.error(f"Hallo inference failed:\n{result.stderr[-2000:]}")
+        log.error(f"SadTalker inference failed:\n{result.stderr[-2000:]}")
+        shutil.rmtree(str(tmp_result), ignore_errors=True)
         return False
+
+    # Locate generated MP4 and move to final path
+    mp4s = list(tmp_result.rglob("*.mp4"))
+    if not mp4s:
+        log.error("SadTalker returned success but no MP4 found in output dir.")
+        shutil.rmtree(str(tmp_result), ignore_errors=True)
+        return False
+
+    shutil.move(str(mp4s[0]), str(out_path))
+    shutil.rmtree(str(tmp_result), ignore_errors=True)
     return True
 
 
@@ -186,8 +193,7 @@ def run_hallo(
 def generate(args):
     track1_videos = Path(args.track1_dir) / "videos"
     portraits_dir = Path(args.portraits_dir)
-    hallo_dir     = Path(args.hallo_dir)
-    ckpt_dir      = Path(args.lora_dir)
+    sadtalker_dir = Path(args.sadtalker_dir)
     out_dir       = Path(args.out_dir)
     vid_dir       = out_dir / "videos"
     vid_dir.mkdir(parents=True, exist_ok=True)
@@ -200,7 +206,7 @@ def generate(args):
 
     done = load_checkpoint(out_dir) if args.resume else set()
     if done:
-        log.info(f"Resuming — {len(done)} clips already done.")
+        log.info(f"Resuming -- {len(done)} clips already done.")
 
     meta_path   = out_dir / METADATA_FILE
     failed_path = out_dir / FAILED_FILE
@@ -220,7 +226,7 @@ def generate(args):
     with tempfile.TemporaryDirectory() as tmpdir:
         for i, t1_path in enumerate(styletts_files, 1):
             stem     = t1_path.stem
-            out_stem = stem.replace("_styletts", "_hallo")
+            out_stem = stem.replace("_styletts", "_sadtalker")
             out_path = vid_dir / f"{out_stem}.mp4"
 
             if out_stem in done:
@@ -230,7 +236,7 @@ def generate(args):
 
             info = parse_track1_stem(stem)
             if info is None:
-                log.warning(f"  Could not parse stem, skipping.")
+                log.warning("  Could not parse stem, skipping.")
                 continue
 
             actor_id = info["actor_id"]
@@ -244,10 +250,6 @@ def generate(args):
                 failed += 1
                 continue
 
-            actor_ckpt = find_actor_ckpt(ckpt_dir, actor_id)
-            if actor_ckpt is None:
-                log.warning(f"  No fine-tuned checkpoint for actor {actor_id} — using base Hallo model.")
-
             tmp_wav = Path(tmpdir) / f"{out_stem}.wav"
             if not extract_audio(t1_path, tmp_wav):
                 msg = "ffmpeg audio extraction failed"
@@ -257,18 +259,22 @@ def generate(args):
                 continue
 
             try:
-                ok = run_hallo(hallo_dir, portrait, tmp_wav, out_path, actor_ckpt)
+                ok = run_sadtalker(
+                    sadtalker_dir, portrait, tmp_wav, out_path,
+                    size=args.size, still=not args.no_still,
+                    enhancer=args.enhancer,
+                )
             except FileNotFoundError as e:
                 log.error(str(e))
                 sys.exit(1)
             except subprocess.TimeoutExpired:
                 ok = False
-                fail_w.writerow({"output_stem": out_stem, "error": "Hallo timed out",
+                fail_w.writerow({"output_stem": out_stem, "error": "SadTalker timed out",
                                  "timestamp": datetime.now().isoformat()})
                 failed += 1
                 continue
             except Exception as e:
-                log.error(f"  Hallo error: {e}", exc_info=True)
+                log.error(f"  SadTalker error: {e}", exc_info=True)
                 fail_w.writerow({"output_stem": out_stem, "error": str(e),
                                  "timestamp": datetime.now().isoformat()})
                 failed += 1
@@ -283,8 +289,7 @@ def generate(args):
                     "audio_emotion": info["audio_emotion"],
                     "actor_id":      actor_id,
                     "sentence":      info["sentence"],
-                    "lora_path":     str(actor_ckpt) if actor_ckpt else "",
-                    "hallo_model":   "hallo_v2",
+                    "sadtalker_size": args.size,
                     "timestamp":     datetime.now().isoformat(),
                 })
                 done.add(out_stem)
@@ -294,7 +299,7 @@ def generate(args):
                     meta_f.flush()
             else:
                 fail_w.writerow({"output_stem": out_stem,
-                                 "error": "Hallo returned failure or no output file",
+                                 "error": "SadTalker returned failure or no output file",
                                  "timestamp": datetime.now().isoformat()})
                 failed += 1
 
@@ -306,13 +311,18 @@ def generate(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Track 3 — Hallo talking head generation with per-actor LoRA."
+        description="Track 3 -- SadTalker talking head generation."
     )
     parser.add_argument("--track1_dir",    required=True)
     parser.add_argument("--portraits_dir", required=True)
-    parser.add_argument("--hallo_dir",     required=True)
-    parser.add_argument("--lora_dir",      required=True)
+    parser.add_argument("--sadtalker_dir", required=True)
     parser.add_argument("--out_dir",       required=True)
+    parser.add_argument("--size",          type=int, default=256,
+                        choices=[256, 512])
+    parser.add_argument("--no_still",      action="store_true",
+                        help="Allow free head motion (default: still mode)")
+    parser.add_argument("--enhancer",      default="none",
+                        choices=["none", "gfpgan"])
     parser.add_argument("--resume",        action="store_true")
     args = parser.parse_args()
     generate(args)

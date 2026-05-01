@@ -126,95 +126,62 @@ tools/Wav2Lip/
 
 ---
 
-## Hallo (required for Track 3)
+## SadTalker (required for Track 3)
 
-Hallo is a diffusion-based talking head model from Fudan University. Track 3
-uses it to generate fully synthesised face videos with emotion-driven lip sync,
-head motion, and facial expression from a single portrait + audio file.
+SadTalker generates a complete talking head video from a single portrait image
+driven by audio — lip sync and 3D head motion both synthesised. Unlike Wav2Lip
+(Track 2) which reanimates an existing face video's mouth region, SadTalker
+generates a **fully new face sequence** from just the portrait, making Track 3
+fakes harder to detect.
 
-### 1. Clone Hallo
+Cross-platform (Windows + Linux), lighter than diffusion-based alternatives.
+
+### 1. Clone SadTalker
 
 ```bash
-git clone https://github.com/fudan-generative-vision/hallo.git tools/Hallo
+git clone https://github.com/OpenTalker/SadTalker.git tools/SadTalker
+cd tools/SadTalker
+pip install -r requirements.txt
 ```
 
-### 2. Install Python dependencies
+### 2. Download pretrained models
 
-Hallo requires `insightface` which needs Microsoft C++ Build Tools on Windows.
-Install the hallo package only (without build-failing deps):
+SadTalker provides a download script:
 
 ```bash
-pip install -e tools/Hallo --no-deps
-pip install diffusers transformers omegaconf einops accelerate face_alignment
-pip install imageio-ffmpeg decord av librosa
+cd tools/SadTalker
+# Linux/Mac:
+bash scripts/download_models.sh
+# Windows — run the commands inside download_models.sh manually, or:
+python scripts/download_correct_model.py  # if available
 ```
 
-### 3. Download pretrained models
+Alternatively download manually and place in `tools/SadTalker/checkpoints/`:
+- SadTalker models: ~400 MB total
+- (Optional) GFPGAN face enhancer: ~340 MB — place in `tools/SadTalker/gfpgan/weights/`
 
-Models are stored via git-lfs in HuggingFace. Run in the Hallo directory:
+See the [SadTalker README](https://github.com/OpenTalker/SadTalker#usage) for
+direct download links.
 
-```bash
-cd tools/Hallo
-git clone https://huggingface.co/fudan-generative-ai/hallo pretrained_models
-```
-
-If git-lfs isn't installed (`git lfs version`), install it first:
-- Windows: https://git-lfs.com
-- Then re-run the clone or `git lfs pull` inside the pretrained_models directory
-
-Total model size: ~12 GB across 12 LFS files.
-
-### 4. Extract component weights (required for per-actor fine-tuning)
-
-`train_stage2.py` expects individual `.pth` files, but HuggingFace ships a
-single `net.pth`. Run the splitter once:
+### 3. Verify setup
 
 ```bash
-python src/track3/extract_hallo_components.py \
-  --net_pth tools/Hallo/pretrained_models/hallo/net.pth \
-  --out_dir tools/Hallo/pretrained_models/hallo
-```
-
-This writes `reference_unet.pth`, `denoising_unet.pth`, `face_locator.pth`,
-`imageproj.pth`, and `audioproj.pth` into `pretrained_models/hallo/`.
-
-### 5. Verify inference
-
-```bash
-cd tools/Hallo
-python scripts/inference.py \
-  --config configs/inference/default.yaml \
-  --source_image examples/reference_images/1.jpg \
-  --driving_audio examples/driving_audios/1.wav \
-  --output .cache/test_output.mp4
+cd tools/SadTalker
+python inference.py \
+  --driven_audio examples/driven_audio/bus_chinese.wav \
+  --source_image examples/source_image/full_body_1.png \
+  --result_dir results \
+  --still --preprocess full --size 256
 ```
 
 ### Directory structure after setup
 
 ```
-tools/Hallo/
-├── hallo/                  <- Python package (pip install -e . --no-deps)
-├── scripts/
-│   ├── inference.py        <- entry point used by track3_generate.py
-│   ├── train_stage2.py     <- entry point used by finetune_hallo.py
-│   └── data_preprocess.py  <- data pipeline for fine-tuning
-├── configs/
-│   ├── inference/default.yaml
-│   └── train/stage2.yaml
-└── pretrained_models/      <- downloaded via git-lfs (12 GB)
-    ├── hallo/
-    │   ├── net.pth                     <- combined checkpoint (4.9 GB)
-    │   ├── reference_unet.pth          <- extracted by extract_hallo_components.py
-    │   ├── denoising_unet.pth          <- extracted
-    │   ├── face_locator.pth            <- extracted
-    │   ├── imageproj.pth               <- extracted
-    │   └── audioproj.pth               <- extracted
-    ├── face_analysis/models/           <- InsightFace ONNX models
-    ├── motion_module/mm_sd_v15_v2.ckpt <- AnimateDiff motion module (1.8 GB)
-    ├── sd-vae-ft-mse/                  <- Stable Diffusion VAE (335 MB)
-    ├── stable-diffusion-v1-5/unet/    <- SD1.5 UNet (3.4 GB)
-    ├── wav2vec/wav2vec2-base-960h/    <- Audio encoder (378 MB)
-    └── audio_separator/Kim_Vocal_2.onnx <- Vocal separator (67 MB)
+tools/SadTalker/
+├── inference.py             <- entry point used by track3_generate.py
+├── checkpoints/             <- pretrained SadTalker models (~400 MB)
+├── gfpgan/weights/          <- optional face enhancer (~340 MB)
+└── src/                     <- SadTalker source modules
 ```
 
 ---

@@ -37,6 +37,7 @@ data/synthetic/
 tools/Applio/
 tools/Wav2Lip/
 tools/Hallo/
+tools/SadTalker/
 
 # =============================================================================
 # Audio / video files anywhere in the repo
