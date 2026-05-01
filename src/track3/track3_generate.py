@@ -112,8 +112,9 @@ def find_portrait(portraits_dir: Path, actor_id: str) -> Path | None:
     return p if p.exists() else None
 
 
-def find_lora(lora_dir: Path, actor_id: str) -> Path | None:
-    p = lora_dir / f"actor_{actor_id}.safetensors"
+def find_actor_ckpt(ckpt_dir: Path, actor_id: str) -> Path | None:
+    """Return per-actor fine-tuned Hallo checkpoint dir if it exists."""
+    p = ckpt_dir / f"actor_{actor_id}"
     return p if p.exists() else None
 
 
@@ -122,26 +123,27 @@ def find_lora(lora_dir: Path, actor_id: str) -> Path | None:
 # ---------------------------------------------------------------------------
 
 def run_hallo(
-    hallo_dir: Path,
-    portrait:  Path,
-    audio_wav: Path,
-    out_video: Path,
-    lora_path: Path | None,
+    hallo_dir:    Path,
+    portrait:     Path,
+    audio_wav:    Path,
+    out_video:    Path,
+    actor_ckpt:   Path | None,
 ) -> bool:
     """
     Call Hallo's inference script to generate a talking head video.
 
-    Hallo takes:
-      --source_image  : actor portrait (reference identity)
-      --driving_audio : synthesised audio with target emotion
-      --lora_path     : per-actor LoRA weights (optional but recommended)
-      --output        : output video path
+    Hallo takes a YAML config (configs/inference/default.yaml) with model paths,
+    plus CLI overrides for the per-clip inputs:
+      --source_image  : actor portrait PNG (reference identity)
+      --driving_audio : synthesised WAV with target emotion
+      --output        : output MP4 path
+      --audio_ckpt_dir: optional per-actor fine-tuned checkpoint dir
 
     The model generates a video where:
-      - Face identity matches the portrait (reinforced by LoRA)
-      - Lip movements are driven by the audio
-      - Facial expression and head motion are inferred from audio prosody,
-        making the emotion visible in the generated face
+      - Face identity is anchored to the portrait via InsightFace embeddings
+      - Lip movements are driven by audio via wav2vec features
+      - Facial expression and head motion emerge from audio prosody,
+        making the synthesised emotion visible in the generated face
     """
     infer_script = hallo_dir / "scripts" / "inference.py"
     if not infer_script.exists():
@@ -152,18 +154,19 @@ def run_hallo(
 
     cmd = [
         sys.executable, str(infer_script),
-        "--source_image",       str(portrait),
-        "--driving_audio",      str(audio_wav),
-        "--output",             str(out_video),
-        "--pretrained_model_path", str(hallo_dir / "pretrained_models"),
-        "--pose_weight",        "1.0",
-        "--face_weight",        "1.0",
-        "--lip_weight",         "1.0",
-        "--face_expand_ratio",  "1.2",
+        "--config",         str(hallo_dir / "configs" / "inference" / "default.yaml"),
+        "--source_image",   str(portrait),
+        "--driving_audio",  str(audio_wav),
+        "--output",         str(out_video),
+        "--pose_weight",    "1.0",
+        "--face_weight",    "1.0",
+        "--lip_weight",     "1.0",
+        "--face_expand_ratio", "1.2",
     ]
 
-    if lora_path and lora_path.exists():
-        cmd += ["--lora_path", str(lora_path)]
+    # If a per-actor fine-tuned checkpoint exists, use it instead of the base model
+    if actor_ckpt and actor_ckpt.exists():
+        cmd += ["--audio_ckpt_dir", str(actor_ckpt)]
 
     result = subprocess.run(
         cmd,
@@ -184,7 +187,7 @@ def generate(args):
     track1_videos = Path(args.track1_dir) / "videos"
     portraits_dir = Path(args.portraits_dir)
     hallo_dir     = Path(args.hallo_dir)
-    lora_dir      = Path(args.lora_dir)
+    ckpt_dir      = Path(args.lora_dir)
     out_dir       = Path(args.out_dir)
     vid_dir       = out_dir / "videos"
     vid_dir.mkdir(parents=True, exist_ok=True)
@@ -241,9 +244,9 @@ def generate(args):
                 failed += 1
                 continue
 
-            lora_path = find_lora(lora_dir, actor_id)
-            if lora_path is None:
-                log.warning(f"  No LoRA for actor {actor_id} — using base model (lower identity fidelity).")
+            actor_ckpt = find_actor_ckpt(ckpt_dir, actor_id)
+            if actor_ckpt is None:
+                log.warning(f"  No fine-tuned checkpoint for actor {actor_id} — using base Hallo model.")
 
             tmp_wav = Path(tmpdir) / f"{out_stem}.wav"
             if not extract_audio(t1_path, tmp_wav):
@@ -254,7 +257,7 @@ def generate(args):
                 continue
 
             try:
-                ok = run_hallo(hallo_dir, portrait, tmp_wav, out_path, lora_path)
+                ok = run_hallo(hallo_dir, portrait, tmp_wav, out_path, actor_ckpt)
             except FileNotFoundError as e:
                 log.error(str(e))
                 sys.exit(1)
@@ -280,7 +283,7 @@ def generate(args):
                     "audio_emotion": info["audio_emotion"],
                     "actor_id":      actor_id,
                     "sentence":      info["sentence"],
-                    "lora_path":     str(lora_path) if lora_path else "",
+                    "lora_path":     str(actor_ckpt) if actor_ckpt else "",
                     "hallo_model":   "hallo_v2",
                     "timestamp":     datetime.now().isoformat(),
                 })
