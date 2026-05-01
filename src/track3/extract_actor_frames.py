@@ -7,7 +7,7 @@ For each of the 91 CREMA-D actors, this script extracts:
 
 Strategy:
   1. Prefer NEU (neutral) clips — cleanest face, no exaggerated expression
-  2. Run MediaPipe face detection on every candidate frame
+  2. Run OpenCV Haar cascade face detection on every candidate frame
   3. Score each frame by face size, detection confidence, and frontality
      (yaw angle from face landmarks) — highest score wins
   4. Save portraits as PNG; write a manifest CSV for the fine-tuner
@@ -34,7 +34,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
 
 logging.basicConfig(
@@ -52,34 +51,16 @@ MANIFEST_COLS = ["actor_id", "portrait_path", "finetune_frames", "n_frames", "so
 # Frame scoring
 # ---------------------------------------------------------------------------
 
-def score_frame(frame_bgr: np.ndarray, face_result) -> float:
-    """
-    Score a single frame for portrait quality.
-    Higher is better. Returns 0.0 if no face is detected.
-
-    Scoring components:
-      - face_area:    larger face relative to frame = better (more detail)
-      - confidence:   MediaPipe detection confidence
-      - frontality:   estimated from left-right symmetry of face bbox centre
-                      (centre near the frame midpoint → more frontal)
-    """
-    if not face_result.detections:
+def score_frame(frame_bgr: np.ndarray, faces) -> float:
+    """Score frame for portrait quality using OpenCV Haar faces (x, y, w, h tuples)."""
+    if len(faces) == 0:
         return 0.0
-
-    det = face_result.detections[0]
-    bbox = det.location_data.relative_bounding_box
-    h, w = frame_bgr.shape[:2]
-
-    face_w = bbox.width
-    face_h = bbox.height
-    face_area = face_w * face_h                     # 0–1, relative to frame
-
-    confidence = det.score[0]                       # 0–1
-
-    cx = bbox.xmin + face_w / 2                     # face centre x, 0–1
-    frontality = 1.0 - abs(cx - 0.5) * 2           # 1 = centred, 0 = edge
-
-    return face_area * 0.4 + confidence * 0.4 + frontality * 0.2
+    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+    fh, fw = frame_bgr.shape[:2]
+    face_area = (w * h) / (fw * fh)
+    cx = (x + w / 2) / fw
+    frontality = 1.0 - abs(cx - 0.5) * 2
+    return face_area * 0.6 + frontality * 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -156,13 +137,13 @@ def extract_for_actor(
     for clip in clips:
         frames = sample_frames(clip, stride=4)
         for frame in frames:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            result = detector.process(rgb)
-            s = score_frame(frame, result)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
+            s = score_frame(frame, faces)
             if s > 0:
                 scored.append((s, frame.copy()))
         source_names.append(clip.name)
-        if len(scored) >= n_finetune * 3:   # enough candidates, stop early
+        if len(scored) >= n_finetune * 3:
             break
 
     if not scored:
@@ -239,18 +220,14 @@ def main():
     actor_ids = sorted({p.stem.split("_")[0] for p in all_clips})
     log.info(f"Found {len(actor_ids)} actors in {cremad_video_dir}")
 
-    # Each thread gets its own MediaPipe detector instance (not thread-safe to share)
+    # Each thread gets its own detector instance (not thread-safe to share)
     def worker(actor_id: str) -> dict | None:
-        detector = mp.solutions.face_detection.FaceDetection(
-            model_selection=1,          # full-range model (better for portrait distance)
-            min_detection_confidence=0.5,
+        detector = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
-        try:
-            return extract_for_actor(
-                actor_id, cremad_video_dir, out_dir, args.n_finetune, detector
-            )
-        finally:
-            detector.close()
+        return extract_for_actor(
+            actor_id, cremad_video_dir, out_dir, args.n_finetune, detector
+        )
 
     results = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
