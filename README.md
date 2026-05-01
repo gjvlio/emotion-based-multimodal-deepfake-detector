@@ -161,7 +161,6 @@ Thesis_G10/
 │
 ├── tools/
 │   ├── README.md                  ← setup instructions for all external tools
-│   ├── Applio/                    ← RVC v2 training tool (not in git, clone separately)
 │   ├── Wav2Lip/                   ← lip reenactment tool (not in git, clone separately)
 │   └── SadTalker/                 ← talking head generation (not in git, clone separately)
 │
