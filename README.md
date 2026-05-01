@@ -1,223 +1,334 @@
-# Thesis G10 — Multimodal Deepfake Generation & Detection Pipeline
+# Multimodal Deepfake Generation & Detection Pipeline
 
-## Overview
+**Thesis G10** — Generating a labeled dataset of audio-visual deepfakes from the CREMA-D corpus, then training and evaluating detection models against them.
 
-This project generates a labeled dataset of audio-visual deepfakes from the
-CREMA-D corpus, then uses that dataset to train and evaluate deepfake detection
-models. Fakes are created by **mismatching the emotional content of the audio
-and video** — the face shows one emotion, the voice expresses another.
-
-Three tracks of increasing sophistication are used to produce fakes, so that
-detectors can be evaluated against simple and complex manipulations alike.
+Deepfakes are created by **mismatching the emotional content of audio and video**: the actor's face expresses one emotion while their voice expresses a different one. Three pipeline tracks of increasing sophistication produce the fakes, so detectors can be evaluated against both simple and complex manipulations.
 
 ---
 
-## Source Dataset: CREMA-D
+## Table of Contents
 
-**Location:** `data/raw/CREMA-D/`
-
-CREMA-D (Crowd-sourced Emotional Multimodal Actors Dataset) contains ~7,400
-short clips of 91 actors (IDs 1001–1091) each speaking one of 12 sentences
-with one of 6 emotions at varying intensities.
-
-### Filename convention
-
-1001_IEO_ANG_HI.wav
-│   │   │   └── Intensity: HI / MD / LO / XX (unspecified)
-│   │   └── Emotion:   ANG DIS FEA HAP NEU SAD
-│   └── Sentence:  IEO = "It's eleven o'clock"
-│                  DFA = "Don't forget a jacket"
-│                  (12 sentence codes total)
-└── Actor ID:  1001 – 1091
-
-### Key subdirectories
-
-| Path | Contents |
-|------|----------|
-| `data/raw/CREMA-D/AudioWAV/` | ~7,400 `.wav` files, one per clip |
-| `data/raw/CREMA-D/` (root) | `.flv` or `.mp4` video files |
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Dataset: CREMA-D](#dataset-crema-d)
+- [Project Structure](#project-structure)
+- [Track 1 — Emotion Audio Swap](#track-1--emotion-audio-swap)
+  - [Method A: Direct Swap](#method-a-direct-swap-no-ai)
+  - [Method B: AI Voice Conversion](#method-b-ai-voice-conversion-styletts2--rvc)
+  - [Step 1 — Parse the dataset](#step-1--parse-the-dataset)
+  - [Step 2 — Train voice models](#step-2--train-voice-models-method-b-only)
+  - [Step 3 — Generate fakes](#step-3--generate-fake-videos)
+- [Pipeline Status](#pipeline-status)
 
 ---
 
-## Project Directory Structure
+## Prerequisites
 
-Thesis_G10/
-├── data/
-│   ├── raw/
-│   │   └── CREMA-D/             <- original dataset (do not modify)
-│   │       ├── AudioWAV/        <- all WAV audio clips
-│   │       └── .flv / .mp4      <- all video clips
-│   │
-│   ├── processed/
-│   │   ├── track1_manifests/
-│   │   │   └── swap_pairs.csv   <- 6,532 valid emotion-swap pairs
-│   │   │
-│   │   └── rvc_datasets/
-│   │       ├── actor_1001/      <- 82 WAVs resampled to 40 kHz (training data)
-│   │       ├── actor_1002/      <- 81 WAVs resampled to 40 kHz
-│   │       ├── actor_1003/      <- 82 WAVs resampled to 40 kHz
-│   │       └── training_log_.csv <- per-run training status for each actor
-│   │
-│   └── synthetic/
-│       └── track1_fakes/
-│           ├── videos/          <- generated fake MP4 files
-│           ├── metadata.csv     <- per-fake label, method, paths
-│           ├── progress.json    <- completed clip IDs (for resumable runs)
-│           └── generation_.log  <- timestamped run logs
-│
-├── src/
-│   ├── track1/
-│   │   ├── train_rvc_voices.py  <- trains one RVC voice model per actor
-│   │   └── track1_generate.py   <- generates Track 1 fake videos
-│   ├── track2/                  <- (Track 2 scripts, TBD)
-│   └── track3/                  <- (Track 3 scripts, TBD)
-│
-├── tools/
-│   └── Applio/                  <- RVC v2 training tool (git submodule)
-│       ├── core.py              <- CLI entry point for all Applio commands
-│       └── logs/
-│           ├── actor_1001/      <- Applio training artifacts for actor 1001
-│           │   ├── sliced_audios/       <- preprocessed audio chunks (40 kHz)
-│           │   ├── sliced_audios_16k/   <- preprocessed audio chunks (16 kHz)
-│           │   ├── extracted/           <- contentvec speaker embeddings (.npy)
-│           │   ├── f0/                  <- raw pitch contours (.npy)
-│           │   ├── f0_voiced/           <- voiced-only pitch contours (.npy)
-│           │   ├── model_info.json      <- dataset duration summary
-│           │   └── actor_1001.pth       <- TRAINED MODEL (target output)
-│           └── actor_1002/, actor_1003/, ...
-│       └── rvc/
-│           └── models/
-│               ├── predictors/
-│               │   ├── rmvpe.pt         <- pitch predictor model (must be downloaded)
-│               │   └── fcpe.pt          <- alt pitch predictor (must be downloaded)
-│               ├── embedders/
-│               │   └── contentvec/      <- speaker embedding model (must be downloaded)
-│               └── pretraineds/
-│                   └── hifi-gan/        <- pretrained vocoder (must be downloaded)
-│
-├── scripts/
-│   └── setup_track1.sh          <- environment setup script
-│
-└── requirements.txt
+**Python 3.11** is required. Install dependencies from the project root:
 
----
-
-## Track 1 — Emotion Audio Swap
-
-**What it does:** Replaces the audio of a video with audio from the same actor
-saying the same sentence but with a different emotion. The face and voice now
-express different emotions — a labeled fake.
-
-**Why it works:** Using the same actor keeps vocal timbre consistent. Using the
-same sentence keeps timing/lip-sync plausible.
-
-### Method A: `swap` (simple, no AI)
-
-ffmpeg replaces the audio track directly. Fast, no model needed.
-
-**Input:** `1001_IEO_ANG_HI.mp4` + `1001_IEO_HAP_MD.wav`
-**Output:** `FAKE_T1_1001_IEO_ANG_HI__AUDIO_1001_IEO_HAP_MD.mp4`
-- Face shows: ANGRY
-- Voice says: HAPPY
-
-### Method B: `styletts` (AI voice conversion)
-
-1. **StyleTTS 2** synthesizes the target sentence with the target emotion from scratch
-2. **RVC (Retrieval-based Voice Conversion)** wraps the synthesized speech with the original actor's vocal timbre, using a trained per-actor voice model
-3. The converted audio replaces the original audio track
-
-This produces a more natural-sounding fake where the synthesized emotion is convincing AND the voice identity is preserved.
-
----
-
-## Track 1: RVC Training Pipeline
-
-Before Method B generation can run, a voice model must be trained for each
-actor. This is handled by `src/track1/train_rvc_voices.py`.
-
-### Steps per actor
-
-Stage dataset -> Preprocess -> Extract features -> Train -> Build index -> Validate
-     (1)            (2)              (3)            (4)        (5)          (6)
-
-| Step | Applio command | What it does | Output |
-|------|----------------|--------------|--------|
-| 1 | _(Python)_ | Copies actor's CREMA-D WAVs into `rvc_datasets/actor_XXXX/`, resampled to 40 kHz | `data/processed/rvc_datasets/actor_XXXX/*.wav` |
-| 2 | `core.py preprocess` | Slices audio into training chunks, normalizes | `logs/actor_XXXX/sliced_audios/` |
-| 3 | `core.py extract` | Extracts contentvec embeddings + f0 pitch contours | `logs/actor_XXXX/extracted/`, `f0/`, `f0_voiced/` |
-| 4 | `core.py train` | Trains RVC v2 model for 40 epochs | `logs/actor_XXXX/actor_XXXX.pth` |
-| 5 | `core.py index` | Builds FAISS index for fast inference retrieval | `logs/actor_XXXX/added_*.index` |
-| 6 | _(Python)_ | Runs inference on a held-out clip, measures x-vector cosine similarity vs original | `training_log_*.csv` column `xvector_sim` |
-
-### Running the training
 ```bash
-# Train specific actors (for testing)
-python src/track1/train_rvc_voices.py \
-  --cremad_dir data/raw/CREMA-D \
-  --applio_dir tools/Applio \
-  --datasets_dir data/processed/rvc_datasets \
-  --actors 1001 1002 1003
-
-# Full run — all 91 actors (~30 hrs on RTX 3060)
-python src/track1/train_rvc_voices.py \
-  --cremad_dir data/raw/CREMA-D \
-  --applio_dir tools/Applio \
-  --datasets_dir data/processed/rvc_datasets
+pip install -r requirements.txt
 ```
 
+**External tools and datasets** must be set up manually before running the pipeline — they are too large for version control:
+
+| Dependency | Setup guide |
+|------------|-------------|
+| CREMA-D dataset | See [`data/raw/README.md`](data/raw/README.md) |
+| Applio (RVC v2 tool) | See [`tools/README.md`](tools/README.md) |
+
 ---
 
-## Track 1: Generation Pipeline
-
-After training, generate fake clips using `src/track1/track1_generate.py`.
-
-**Important:** Run from `src/track1/` — the pairs CSV uses paths relative to that directory.
+## Quick Start
 
 ```bash
+# 1. Download CREMA-D (see data/raw/README.md)
+# 2. Clone and configure Applio (see tools/README.md)
+
+# 3. Parse CREMA-D and build the swap-pair manifest
+python src/track1/parse_cremad.py \
+  --cremad_dir data/raw/CREMA-D \
+  --out_dir    data/processed/track1_manifests
+
+# 4a. Generate Method A fakes (no AI needed, ~0.5 s/clip)
 cd src/track1
-
-# Method A only — fast, no model needed (~0.5s/clip)
-python track1_generate.py \
-  --pairs_csv ../../data/processed/track1_manifests/swap_pairs.csv \
-  --out_dir   ../../data/synthetic/track1_fakes \
-  --method    swap
-
-# Test run — actors 1001–1003 only (215 pairs, pre-filtered CSV)
 python track1_generate.py \
   --pairs_csv ../../data/processed/track1_manifests/test_pairs_1001_1003.csv \
   --out_dir   ../../data/synthetic/track1_fakes \
-  --method    swap \
-  --resume
+  --method    swap
 
-# Method B (StyleTTS 2 + RVC) — requires trained .pth models
+# 4b. Generate Method B fakes (requires trained voice models — run step 5 first)
 python track1_generate.py \
   --pairs_csv  ../../data/processed/track1_manifests/test_pairs_1001_1003.csv \
   --out_dir    ../../data/synthetic/track1_fakes \
   --method     styletts \
   --cremad_dir ../../data/raw/CREMA-D \
-  --applio_dir ../../tools/Applio \
-  --resume
+  --applio_dir ../../tools/Applio
 
-# Resume any interrupted run
-python track1_generate.py --resume ...same args...
+# 5. (Method B only) Train RVC voice models for target actors
+cd ../..
+python src/track1/train_rvc_voices.py \
+  --cremad_dir   data/raw/CREMA-D \
+  --applio_dir   tools/Applio \
+  --datasets_dir data/processed/rvc_datasets \
+  --actors 1001 1002 1003
 ```
 
-### Test workflow (actors 1001–1003)
-
-A pre-filtered CSV `test_pairs_1001_1003.csv` (215 pairs) is available for quick
-end-to-end testing before committing to all 91 actors.
+> **Note:** Steps 4b and 5 can be run in any order — run 5 first (training), then 4b (generation).  
+> Add `--resume` to any generation command to continue an interrupted run without reprocessing completed clips.
 
 ---
 
-## Current Pipeline Status (updated 2026-04-30, ~17:15)
+## Dataset: CREMA-D
+
+**CREMA-D** (Crowd-Sourced Emotional Multimodal Actors Dataset) contains ~7,400 short video clips of 91 actors (IDs 1001–1091). Each actor speaks one of 12 sentences using one of 6 emotions at varying intensity levels.
+
+Download instructions: [`data/raw/README.md`](data/raw/README.md)
+
+### Filename format
+
+```
+1001_IEO_ANG_HI.wav
+│    │   │   └─ Intensity : HI (high) | MD (medium) | LO (low) | XX (unspecified)
+│    │   └───── Emotion   : ANG | DIS | FEA | HAP | NEU | SAD
+│    └───────── Sentence  : IEO = "It's eleven o'clock"
+│                           IWW = "I want your wardrobe"
+│                           (12 sentence codes total)
+└──────────────  Actor ID : 1001 – 1091
+```
+
+### Emotions
+
+| Code | Emotion  | Code | Emotion  |
+|------|----------|------|----------|
+| ANG  | Angry    | HAP  | Happy    |
+| DIS  | Disgusted| NEU  | Neutral  |
+| FEA  | Fearful  | SAD  | Sad      |
+
+---
+
+## Project Structure
+
+```
+Thesis_G10/
+│
+├── data/
+│   ├── raw/
+│   │   ├── README.md              ← dataset download instructions
+│   │   ├── CREMA-D/               ← original dataset (not in git)
+│   │   │   ├── AudioWAV/          ← ~7,400 WAV audio clips
+│   │   │   └── VideoFlash/        ← ~7,442 FLV video clips
+│   │   ├── SAVEE/                 ← optional (future tracks)
+│   │   └── MELD/                  ← optional (future tracks)
+│   │
+│   ├── processed/
+│   │   ├── track1_manifests/
+│   │   │   ├── swap_pairs.csv         ← 6,532 emotion-swap pairs (all actors)
+│   │   │   ├── test_pairs_1001_1003.csv ← 215 pairs (actors 1001–1003 only)
+│   │   │   ├── clips.csv              ← per-clip metadata
+│   │   │   └── actor_stats.csv        ← clip counts per actor
+│   │   └── rvc_datasets/
+│   │       └── actor_XXXX/            ← WAVs resampled to 40 kHz for RVC training
+│   │
+│   └── synthetic/
+│       └── track1_fakes/
+│           ├── videos/                ← generated fake MP4 files (not in git)
+│           ├── metadata.csv           ← label, method, and path per fake
+│           └── failed.csv             ← clips that failed with error details
+│
+├── src/
+│   ├── track1/
+│   │   ├── parse_cremad.py        ← parses CREMA-D and builds pair manifests
+│   │   ├── train_rvc_voices.py    ← trains one RVC voice model per actor
+│   │   └── track1_generate.py     ← generates Track 1 fake videos
+│   ├── track2/                    ← (not started)
+│   └── track3/                    ← (not started)
+│
+├── tools/
+│   ├── README.md                  ← Applio setup + Windows patch instructions
+│   └── Applio/                    ← RVC v2 training tool (not in git, clone separately)
+│
+├── scripts/
+│   ├── setup_track1.sh            ← environment setup script
+│   └── peek_cmu_mosei.py          ← inspect CMU-MOSEI feature file shapes
+│
+├── .github/workflows/
+│   ├── claude-code-review.yml     ← auto PR review (bugs + security)
+│   └── claude.yml                 ← Claude PR assistant
+│
+├── requirements.txt
+└── .gitignore
+```
+
+---
+
+## Track 1 — Emotion Audio Swap
+
+Track 1 creates the simplest class of fake: the audio track of a real video is replaced with audio of the **same actor saying the same sentence but with a different emotion**. The result is a clip where the face and voice express conflicting emotions — a labeled fake that preserves speaker identity and lip-sync plausibility.
+
+Two methods are provided, producing two separate sets of fakes from the same pair manifest:
+
+### Method A: Direct Swap (no AI)
+
+`ffmpeg` strips the original audio track and replaces it with the target WAV file directly. No model is trained or invoked.
+
+**Example:**
+
+| | File | Emotion shown |
+|-|------|---------------|
+| Input video | `1001_IEO_ANG_HI.mp4` | Angry face |
+| Replacement audio | `1001_IEO_HAP_MD.wav` | Happy voice |
+| Output fake | `FAKE_T1_1001_IEO_ANG_HI__AUDIO_1001_IEO_HAP_MD.mp4` | Angry face + Happy voice |
+
+This method is fast (~0.5 s/clip) and produces a perfectly valid fake for detection experiments, but the audio is unmodified real speech — making it easier for detectors that look for audio synthesis artifacts.
+
+---
+
+### Method B: AI Voice Conversion (StyleTTS2 + RVC)
+
+Method B produces a more challenging fake by **synthesising the target emotion from scratch and then transferring the actor's vocal identity onto it**. This makes both the emotion and the voice identity convincing while keeping the audio-visual mismatch intact.
+
+**Pipeline:**
+
+```
+[CREMA-D sentence text]
+        │
+        ▼
+  StyleTTS 2                ← Neural TTS model
+  synthesises speech         Generates natural-sounding speech in the
+  in target emotion          target emotion style using a reference WAV
+        │
+        ▼
+  RVC v2 (Applio)           ← Retrieval-based Voice Conversion
+  wraps speech with          Converts the synthesised voice to match
+  actor's vocal timbre       the actor's real vocal characteristics,
+        │                    using a trained per-actor voice model
+        ▼
+  ffmpeg muxes               Replaces the original audio track in
+  audio into video           the source video file
+```
+
+**Why this is harder to detect:** The synthesised audio contains real neural TTS artifacts and a real voice identity, unlike Method A where the audio is completely unaltered original speech.
+
+---
+
+### Step 1 — Parse the dataset
+
+`src/track1/parse_cremad.py` scans the CREMA-D directory, parses every filename into its components (actor, sentence, emotion, intensity), and generates **emotion-swap pairs**: for every clip, it finds other clips from the **same actor and same sentence** but with a **different emotion**. These pairs are the inputs to the generation pipeline.
+
+```bash
+python src/track1/parse_cremad.py \
+  --cremad_dir data/raw/CREMA-D \
+  --out_dir    data/processed/track1_manifests
+```
+
+**Outputs:**
+
+| File | Description |
+|------|-------------|
+| `swap_pairs.csv` | 6,532 pairs across all 91 actors |
+| `test_pairs_1001_1003.csv` | 215 pairs for actors 1001–1003 (quick test subset) |
+| `clips.csv` | One row per clip with parsed fields |
+| `actor_stats.csv` | Clip count per actor |
+
+---
+
+### Step 2 — Train voice models (Method B only)
+
+`src/track1/train_rvc_voices.py` trains a **per-actor RVC v2 voice model** using Applio's CLI. The model learns the actor's unique vocal characteristics (timbre, prosody pattern) from their CREMA-D clips, so that RVC can later transfer those characteristics onto any synthesised speech.
+
+**Training stages per actor:**
+
+```
+(1) Stage     → Copy actor WAVs to rvc_datasets/, resample to 40 kHz
+(2) Preprocess → Slice audio into training chunks, normalize volume
+(3) Extract   → Extract ContentVec speaker embeddings + F0 pitch contours
+(4) Train     → Train RVC v2 model for 40 epochs
+(5) Index     → Build FAISS vector index for fast retrieval at inference time
+(6) Validate  → Run inference on a held-out clip; measure x-vector cosine
+                 similarity between converted and original voice (quality check)
+```
+
+```bash
+# Train for test actors only (recommended first run — ~1 hr on RTX 3060)
+python src/track1/train_rvc_voices.py \
+  --cremad_dir   data/raw/CREMA-D \
+  --applio_dir   tools/Applio \
+  --datasets_dir data/processed/rvc_datasets \
+  --actors 1001 1002 1003
+
+# Full run — all 91 actors (~30 hrs on RTX 3060)
+python src/track1/train_rvc_voices.py \
+  --cremad_dir   data/raw/CREMA-D \
+  --applio_dir   tools/Applio \
+  --datasets_dir data/processed/rvc_datasets
+```
+
+**Trained model output:** `tools/Applio/logs/actor_XXXX/actor_XXXX_40e_880s.pth`
+
+> See [`tools/README.md`](tools/README.md) for Windows-specific patches required before training.
+
+---
+
+### Step 3 — Generate fake videos
+
+`src/track1/track1_generate.py` reads the pair manifest and produces one fake video per row.
+
+> **Important:** Run from the `src/track1/` directory — the CSV uses paths relative to that location.
+
+```bash
+cd src/track1
+
+# Method A — no models required, processes all pairs in the CSV
+python track1_generate.py \
+  --pairs_csv ../../data/processed/track1_manifests/swap_pairs.csv \
+  --out_dir   ../../data/synthetic/track1_fakes \
+  --method    swap
+
+# Method B — requires trained .pth models (run Step 2 first)
+python track1_generate.py \
+  --pairs_csv  ../../data/processed/track1_manifests/swap_pairs.csv \
+  --out_dir    ../../data/synthetic/track1_fakes \
+  --method     styletts \
+  --cremad_dir ../../data/raw/CREMA-D \
+  --applio_dir ../../tools/Applio
+
+# Add --resume to any command to skip already-completed clips
+python track1_generate.py --resume [... same args ...]
+```
+
+**CLI flags:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--pairs_csv` | Yes | Path to the swap-pair manifest CSV |
+| `--out_dir` | Yes | Directory for output videos and logs |
+| `--method` | Yes | `swap` (Method A) or `styletts` (Method B) |
+| `--cremad_dir` | Method B | Root CREMA-D directory (for reference audio) |
+| `--applio_dir` | Method B | Applio tool directory (for RVC inference) |
+| `--resume` | No | Skip clips already present in the checkpoint file |
+
+**Output files:**
+
+| File | Description |
+|------|-------------|
+| `videos/FAKE_T1_*.mp4` | Generated fake video clips |
+| `metadata.csv` | Per-clip record: method, source/target emotions, file paths |
+| `failed.csv` | Clips that failed, with error messages |
+| `progress_{method}.json` | Checkpoint for `--resume` (updated every 50 clips) |
+
+---
+
+## Pipeline Status
 
 | Stage | Status | Notes |
 |-------|--------|-------|
-| CREMA-D dataset | ✅ Ready | 7,442 FLV videos + 7,400 WAVs in `data/raw/CREMA-D/` |
-| Swap pairs manifest | ✅ Done | 6,532 pairs in `track1_manifests/swap_pairs.csv` |
-| Test pairs manifest | ✅ Done | 215 pairs (actors 1001–1003) in `test_pairs_1001_1003.csv` |
-| RVC training (actors 1001–1003) | ✅ Done | 40-epoch models in `tools/Applio/logs/actor_XXXX/actor_XXXX_40e_880s.pth` |
-| Track 1 Method A generation | ✅ Done | 215/215 clips for actors 1001–1003; `data/synthetic/track1_fakes/videos/` |
-| Track 1 Method B generation | ✅ Done | 214/215 clips for actors 1001–1003; `data/synthetic/track1_fakes/videos/` |
+| CREMA-D dataset | ✅ Ready | 7,442 videos + 7,400 WAVs |
+| Swap pairs manifest | ✅ Done | 6,532 pairs → `swap_pairs.csv` |
+| Test pairs manifest | ✅ Done | 215 pairs (actors 1001–1003) |
+| RVC training — actors 1001–1003 | ✅ Done | 40-epoch models in `tools/Applio/logs/` |
+| Track 1 Method A — test actors | ✅ Done | 215 / 215 clips |
+| Track 1 Method B — test actors | ✅ Done | 214 / 215 clips (1 RVC timeout) |
+| RVC training — all 91 actors | ⏳ Pending | Full run not started |
+| Track 1 — all 91 actors | ⏳ Pending | Blocked on full training |
 | Track 2 / Track 3 | ⏳ Not started | TBD |
-  
