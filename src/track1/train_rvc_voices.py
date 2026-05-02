@@ -41,6 +41,7 @@ import re
 import sys
 import csv
 import json
+import signal
 import logging
 import argparse
 import subprocess
@@ -179,6 +180,15 @@ def _run_applio(applio_dir: Path, args: list[str], timeout: int = 3600) -> bool:
     return True
 
 
+def _batch_sizes(initial: int):
+    """Yield batch sizes to try on failure: initial → half → 1."""
+    seen: set[int] = set()
+    for bs in [initial, max(1, initial // 2), 1]:
+        if bs not in seen:
+            seen.add(bs)
+            yield bs
+
+
 def train_rvc_model(actor_id: int, dataset_dir: Path, applio_dir: Path,
                     epochs: int = 40, batch_size: int = 2) -> bool:
     """
@@ -194,47 +204,66 @@ def train_rvc_model(actor_id: int, dataset_dir: Path, applio_dir: Path,
         log.info(f"Actor {actor_id}: model already exists — skipping")
         return True
 
-    log.info(f"Actor {actor_id}: [1/4] preprocessing …")
-    if not _run_applio(applio_dir, [
-        'preprocess',
-        '--model_name',    model_name,
-        '--dataset_path',  str(dataset_dir.resolve()),
-        '--sample_rate',   str(RVC_SR),
-        '--cpu_cores',     '4',
-        '--cut_preprocess','Skip',
-    ]):
-        log.error(f"Actor {actor_id}: preprocess failed")
-        return False
+    # Step 1: preprocess — skip if sliced_audios already populated
+    sliced_dir = logs_dir / 'sliced_audios'
+    if sliced_dir.exists() and any(sliced_dir.iterdir()):
+        log.info(f"Actor {actor_id}: [1/4] preprocess already done — skipping")
+    else:
+        log.info(f"Actor {actor_id}: [1/4] preprocessing …")
+        if not _run_applio(applio_dir, [
+            'preprocess',
+            '--model_name',    model_name,
+            '--dataset_path',  str(dataset_dir.resolve()),
+            '--sample_rate',   str(RVC_SR),
+            '--cpu_cores',     '4',
+            '--cut_preprocess','Skip',
+        ]):
+            log.error(f"Actor {actor_id}: preprocess failed")
+            return False
 
-    log.info(f"Actor {actor_id}: [2/4] extracting features …")
-    if not _run_applio(applio_dir, [
-        'extract',
-        '--model_name',   model_name,
-        '--f0_method',    'rmvpe',
-        '--cpu_cores',    '4',
-        '--gpu',          '0',
-        '--sample_rate',  str(RVC_SR),
-        '--include_mutes', '0',
-    ]):
-        log.error(f"Actor {actor_id}: feature extraction failed")
-        return False
+    # Step 2: extract — skip if features already extracted
+    extracted_dir = logs_dir / 'extracted'
+    if extracted_dir.exists() and any(extracted_dir.iterdir()):
+        log.info(f"Actor {actor_id}: [2/4] extraction already done — skipping")
+    else:
+        log.info(f"Actor {actor_id}: [2/4] extracting features …")
+        if not _run_applio(applio_dir, [
+            'extract',
+            '--model_name',   model_name,
+            '--f0_method',    'rmvpe',
+            '--cpu_cores',    '4',
+            '--gpu',          '0',
+            '--sample_rate',  str(RVC_SR),
+            '--include_mutes', '0',
+        ]):
+            log.error(f"Actor {actor_id}: feature extraction failed")
+            return False
 
+    # Step 3: train — retry with halved batch_size on failure
     log.info(f"Actor {actor_id}: [3/4] training ({epochs} epochs) …")
-    if not _run_applio(applio_dir, [
-        'train',
-        '--model_name',         model_name,
-        '--sample_rate',        str(RVC_SR),
-        '--vocoder',            'HiFi-GAN',
-        '--save_every_epoch',   '10',
-        '--save_only_latest',   'True',
-        '--save_every_weights', 'True',
-        '--total_epoch',        str(epochs),
-        '--batch_size',         str(batch_size),
-        '--gpu',                '0',
-        '--overtraining_detector', 'False',
-        '--cleanup',            'False',
-    ], timeout=7200):
-        log.error(f"Actor {actor_id}: training failed")
+    trained = False
+    for bs in _batch_sizes(batch_size):
+        if bs < batch_size:
+            log.warning(f"Actor {actor_id}: retrying training with batch_size={bs}")
+        if _run_applio(applio_dir, [
+            'train',
+            '--model_name',         model_name,
+            '--sample_rate',        str(RVC_SR),
+            '--vocoder',            'HiFi-GAN',
+            '--save_every_epoch',   '10',
+            '--save_only_latest',   'True',
+            '--save_every_weights', 'True',
+            '--total_epoch',        str(epochs),
+            '--batch_size',         str(bs),
+            '--gpu',                '0',
+            '--overtraining_detector', 'False',
+            '--cleanup',            'False',
+        ], timeout=7200):
+            trained = True
+            break
+
+    if not trained:
+        log.error(f"Actor {actor_id}: training failed after all batch_size retries")
         return False
 
     log.info(f"Actor {actor_id}: [4/4] building index …")
@@ -380,6 +409,19 @@ def main():
     log_fields = ['actor_id', 'clips_staged', 'trained', 'xvector_sim', 'passes_threshold', 'error']
     log_rows: list[dict] = []
 
+    def _flush_log():
+        with open(log_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=log_fields)
+            writer.writeheader()
+            writer.writerows(log_rows)
+
+    def _sigint_handler(sig, frame):
+        log.warning("Interrupted — saving partial log …")
+        _flush_log()
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+
     for actor_id in tqdm(actor_ids, desc="Actors"):
         row: dict = {
             'actor_id': actor_id, 'clips_staged': 0,
@@ -393,6 +435,7 @@ def main():
 
             if args.prepare_only:
                 log_rows.append(row)
+                _flush_log()
                 continue
 
             if not args.validate_only:
@@ -416,12 +459,7 @@ def main():
             log.error(f"Actor {actor_id}: {e}")
 
         log_rows.append(row)
-
-    # Save log
-    with open(log_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=log_fields)
-        writer.writeheader()
-        writer.writerows(log_rows)
+        _flush_log()  # persist after every actor so a crash loses at most one actor's data
 
     # Summary
     n_trained  = sum(1 for r in log_rows if r['trained'])
