@@ -237,11 +237,13 @@ class StyleTTSRVCGenerator:
 
     def __init__(self, out_dir: Path, applio_dir: Path,
                  verifier: XVectorVerifier,
-                 ref_wavs: dict[str, str] | None = None):
+                 ref_wavs: dict[str, str] | None = None,
+                 cremad_dir: Path | None = None):
         self.out_dir    = out_dir
         self.applio_dir = applio_dir
         self.verifier   = verifier
         self.ref_wavs   = ref_wavs or {}
+        self.cremad_dir = cremad_dir
         self.video_dir  = out_dir / 'videos'
         self.wav_dir    = out_dir / 'wav_tmp'
         self.video_dir.mkdir(parents=True, exist_ok=True)
@@ -311,10 +313,10 @@ class StyleTTSRVCGenerator:
                 '--volume_envelope', '0.25',
                 '--protect',         '0.33',
                 '--f0_method',       'rmvpe',
-                '--input_path',      src_wav,
-                '--output_path',     out_wav,
-                '--pth_path',        pth_path,
-                '--index_path',      idx_path,
+                '--input_path',      os.path.abspath(src_wav),
+                '--output_path',     os.path.abspath(out_wav),
+                '--pth_path',        os.path.abspath(pth_path),
+                '--index_path',      os.path.abspath(idx_path) if idx_path else '',
                 '--split_audio',     'False',
                 '--clean_audio',     'True',
                 '--clean_strength',  '0.7',
@@ -327,15 +329,27 @@ class StyleTTSRVCGenerator:
             log.debug(f"Applio infer failed: {result.stderr[:300]}")
         return result.returncode == 0 and os.path.exists(out_wav)
 
+    def _resolve_video_path(self, row: pd.Series) -> str | None:
+        video_stem = row.get('video_stem')
+        if self.cremad_dir and video_stem:
+            for subdir, ext in [('VideoFlash', '.flv'), ('VideoMP4', '.mp4')]:
+                p = self.cremad_dir / subdir / f"{video_stem}{ext}"
+                if p.exists():
+                    return str(p)
+        csv_path = row.get('video_path')
+        if csv_path and not pd.isna(csv_path) and os.path.exists(csv_path):
+            return csv_path
+        return None
+
     def generate(self, row: pd.Series) -> dict:
-        video_path    = row['video_path']
         actor_id      = int(row['actor_id'])
         sentence_text = row['sentence_text']
         tgt_emotion   = EMOTION_STYLE_MAP[row['audio_emotion']]
         out_stem      = row['output_stem'] + '_styletts'
 
-        if pd.isna(video_path):
-            return {'status': 'failed', 'error': 'missing video path'}
+        video_path = self._resolve_video_path(row)
+        if video_path is None:
+            return {'status': 'failed', 'error': 'video file not found'}
 
         out_video = str(self.video_dir / f"{out_stem}.mp4")
         tts_wav   = str(self.wav_dir  / f"{out_stem}_tts.wav")
@@ -446,7 +460,8 @@ def main():
 
     verifier  = XVectorVerifier(threshold=args.xvector_threshold)
     ref_wavs  = build_emotion_refs(Path(args.cremad_dir))
-    generator = StyleTTSRVCGenerator(out_dir, Path(args.applio_dir), verifier, ref_wavs)
+    generator = StyleTTSRVCGenerator(out_dir, Path(args.applio_dir), verifier, ref_wavs,
+                                     cremad_dir=Path(args.cremad_dir))
 
     results  = []
     failed   = []
