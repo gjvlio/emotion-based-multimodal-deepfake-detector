@@ -117,7 +117,7 @@ Thesis_G10/
 │   │
 │   ├── processed/
 │   │   ├── track1_manifests/
-│   │   │   ├── swap_pairs.csv           ← 6,532 emotion-swap pairs (all actors)
+│   │   │   ├── swap_pairs.csv           ← 7,442 emotion-swap pairs (all actors, all intensities)
 │   │   │   ├── test_pairs_1001_1003.csv ← 215 pairs (actors 1001–1003 only)
 │   │   │   ├── clips.csv                ← per-clip metadata
 │   │   │   └── actor_stats.csv          ← clip counts per actor
@@ -218,7 +218,7 @@ python src/track1/parse_cremad.py \
 
 | File | Description |
 |------|-------------|
-| `swap_pairs.csv` | 6,532 pairs across all 91 actors |
+| `swap_pairs.csv` | 7,442 pairs across all 91 actors (all intensity variants) |
 | `test_pairs_1001_1003.csv` | 215 pairs for actors 1001–1003 (quick test subset) |
 | `clips.csv` | One row per clip with parsed fields |
 | `actor_stats.csv` | Clip count per actor |
@@ -227,13 +227,15 @@ python src/track1/parse_cremad.py \
 
 ### Step 2 — Sample by track
 
-`scripts/sample_by_track.py` splits the 6,532 swap pairs into three non-overlapping, actor-stratified manifests for the three pipeline tracks:
+`scripts/sample_by_track.py` splits the 7,442 swap pairs into three non-overlapping, actor-stratified manifests for the three pipeline tracks:
 
 | Track | Fraction | Pairs | Rationale |
 |-------|----------|-------|-----------|
-| Track 1 | 20% | 1,271 | Simplest fakes — fewer needed for baseline |
-| Track 2 | 30% | 1,994 | Medium difficulty |
-| Track 3 | 50% | 3,267 | Hardest to detect — largest share |
+| Track 1 | 20% | ~1,488 | Simplest fakes — fewer needed for baseline |
+| Track 2 | 30% | ~2,233 | Medium difficulty |
+| Track 3 | 50% | ~3,721 | Hardest to detect — largest share |
+
+> **Note:** Exact pair counts depend on stratified sampling. Rerun `sample_by_track.py` after any update to `swap_pairs.csv`.
 
 ```bash
 python scripts/sample_by_track.py \
@@ -275,7 +277,7 @@ python src/track1/train_rvc_voices.py \
   --datasets_dir data/processed/rvc_datasets \
   --actors 1001 1002 1003
 
-# Full run — all 91 actors (~30 hrs on RTX 3060)
+# Full run — all 91 actors (~16 hrs on RTX 3060)
 python src/track1/train_rvc_voices.py \
   --cremad_dir   data/raw/CREMA-D \
   --applio_dir   tools/Applio \
@@ -328,15 +330,11 @@ python src/track1/track1_generate.py --resume [... same args ...]
 
 | Stage | Status | Notes |
 |-------|--------|-------|
-| CREMA-D dataset | ✅ Ready | 7,442 videos + 7,400 WAVs |
-| Swap pairs manifest | ✅ Done | 6,532 pairs → `swap_pairs.csv` |
-| Track split manifest | ✅ Done | 20/30/50 → `track1/2/3_pairs.csv` |
-| RVC training — actors 1001–1003 | ✅ Done | 40-epoch models in `tools/Applio/logs/` |
-| Track 1 — test actors (1001–1003) | ✅ Done | 214 / 214 clips (_styletts.mp4) |
-| Track 2 — test actors | ⚠️ Partial | 48 / 214 done; resume with `--resume` |
-| Track 3 — test actors | ✅ Done | 214 / 214 clips (_sadtalker.mp4) |
+| CREMA-D dataset | ✅ Ready | 7,442 videos + 7,442 WAVs |
+| Swap pairs manifest | ✅ Done | 7,442 pairs → `swap_pairs.csv` (all intensities) |
+| Track split manifest | ⚠️ Stale | CSVs based on old 6,532 pairs — rerun `sample_by_track.py` |
+| RVC training — all 91 actors | ✅ Done | 40-epoch models, actors 1001–1091 |
 | Actor portrait extraction — all 91 | ✅ Done | `data/processed/actor_portraits/` |
-| RVC training — all 91 actors | ⏳ Pending | Full run not started |
-| Track 1 — all 91 actors (1,271 clips) | ⏳ Pending | Blocked on full RVC training |
-| Track 2 — all 91 actors (1,994 clips) | ⏳ Pending | Blocked on Track 1 full run |
-| Track 3 — all 91 actors (3,267 clips) | ⏳ Pending | Blocked on Track 1 full run |
+| Track 1 — all 91 actors (~1,488 clips) | ⏳ Pending | Blocked on `sample_by_track.py` rerun |
+| Track 2 — all 91 actors (~2,233 clips) | ⏳ Pending | Blocked on Track 1 full run |
+| Track 3 — all 91 actors (~3,721 clips) | ⏳ Pending | Blocked on Track 1 full run |
