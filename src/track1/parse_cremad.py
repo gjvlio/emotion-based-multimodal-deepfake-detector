@@ -166,9 +166,17 @@ def build_swap_pairs(clips: pd.DataFrame) -> pd.DataFrame:
 
     groups = clips.groupby(['actor_id', 'sentence_key'])
     for (actor_id, sentence_key), group in tqdm(groups, desc="Building swap pairs"):
-        emotion_index = {row['emotion_code']: row for _, row in group.iterrows()}
+        # Key by (emotion_code, intensity_code) so all intensity variants are preserved
+        emotion_index = {
+            (row['emotion_code'], row['intensity_code']): row
+            for _, row in group.iterrows()
+        }
+        # by_emotion[emo] = list of (emo, intensity) keys for fast fallback lookup
+        by_emotion: dict[str, list] = {}
+        for (emo, inten) in emotion_index:
+            by_emotion.setdefault(emo, []).append((emo, inten))
 
-        for src_emotion, src_row in emotion_index.items():
+        for (src_emotion, src_intensity), src_row in emotion_index.items():
             # Skip if this clip has no video file — we need a video to swap into
             if pd.isna(src_row.get('video_path')) or src_row['video_path'] is None:
                 skipped += 1
@@ -176,15 +184,26 @@ def build_swap_pairs(clips: pd.DataFrame) -> pd.DataFrame:
 
             # Find a target clip (same actor, same sentence, different emotion)
             tgt_emotion = rotation[src_emotion]
-            if tgt_emotion not in emotion_index:
-                # Fall back to any other available emotion
-                available = [e for e in emotion_index if e != src_emotion]
-                if not available:
-                    skipped += 1
-                    continue
-                tgt_emotion = available[0]
+            tgt_key = None
 
-            tgt_row = emotion_index[tgt_emotion]
+            # Primary: rotated emotion at same intensity
+            if (tgt_emotion, src_intensity) in emotion_index:
+                tgt_key = (tgt_emotion, src_intensity)
+            # Fallback: rotated emotion at any available intensity
+            elif tgt_emotion in by_emotion:
+                tgt_key = by_emotion[tgt_emotion][0]
+            # Final fallback: any other emotion at any intensity
+            else:
+                for emo, keys in by_emotion.items():
+                    if emo != src_emotion:
+                        tgt_key = keys[0]
+                        break
+
+            if tgt_key is None:
+                skipped += 1
+                continue
+
+            tgt_row = emotion_index[tgt_key]
             if pd.isna(tgt_row.get('audio_path')) or tgt_row['audio_path'] is None:
                 skipped += 1
                 continue
