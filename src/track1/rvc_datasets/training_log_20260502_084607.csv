@@ -1,0 +1,5 @@
+actor_id,clips_staged,trained,xvector_sim,passes_threshold,error
+1002,81,True,,,
+1007,82,True,,,
+1008,76,True,,,
+1014,82,True,,,
