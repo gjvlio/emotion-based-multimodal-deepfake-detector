@@ -166,14 +166,20 @@ def _run_applio(applio_dir: Path, args: list[str], timeout: int = 3600) -> bool:
     env['OPENBLAS_NUM_THREADS'] = '1'
     env['OMP_NUM_THREADS'] = '1'
 
-    result = subprocess.run(
-        [sys.executable, 'core.py'] + args,
-        cwd=str(applio_dir),
-        capture_output=True, text=True, timeout=timeout,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, 'core.py'] + args,
+            cwd=str(applio_dir),
+            stdout=subprocess.DEVNULL,   # avoid stdout pipe buffer pressure on long runs
+            stderr=subprocess.PIPE,
+            text=True, timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        log.error(f"Applio {args[0]} timed out after {timeout}s")
+        return False
     # Applio sometimes exits 0 even on failure; treat stderr tracebacks as failure
-    has_traceback = 'Traceback (most recent call last)' in result.stderr
+    has_traceback = 'Traceback (most recent call last)' in (result.stderr or '')
     if result.returncode != 0 or has_traceback:
         log.error(f"Applio {args[0]} stderr:\n{result.stderr[-3000:]}")
         return False
@@ -239,7 +245,14 @@ def train_rvc_model(actor_id: int, dataset_dir: Path, applio_dir: Path,
             log.error(f"Actor {actor_id}: feature extraction failed")
             return False
 
-    # Step 3: train — retry with halved batch_size on failure
+    # Step 3: train — restore config.json from RVC template first so a previous
+    # killed run's PID-only config.json never causes 'HParams has no data' crashes
+    config_src = applio_dir / 'rvc' / 'configs' / f'{RVC_SR}.json'
+    config_dst = logs_dir / 'config.json'
+    if config_src.exists():
+        import shutil as _shutil
+        _shutil.copy2(str(config_src), str(config_dst))
+
     log.info(f"Actor {actor_id}: [3/4] training ({epochs} epochs) …")
     trained = False
     for bs in _batch_sizes(batch_size):
@@ -275,7 +288,46 @@ def train_rvc_model(actor_id: int, dataset_dir: Path, applio_dir: Path,
     success = bool(list(logs_dir.glob(f'{model_name}*.pth')))
     if success:
         log.info(f"Actor {actor_id}: model ready → {logs_dir}")
+        _cleanup_training_artifacts(logs_dir, model_name)
     return success
+
+
+def _cleanup_training_artifacts(logs_dir: Path, model_name: str):
+    """Delete large training-only artifacts after a successful run.
+
+    Keeps: final 40e .pth, .index files, config.json, filelist.txt.
+    Deletes: D_/G_ discriminator checkpoints, intermediate epoch .pth files,
+             sliced_audios*, extracted, f0, f0_voiced, eval directories.
+    This prevents disk exhaustion on multi-actor full runs (~1.5 GB freed per actor).
+    """
+    # Intermediate epoch .pth (keep only the highest-epoch one)
+    all_pths = sorted(logs_dir.glob(f'{model_name}*.pth'))
+    for p in all_pths[:-1]:
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+    # Discriminator / generator checkpoints written by Applio during training
+    for pattern in ('D_*.pth', 'G_*.pth'):
+        for p in logs_dir.glob(pattern):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    # Training-only subdirs (not needed for inference)
+    for subdir in ('sliced_audios', 'sliced_audios_16k', 'extracted',
+                   'f0', 'f0_voiced', 'eval'):
+        target = logs_dir / subdir
+        if target.exists():
+            try:
+                import shutil
+                shutil.rmtree(str(target))
+            except OSError:
+                pass
+
+    log.info(f"Cleaned training artifacts → {logs_dir}")
 
 
 # ── Validation (x-vector similarity) ──────────────────────────────────────────
