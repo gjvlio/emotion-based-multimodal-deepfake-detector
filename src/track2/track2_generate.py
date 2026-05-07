@@ -1,384 +1,544 @@
 """
-Track 2 — Face Reenactment Deepfake Generation
+track2_generate.py
+==================
+Track 2 deepfake generation: StyleTTS2 + RVC + Wav2Lip.
 
-Takes Track 1 Method B fakes (synthetic audio + original face) and runs
-Wav2Lip to sync the actor's lip movements to the synthesised audio.
+Takes track2_pairs.csv (non-overlapping 30% split of CREMA-D) and produces
+fake clips where BOTH the audio AND lip movements are synthesised:
+  - StyleTTS2 synthesises speech in the target emotion
+  - Applio RVC transfers the actor's vocal identity
+  - Wav2Lip reanimates the lip region of the original face video to match the
+    synthesised audio
 
-This closes the lip-sync gap that made Track 1 detectable, producing a
-significantly harder-to-detect fake:
-  - Face expresses original emotion (unchanged from CREMA-D)
-  - Lips move in sync with the synthesised audio
-  - Voice expresses a different emotion (from Track 1 Method B)
+This is strictly harder to detect than Track 1 (audio-only swap) because the
+visual lip sync inconsistency is also corrected.
 
 Pipeline per clip:
-  1. Extract synthesised audio from Track 1 _styletts.mp4 via ffmpeg
-  2. Run Wav2Lip: original CREMA-D face video + extracted audio → reanimated video
-  3. Write output to data/synthetic/track2_fakes/videos/
+  1. Resolve original CREMA-D face video (FLV or MP4)
+  2. Convert FLV -> MP4 if needed (Wav2Lip prefers MP4)
+  3. StyleTTS2 synthesises speech in target emotion
+  4. Applio RVC converts synthesised voice to actor's timbre
+  5. X-vector similarity check (optional filter)
+  6. Wav2Lip reanimates lips in original face video to match RVC audio
+     (retries with resize_factor 2 then 4 on face-detection failure)
 
-Usage (run from src/track2/):
-  python track2_generate.py \
-    --track1_dir  ../../data/synthetic/track1_fakes \
-    --cremad_dir  ../../data/raw/CREMA-D \
-    --wav2lip_dir ../../tools/Wav2Lip \
-    --out_dir     ../../data/synthetic/track2_fakes \
-    [--resume]
+Usage (run from repo root):
+    python src/track2/track2_generate.py \\
+        --pairs_csv  data/processed/track1_manifests/track2_pairs.csv \\
+        --out_dir    data/synthetic/track2_fakes \\
+        --applio_dir tools/Applio \\
+        --wav2lip_dir tools/Wav2Lip \\
+        --cremad_dir data/raw/CREMA-D \\
+        --resume
+
+    # 25% partition runs (run one at a time):
+    python ... --max_clips 567              # batch 1
+    python ... --max_clips 1134 --resume    # batch 2 (resumes, adds next 567)
+    python ... --max_clips 1701 --resume    # batch 3
+    python ... --resume                     # batch 4 (all remaining)
+
+Outputs:
+    data/synthetic/track2_fakes/
+        videos/               -- fake .mp4 clips (*_wav2lip.mp4)
+        metadata.csv          -- completed clip log
+        failed.csv            -- failed clips with error messages
+        progress_track2.json  -- checkpoint for resuming
 """
 
-import argparse
-import csv
-import json
-import logging
 import os
-import subprocess
+import re
 import sys
+import json
+import argparse
+import subprocess
 import tempfile
-from datetime import datetime
+import logging
 from pathlib import Path
+from datetime import datetime
+
+import torch
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+_orig_torch_load = torch.load
+def _torch_load_compat(*args, weights_only=False, **kwargs):
+    return _orig_torch_load(*args, weights_only=weights_only, **kwargs)
+torch.load = _torch_load_compat
+
+# ── Logging ────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler()],
 )
 log = logging.getLogger(__name__)
 
-CHECKPOINT_FILE = "progress_track2.json"
-METADATA_FILE = "metadata.csv"
-FAILED_FILE = "failed.csv"
-METADATA_COLS = [
-    "output_stem", "track1_source", "cremad_face_video",
-    "face_emotion", "audio_emotion", "actor_id",
-    "sentence", "wav2lip_model", "timestamp",
-]
+# ── Constants ──────────────────────────────────────────────────────────────────
+
+EMOTION_STYLE_MAP = {
+    'ANG': 'angry',
+    'DIS': 'disgusted',
+    'FEA': 'fearful',
+    'HAP': 'happy',
+    'NEU': 'neutral',
+    'SAD': 'sad',
+}
 
 
-# ---------------------------------------------------------------------------
-# Checkpoint helpers  (same resume pattern as Track 1)
-# ---------------------------------------------------------------------------
+# ── StyleTTS2 reference audio auto-discovery ──────────────────────────────────
 
-def load_checkpoint(out_dir: Path) -> set:
-    path = out_dir / CHECKPOINT_FILE
-    if path.exists():
-        with open(path) as f:
-            return set(json.load(f))
-    return set()
+def build_emotion_refs(cremad_dir: Path) -> dict[str, str]:
+    audio_dir = cremad_dir / 'AudioWAV'
+    if not audio_dir.exists():
+        log.warning("AudioWAV not found — StyleTTS will use default (neutral) style")
+        return {}
+    INTENSITY_RANK = {'HI': 0, 'XX': 1, 'MD': 2, 'LO': 3}
+    pattern = re.compile(r'^(\d{4})_([A-Z]{2,3})_([A-Z]{2,3})_([A-Z]{2})\.wav$')
+    best: dict[str, tuple[str, int]] = {}
+    for f in audio_dir.iterdir():
+        m = pattern.match(f.name)
+        if not m:
+            continue
+        _, _, emotion_code, intensity_code = m.groups()
+        label = EMOTION_STYLE_MAP.get(emotion_code)
+        if label is None:
+            continue
+        rank = INTENSITY_RANK.get(intensity_code, 99)
+        if label not in best or rank < best[label][1]:
+            best[label] = (str(f), rank)
+    refs = {label: path for label, (path, _) in best.items()}
+    if refs:
+        log.info(f"StyleTTS reference WAVs selected: {sorted(refs.keys())}")
+    else:
+        log.warning("No reference WAVs found — StyleTTS will use default style")
+    return refs
 
 
-def save_checkpoint(out_dir: Path, done: set):
-    with open(out_dir / CHECKPOINT_FILE, "w") as f:
-        json.dump(sorted(done), f, indent=2)
+# ── ffmpeg helpers ─────────────────────────────────────────────────────────────
 
-
-# ---------------------------------------------------------------------------
-# ffmpeg helpers
-# ---------------------------------------------------------------------------
-
-def extract_audio(video_path: Path, out_wav: Path) -> bool:
-    """Extract audio track from an MP4 into a WAV file."""
-    result = subprocess.run(
-        [
-            "ffmpeg", "-y", "-i", str(video_path),
-            "-vn", "-acodec", "pcm_s16le",
-            "-ar", "16000", "-ac", "1",
-            str(out_wav),
-        ],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        log.error(f"ffmpeg audio extract failed:\n{result.stderr}")
+def run_ffmpeg(cmd: list[str], timeout: int = 120) -> bool:
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error'] + cmd,
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            log.debug(f"ffmpeg error: {result.stderr}")
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        log.warning("ffmpeg timeout")
         return False
-    return True
+    except FileNotFoundError:
+        log.error("ffmpeg not found — install it and add to PATH")
+        sys.exit(1)
 
 
-def video_has_audio(video_path: Path) -> bool:
-    """Return True if the video file contains an audio stream."""
-    result = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-select_streams", "a",
-            "-show_entries", "stream=codec_type",
-            "-of", "csv=p=0",
-            str(video_path),
-        ],
-        capture_output=True, text=True,
-    )
-    return bool(result.stdout.strip())
+def convert_flv_to_mp4(flv_path: str, mp4_path: str) -> bool:
+    return run_ffmpeg([
+        '-i', flv_path,
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:a', 'aac', mp4_path,
+    ])
 
 
-# ---------------------------------------------------------------------------
-# Wav2Lip inference
-# ---------------------------------------------------------------------------
+def extract_audio_from_video(video_path: str, wav_path: str,
+                              sample_rate: int = 16000) -> bool:
+    return run_ffmpeg([
+        '-i', video_path, '-vn',
+        '-acodec', 'pcm_s16le', '-ar', str(sample_rate), '-ac', '1', wav_path,
+    ])
 
-def run_wav2lip(
-    wav2lip_dir: Path,
-    face_video: Path,
-    audio_wav: Path,
-    out_video: Path,
-    model_path: Path,
-) -> bool:
+
+# ── Speaker verification ───────────────────────────────────────────────────────
+
+class XVectorVerifier:
+    def __init__(self, threshold: float = 0.75):
+        self.threshold = threshold
+        self._model = None
+
+    def _load(self):
+        if self._model is not None:
+            return
+        try:
+            from speechbrain.pretrained import SpeakerRecognition
+            self._model = SpeakerRecognition.from_hparams(
+                source="speechbrain/spkrec-xvect-voxceleb",
+                savedir="./pretrained_models/xvect",
+            )
+            log.info("X-vector model loaded.")
+        except ImportError:
+            log.warning("speechbrain not installed — x-vector filtering disabled.")
+            self._model = 'unavailable'
+
+    def passes(self, wav1: str, wav2: str) -> bool:
+        self._load()
+        if self._model == 'unavailable':
+            return True
+        try:
+            score, _ = self._model.verify_files(wav1, wav2)
+            return float(score) >= self.threshold
+        except Exception as e:
+            log.debug(f"X-vector error: {e}")
+            return True
+
+
+# ── Wav2Lip inference ──────────────────────────────────────────────────────────
+
+def run_wav2lip(wav2lip_dir: Path, face_mp4: str, audio_wav: str,
+                out_video: str, model_path: Path) -> bool:
     """
-    Call Wav2Lip's inference.py to reanimate lip movements.
-
-    Wav2Lip takes the original face video and the target audio, then
-    generates a new video where the mouth region is reanimated to match
-    the audio while the rest of the face is left unchanged.
+    Run Wav2Lip on an MP4 face video + WAV audio.
+    Retries with resize_factor 2 then 4 on face-detection failure.
+    face_mp4 must already be an MP4 (convert FLV before calling).
     """
     inference_script = wav2lip_dir / "inference.py"
     if not inference_script.exists():
         raise FileNotFoundError(
             f"Wav2Lip inference.py not found at {inference_script}. "
-            f"Clone Wav2Lip to tools/Wav2Lip and download the model checkpoint. "
-            f"See tools/README.md."
+            "Clone Wav2Lip to tools/Wav2Lip and download wav2lip_gan.pth."
         )
 
-    result = subprocess.run(
-        [
-            sys.executable, str(inference_script),
-            "--checkpoint_path", str(model_path),
-            "--face",           str(face_video),
-            "--audio",          str(audio_wav),
-            "--outfile",        str(out_video),
-            "--nosmooth",       # skip temporal smoothing for cleaner frames
-        ],
-        cwd=str(wav2lip_dir),
-        capture_output=True, text=True, timeout=600,
-    )
-    if result.returncode != 0:
-        log.error(f"Wav2Lip failed:\n{result.stderr[-2000:]}")
+    for resize in (1, 2, 4):
+        cmd = [
+            sys.executable, str(inference_script.resolve()),
+            "--checkpoint_path", str(model_path.resolve()),
+            "--face",    os.path.abspath(face_mp4),
+            "--audio",   os.path.abspath(audio_wav),
+            "--outfile", os.path.abspath(out_video),
+            "--nosmooth",
+        ]
+        if resize > 1:
+            cmd += ["--resize_factor", str(resize)]
+
+        result = subprocess.run(
+            cmd,
+            cwd=str(wav2lip_dir.resolve()),
+            capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode == 0 and os.path.exists(out_video):
+            return True
+        if "Face not detected" in result.stderr:
+            log.warning(f"Face not detected at resize_factor={resize}, retrying...")
+            continue
+        log.debug(f"Wav2Lip failed (resize={resize}):\n{result.stderr[-1000:]}")
         return False
-    return True
 
-
-# ---------------------------------------------------------------------------
-# Main generation loop
-# ---------------------------------------------------------------------------
-
-def parse_track1_stem(stem: str) -> dict | None:
-    """
-    Parse a Track 1 Method B output stem into its components.
-
-    Expected format: FAKE_T1_{actor}_{sentence}_{face_emo}_{intensity}__AUDIO_{actor}_{sentence}_{audio_emo}_{intensity}_styletts
-    Example:         FAKE_T1_1001_DFA_ANG_XX__AUDIO_1001_DFA_HAP_MD_styletts
-    """
-    stem = stem.replace("_styletts", "")
-    if not stem.startswith("FAKE_T1_"):
-        return None
-    try:
-        parts = stem[len("FAKE_T1_"):].split("__AUDIO_")
-        face_parts  = parts[0].split("_")   # actor, sentence, emotion, intensity
-        audio_parts = parts[1].split("_")
-        return {
-            "actor_id":      face_parts[0],
-            "sentence":      face_parts[1],
-            "face_emotion":  face_parts[2],
-            "face_intensity": face_parts[3],
-            "audio_emotion": audio_parts[2],
-            "audio_intensity": audio_parts[3],
-        }
-    except (IndexError, ValueError):
-        return None
-
-
-def find_cremad_video(cremad_dir: Path, actor: str, sentence: str,
-                      emotion: str, intensity: str) -> Path | None:
-    """Locate the original CREMA-D video for the given clip."""
-    stem = f"{actor}_{sentence}_{emotion}_{intensity}"
-    for ext in (".mp4", ".flv"):
-        for subdir in ("VideoFlash", "VideoMP4", ""):
-            candidate = cremad_dir / subdir / f"{stem}{ext}"
-            if candidate.exists():
-                return candidate
-    return None
+    log.error("Wav2Lip face detection failed at all resize factors (1, 2, 4).")
+    return False
 
 
 def find_wav2lip_model(wav2lip_dir: Path) -> Path | None:
-    """Find the Wav2Lip model checkpoint (.pth) in the checkpoints/ folder."""
     for name in ("wav2lip_gan.pth", "wav2lip.pth"):
-        candidate = wav2lip_dir / "checkpoints" / name
-        if candidate.exists():
-            return candidate
+        p = wav2lip_dir / "checkpoints" / name
+        if p.exists():
+            return p
     return None
 
 
-def load_filter_stems(filter_csv: str | None) -> set | None:
-    """Return set of base output_stems to process, or None to process all."""
-    if filter_csv is None:
-        return None
-    import csv as _csv
-    stems = set()
-    with open(filter_csv, newline="", encoding="utf-8") as f:
-        for row in _csv.DictReader(f):
-            stems.add(row["output_stem"])
-    return stems
+# ── Track 2 generator ─────────────────────────────────────────────────────────
 
+class Track2Generator:
+    """
+    Per-clip pipeline: StyleTTS2 -> RVC -> Wav2Lip.
+    Produces _wav2lip.mp4 files from track2_pairs.csv rows.
+    """
 
-def generate(args):
-    track1_videos = Path(args.track1_dir) / "videos"
-    cremad_dir    = Path(args.cremad_dir)
-    wav2lip_dir   = Path(args.wav2lip_dir)
-    out_dir       = Path(args.out_dir)
-    vid_dir       = out_dir / "videos"
-    vid_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, out_dir: Path, applio_dir: Path, wav2lip_dir: Path,
+                 wav2lip_model: Path, verifier: XVectorVerifier,
+                 ref_wavs: dict[str, str], cremad_dir: Path):
+        self.out_dir       = out_dir
+        self.applio_dir    = applio_dir
+        self.wav2lip_dir   = wav2lip_dir
+        self.wav2lip_model = wav2lip_model
+        self.verifier      = verifier
+        self.ref_wavs      = ref_wavs
+        self.cremad_dir    = cremad_dir
+        self.video_dir     = out_dir / 'videos'
+        self.wav_dir       = out_dir / 'wav_tmp'
+        self.video_dir.mkdir(parents=True, exist_ok=True)
+        self.wav_dir.mkdir(parents=True, exist_ok=True)
+        self._tts = None
 
-    # Find Wav2Lip checkpoint
-    model_path = find_wav2lip_model(wav2lip_dir)
-    if model_path is None:
-        log.error(
-            "No Wav2Lip checkpoint found in tools/Wav2Lip/checkpoints/. "
-            "Download wav2lip_gan.pth — see tools/README.md."
-        )
-        sys.exit(1)
-    log.info(f"Using Wav2Lip model: {model_path.name}")
+    def _load_tts(self):
+        if self._tts is not None:
+            return
+        try:
+            import nltk
+            nltk.download('punkt_tab', quiet=True)
+            from styletts2 import tts
+            self._tts = tts.StyleTTS2()
+            log.info("StyleTTS2 loaded.")
+        except ImportError:
+            raise RuntimeError("styletts2 not installed. Run: pip install styletts2")
 
-    # Collect Track 1 Method B source files
-    filter_stems = load_filter_stems(args.filter_csv)
-    all_styletts = sorted(track1_videos.glob("*_styletts.mp4"))
-    if filter_stems is not None:
-        styletts_files = [f for f in all_styletts
-                          if f.stem.replace("_styletts", "") in filter_stems]
-        log.info(f"Filter: {len(styletts_files)}/{len(all_styletts)} clips selected via --filter_csv.")
-    else:
-        styletts_files = all_styletts
-    if not styletts_files:
-        log.error(f"No _styletts.mp4 files to process in {track1_videos}.")
-        sys.exit(1)
-    log.info(f"Processing {len(styletts_files)} Track 1 clips.")
-
-    # Resume support
-    done = load_checkpoint(out_dir) if args.resume else set()
-    if done:
-        log.info(f"Resuming — {len(done)} clips already completed.")
-
-    # Output metadata / failed writers
-    meta_path   = out_dir / METADATA_FILE
-    failed_path = out_dir / FAILED_FILE
-    meta_exists = meta_path.exists()
-    meta_f   = open(meta_path,   "a", newline="", encoding="utf-8")
-    failed_f = open(failed_path, "a", newline="", encoding="utf-8")
-    meta_writer   = csv.DictWriter(meta_f,   fieldnames=METADATA_COLS)
-    failed_writer = csv.DictWriter(failed_f, fieldnames=["output_stem", "error", "timestamp"])
-    if not meta_exists:
-        meta_writer.writeheader()
-        failed_writer.writeheader()
-
-    total = len(styletts_files)
-    succeeded = 0
-    failed    = 0
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for i, t1_path in enumerate(styletts_files, 1):
-            stem = t1_path.stem          # e.g. FAKE_T1_1001_DFA_ANG_XX__AUDIO_1001_DFA_HAP_MD_styletts
-            out_stem = stem.replace("_styletts", "_wav2lip")
-            out_path = vid_dir / f"{out_stem}.mp4"
-
-            if out_stem in done:
-                continue
-
-            log.info(f"[{i}/{total}] {stem}")
-
-            info = parse_track1_stem(stem)
-            if info is None:
-                log.warning(f"  Could not parse stem, skipping: {stem}")
-                continue
-
-            # Find the original CREMA-D face video (unmodified mouth movements)
-            face_video = find_cremad_video(
-                cremad_dir,
-                info["actor_id"], info["sentence"],
-                info["face_emotion"], info["face_intensity"],
+    def _get_applio_model_paths(self, actor_id: int) -> tuple[str, str]:
+        logs_dir  = self.applio_dir / 'logs' / f"actor_{actor_id}"
+        pth_files = list(logs_dir.glob('*.pth')) if logs_dir.exists() else []
+        if not pth_files:
+            raise FileNotFoundError(
+                f"No RVC model for actor {actor_id} in {logs_dir}."
             )
-            if face_video is None:
-                msg = f"CREMA-D face video not found for {info}"
-                log.error(f"  {msg}")
-                failed_writer.writerow({"output_stem": out_stem, "error": msg,
-                                        "timestamp": datetime.now().isoformat()})
-                failed += 1
-                continue
+        idx_files = list(logs_dir.glob('added_*.index'))
+        return str(pth_files[0]), (str(idx_files[0]) if idx_files else '')
 
-            # Extract synthesised audio from the Track 1 MP4
-            tmp_wav = Path(tmpdir) / f"{out_stem}.wav"
-            if not extract_audio(t1_path, tmp_wav):
-                msg = "ffmpeg audio extraction failed"
-                failed_writer.writerow({"output_stem": out_stem, "error": msg,
-                                        "timestamp": datetime.now().isoformat()})
-                failed += 1
-                continue
+    def _synthesise(self, text: str, target_emotion: str, out_wav: str) -> bool:
+        self._load_tts()
+        ref_wav = self.ref_wavs.get(target_emotion)
+        try:
+            wav = self._tts.inference(
+                text,
+                target_voice_path=ref_wav,
+                output_sample_rate=24000,
+                alpha=0.3, beta=0.7,
+                diffusion_steps=5,
+                embedding_scale=1.0,
+            )
+            import soundfile as sf
+            sf.write(out_wav, wav, 24000)
+            return True
+        except Exception as e:
+            log.error(f"StyleTTS synthesis failed: {e}", exc_info=True)
+            return False
 
-            # Run Wav2Lip
+    def _convert_voice(self, src_wav: str, actor_id: int, out_wav: str) -> bool:
+        try:
+            pth_path, idx_path = self._get_applio_model_paths(actor_id)
+        except FileNotFoundError as e:
+            log.debug(str(e))
+            return False
+        result = subprocess.run(
+            [
+                sys.executable, 'core.py', 'infer',
+                '--pitch',           '0',
+                '--index_rate',      '0.3' if idx_path else '0',
+                '--volume_envelope', '0.25',
+                '--protect',         '0.33',
+                '--f0_method',       'rmvpe',
+                '--input_path',      os.path.abspath(src_wav),
+                '--output_path',     os.path.abspath(out_wav),
+                '--pth_path',        os.path.abspath(pth_path),
+                '--index_path',      os.path.abspath(idx_path) if idx_path else '',
+                '--split_audio',     'False',
+                '--clean_audio',     'True',
+                '--clean_strength',  '0.7',
+                '--export_format',   'WAV',
+            ],
+            cwd=str(self.applio_dir),
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode != 0:
+            log.debug(f"Applio infer failed: {result.stderr[:300]}")
+        return result.returncode == 0 and os.path.exists(out_wav)
+
+    def _resolve_video_path(self, row: pd.Series) -> str | None:
+        video_stem = row.get('video_stem')
+        if video_stem:
+            for subdir, ext in [('VideoFlash', '.flv'), ('VideoMP4', '.mp4')]:
+                p = self.cremad_dir / subdir / f"{video_stem}{ext}"
+                if p.exists():
+                    return str(p)
+        csv_path = row.get('video_path')
+        if csv_path and not pd.isna(csv_path) and os.path.exists(csv_path):
+            return csv_path
+        return None
+
+    def generate(self, row: pd.Series) -> dict:
+        actor_id      = int(row['actor_id'])
+        sentence_text = row['sentence_text']
+        tgt_emotion   = EMOTION_STYLE_MAP[row['audio_emotion']]
+        out_stem      = row['output_stem'] + '_wav2lip'
+
+        video_path = self._resolve_video_path(row)
+        if video_path is None:
+            return {'status': 'failed', 'error': 'video file not found'}
+
+        out_video = str(self.video_dir / f"{out_stem}.mp4")
+        tts_wav   = str(self.wav_dir   / f"{out_stem}_tts.wav")
+        rvc_wav   = str(self.wav_dir   / f"{out_stem}_rvc.wav")
+        orig_wav  = str(self.wav_dir   / f"{out_stem}_orig.wav")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # FLV -> MP4 (Wav2Lip needs MP4)
+            face_mp4 = video_path
+            if video_path.lower().endswith('.flv'):
+                face_mp4 = os.path.join(tmp, 'face.mp4')
+                if not convert_flv_to_mp4(video_path, face_mp4):
+                    return {'status': 'failed', 'error': 'flv conversion failed'}
+
+            if not self._synthesise(sentence_text, tgt_emotion, tts_wav):
+                return {'status': 'failed', 'error': 'StyleTTS synthesis failed'}
+
             try:
-                ok = run_wav2lip(wav2lip_dir, face_video, tmp_wav, out_path, model_path)
-            except subprocess.TimeoutExpired:
-                ok = False
-                msg = "Wav2Lip subprocess timed out"
-                log.error(f"  {msg}")
-                failed_writer.writerow({"output_stem": out_stem, "error": msg,
-                                        "timestamp": datetime.now().isoformat()})
-                failed += 1
-                continue
-            except Exception as e:
-                ok = False
-                log.error(f"  Wav2Lip error: {e}", exc_info=True)
-                failed_writer.writerow({"output_stem": out_stem, "error": str(e),
-                                        "timestamp": datetime.now().isoformat()})
-                failed += 1
-                continue
+                if not self._convert_voice(tts_wav, actor_id, rvc_wav):
+                    return {'status': 'failed', 'error': 'RVC conversion failed'}
+            except FileNotFoundError as e:
+                return {'status': 'failed', 'error': str(e)}
 
-            if ok and out_path.exists():
-                meta_writer.writerow({
-                    "output_stem":       out_stem,
-                    "track1_source":     t1_path.name,
-                    "cremad_face_video": face_video.name,
-                    "face_emotion":      info["face_emotion"],
-                    "audio_emotion":     info["audio_emotion"],
-                    "actor_id":          info["actor_id"],
-                    "sentence":          info["sentence"],
-                    "wav2lip_model":     model_path.name,
-                    "timestamp":         datetime.now().isoformat(),
-                })
-                done.add(out_stem)
-                succeeded += 1
-                if succeeded % 50 == 0:
-                    save_checkpoint(out_dir, done)
-                    meta_f.flush()
-            else:
-                failed_writer.writerow({
-                    "output_stem": out_stem,
-                    "error":       "Wav2Lip returned failure or output file missing",
-                    "timestamp":   datetime.now().isoformat(),
-                })
-                failed += 1
+            extract_audio_from_video(face_mp4, orig_wav)
+            if not self.verifier.passes(orig_wav, rvc_wav):
+                return {'status': 'failed', 'error': 'x-vector similarity < threshold'}
 
-    save_checkpoint(out_dir, done)
-    meta_f.close()
-    failed_f.close()
+            ok = run_wav2lip(self.wav2lip_dir, face_mp4, rvc_wav,
+                             out_video, self.wav2lip_model)
 
-    log.info(f"\nDone. Succeeded: {succeeded}  Failed: {failed}  Total: {total}")
+        if not ok or not os.path.exists(out_video):
+            return {'status': 'failed', 'error': 'Wav2Lip failed'}
+
+        return {
+            'status':        'done',
+            'output_path':   out_video,
+            'method':        'styletts_rvc_wav2lip',
+            'video_emotion': row['video_emotion'],
+            'audio_emotion': row['audio_emotion'],
+            'actor_id':      actor_id,
+            'sentence_key':  row['sentence_key'],
+            'label':         1,
+        }
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+# ── Progress checkpoint ────────────────────────────────────────────────────────
+
+def load_progress(checkpoint_path: Path) -> set:
+    if not checkpoint_path.exists():
+        return set()
+    with open(checkpoint_path) as f:
+        data = json.load(f)
+    return set(data.get('completed', []))
+
+
+def save_progress(checkpoint_path: Path, completed: set):
+    with open(checkpoint_path, 'w') as f:
+        json.dump({
+            'completed':  sorted(completed),
+            'updated_at': datetime.now().isoformat(),
+            'count':      len(completed),
+        }, f, indent=2)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Track 2 — Wav2Lip face reenactment on Track 1 Method B fakes."
+        description="Track 2: StyleTTS2 + RVC + Wav2Lip deepfake generator"
     )
-    parser.add_argument("--track1_dir",  required=True,
-                        help="Path to Track 1 output dir (contains videos/*_styletts.mp4)")
-    parser.add_argument("--cremad_dir",  required=True,
-                        help="Root CREMA-D directory (for original face videos)")
-    parser.add_argument("--wav2lip_dir", required=True,
-                        help="Path to cloned Wav2Lip tool directory")
-    parser.add_argument("--out_dir",     required=True,
-                        help="Output directory for Track 2 fakes")
-    parser.add_argument("--resume",      action="store_true",
-                        help="Skip clips already present in the checkpoint file")
-    parser.add_argument("--filter_csv",  default=None,
-                        help="Only process clips whose output_stem appears in this pairs CSV "
-                             "(e.g. track2_pairs.csv from sample_by_track.py)")
+    parser.add_argument('--pairs_csv',   required=True,
+                        help='track2_pairs.csv from sample_by_track.py')
+    parser.add_argument('--out_dir',     default='data/synthetic/track2_fakes')
+    parser.add_argument('--applio_dir',  required=True,
+                        help='Path to Applio directory (contains core.py)')
+    parser.add_argument('--wav2lip_dir', required=True,
+                        help='Path to Wav2Lip directory (contains inference.py)')
+    parser.add_argument('--cremad_dir',  required=True,
+                        help='CREMA-D root directory')
+    parser.add_argument('--max_clips',   type=int, default=None,
+                        help='Cap total clips processed — use for 25%% batches: '
+                             '567 / 1134 / 1701 / (omit for all)')
+    parser.add_argument('--resume',      action='store_true',
+                        help='Skip clips already in checkpoint')
+    parser.add_argument('--xvector_threshold', type=float, default=0.75)
     args = parser.parse_args()
-    generate(args)
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    log_file = out_dir / f"generation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log.addHandler(logging.FileHandler(log_file))
+    log.info(f"Log: {log_file}")
+
+    wav2lip_dir = Path(args.wav2lip_dir)
+    wav2lip_model = find_wav2lip_model(wav2lip_dir)
+    if wav2lip_model is None:
+        log.error("No Wav2Lip checkpoint found in tools/Wav2Lip/checkpoints/. "
+                  "Download wav2lip_gan.pth.")
+        sys.exit(1)
+    log.info(f"Wav2Lip model: {wav2lip_model.name}")
+
+    pairs = pd.read_csv(args.pairs_csv)
+    log.info(f"Loaded {len(pairs)} pairs from {args.pairs_csv}")
+
+    if 'status' in pairs.columns:
+        pairs = pairs[pairs['status'] == 'pending'].reset_index(drop=True)
+        log.info(f"  {len(pairs)} pending")
+
+    checkpoint = out_dir / 'progress_track2.json'
+    completed  = load_progress(checkpoint) if args.resume else set()
+    if completed:
+        log.info(f"Resuming: {len(completed)} clips already done")
+        pairs = pairs[~pairs['output_stem'].isin(completed)].reset_index(drop=True)
+        log.info(f"  {len(pairs)} remaining")
+
+    if args.max_clips:
+        pairs = pairs.head(args.max_clips)
+        log.info(f"Capped to {args.max_clips} clips (batch mode)")
+
+    verifier  = XVectorVerifier(threshold=args.xvector_threshold)
+    ref_wavs  = build_emotion_refs(Path(args.cremad_dir))
+    generator = Track2Generator(
+        out_dir       = out_dir,
+        applio_dir    = Path(args.applio_dir),
+        wav2lip_dir   = wav2lip_dir,
+        wav2lip_model = wav2lip_model,
+        verifier      = verifier,
+        ref_wavs      = ref_wavs,
+        cremad_dir    = Path(args.cremad_dir),
+    )
+
+    meta_csv   = out_dir / 'metadata.csv'
+    failed_csv = out_dir / 'failed.csv'
+    results  = pd.read_csv(meta_csv).to_dict('records')   if (args.resume and meta_csv.exists())   else []
+    failed   = pd.read_csv(failed_csv).to_dict('records') if (args.resume and failed_csv.exists()) else []
+    n_done   = 0
+    n_failed = 0
+
+    log.info("Starting Track 2 generation — StyleTTS2 + RVC + Wav2Lip")
+    log.info(f"Output dir: {out_dir}")
+
+    for _, row in tqdm(pairs.iterrows(), total=len(pairs), desc="Generating"):
+        stem = row['output_stem']
+        try:
+            result = generator.generate(row)
+        except Exception as e:
+            result = {'status': 'failed', 'error': str(e)}
+
+        result['output_stem']   = stem
+        result['sentence_text'] = row.get('sentence_text', '')
+        result['timestamp']     = datetime.now().isoformat()
+
+        if result['status'] == 'done':
+            results.append(result)
+            completed.add(stem)
+            n_done += 1
+        else:
+            failed.append(result)
+            n_failed += 1
+            log.debug(f"FAILED {stem}: {result.get('error', '?')}")
+
+        if (n_done + n_failed) % 50 == 0:
+            save_progress(checkpoint, completed)
+            if results:
+                pd.DataFrame(results).to_csv(meta_csv, index=False)
+            if failed:
+                pd.DataFrame(failed).to_csv(failed_csv, index=False)
+
+    save_progress(checkpoint, completed)
+    if results:
+        pd.DataFrame(results).to_csv(meta_csv, index=False)
+        log.info(f"Saved metadata: {meta_csv}")
+    if failed:
+        pd.DataFrame(failed).to_csv(failed_csv, index=False)
+        log.info(f"Failed clips: {failed_csv}")
+
+    print("\n" + "=" * 55)
+    print("TRACK 2 GENERATION COMPLETE")
+    print("=" * 55)
+    print(f"Generated successfully:  {n_done}")
+    print(f"Failed:                  {n_failed}")
+    print(f"Output directory:        {out_dir}/videos/")
+    print("=" * 55)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

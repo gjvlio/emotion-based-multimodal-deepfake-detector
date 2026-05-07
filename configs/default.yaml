@@ -1,0 +1,52 @@
+model:
+  proj_dim: 256            # bilinear projection dim (256×256 avoids 768×768 OOM)
+  n_emotions: 6
+  dropout_heads: 0.3
+  dropout_classifier: 0.4
+  wav2vec_model: "facebook/wav2vec2-base"
+  bert_model: "bert-base-uncased"
+  vit_model: "google/vit-base-patch16-224"
+  whisper_model: "openai/whisper-base"
+
+preprocessing:
+  audio_sample_rate: 16000
+  max_audio_seconds: 30
+  n_keyframes: 8
+  frame_size: 224
+  face_detector: "retinaface"   # retinaface | mtcnn
+
+training:
+  batch_size: 8
+  fp16: true
+  phase1:
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    max_epochs: 10
+    patience: 5
+  phase2:
+    lr: 1.0e-5
+    weight_decay: 1.0e-4
+    max_epochs: 20
+    patience: 5
+  lambda_a: 0.5
+  lambda_b: 0.5
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+paths:
+  data_root: "data"
+  preprocessed_dir: "data/preprocessed"
+  meld_real_csv: "data/processed/meld_manifests/meld_real.csv"
+  mosei_real_csv: "data/processed/mosei_manifests/mosei_real.csv"
+  track1_meta: "data/synthetic/track1_fakes/metadata.csv"
+  track2_meta: "data/synthetic/track2_fakes/metadata.csv"
+  track3_meta: "data/synthetic/track3_fakes/metadata.csv"
+  track4_meta: "data/synthetic/track4_fakes/metadata.csv"
+  checkpoints_dir: "checkpoints"
+  logs_dir: "logs"
+
+evaluation:
+  threshold: 0.5
+  threshold_strict: 0.65
+  ood_datasets: []   # paths to OOD benchmark CSVs
