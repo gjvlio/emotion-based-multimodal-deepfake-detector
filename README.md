@@ -126,7 +126,7 @@ Emotionally mismatched audio in actor's own voice
 **RVC models:** 91 trained models, one per actor (1001–1091). Each trained for 40 epochs on ~7–10 min of that actor's CREMA-D audio. `tools/Applio/logs/actor_XXXX/`.
 
 ### Track 1 — Audio Swap (StyleTTS2 + RVC)
-> CREMA-D · 20% split (~1,484 pairs)
+> CREMA-D · 20% split (1,452 pairs)
 
 ```
 StyleTTS2 → RVC → ffmpeg mux into original face video
@@ -187,6 +187,12 @@ python ... --max_clips 1701 --resume    # batch 3
 python ... --resume                     # batch 4
 ```
 
+**Known issues and fixes applied:**
+- Wav2Lip S3FD face detector fails on low-resolution or dark frames. Generator retries with
+  `resize_factor` 1 → 2 → 4 → 8 before marking a clip failed.
+- Applio RVC timeout raised to 600 s for slow-converging actors.
+- Actor 1047 black leader frames: same fix as Track 3 (`VideoMP4/` override, see above).
+
 ---
 
 ### Track 3 — Full Face Synthesis (+ SadTalker)
@@ -214,10 +220,46 @@ python ... --max_clips 2791 --resume    # batch 3
 python ... --resume                     # batch 4
 ```
 
+#### Two-phase strategy (batches 2–4)
+
+End-to-end per clip is ~240 s (TTS+RVC ≈ 213 s + SadTalker ≈ 27 s). Batch 1 benefited from 930
+pre-existing cached RVC wavs (`wav_tmp/`) left by a prior interrupted run, so SadTalker ran alone
+at 27 s/clip and finished in ~6.2 h. For subsequent batches, pre-compute TTS+RVC first, then run
+SadTalker-only:
+
+```bash
+# Phase A — TTS+RVC only (no SadTalker). Checkpoints every 20 clips.
+python src/track3/precompute_rvc.py \
+  --pairs_csv  data/processed/track1_manifests/track3_pairs.csv \
+  --out_dir    data/synthetic/track3_fakes \
+  --applio_dir tools/Applio \
+  --cremad_dir data/raw/CREMA-D \
+  --start 930 --end 1861 \   # batch 2 — adjust start/end per batch
+  --skip_done                # skip stems already in track3 progress checkpoint
+
+# Phase B — SadTalker-only. track3_generate.py auto-detects wav_tmp cache and skips TTS+RVC.
+python src/track3/track3_generate.py \
+  --pairs_csv     data/processed/track1_manifests/track3_pairs.csv \
+  --out_dir       data/synthetic/track3_fakes \
+  --applio_dir    tools/Applio \
+  --sadtalker_dir tools/SadTalker \
+  --cremad_dir    data/raw/CREMA-D \
+  --max_clips 1861 --resume
+```
+
+**Phase A** writes `wav_tmp/{stem}_sadtalker_rvc.wav`. **Phase B** checks for that file before
+calling StyleTTS2/RVC — on cache hit it proceeds directly to SadTalker.
+
+**Known issues and fixes applied:**
+- Actor 1047 `IEO_FEA_LO.flv` has black leader frames (0.03–0.23 s) that break face detection.
+  Fix: trimmed MP4 at `data/raw/CREMA-D/VideoMP4/1047_IEO_FEA_LO.mp4`; generator checks
+  `VideoMP4/` before `VideoFlash/`.
+- Applio RVC timeout raised to 600 s (default was 300 s — insufficient for slow actors).
+
 ---
 
 ### Track 4 — Cross-Speaker Lip Sync on MELD
-> MELD · 50% split (~5,070 pairs)
+> MELD · 50% split · 4,909 clips ≥2.5 s → 2,522 pairs (2,387 real)
 
 ```
 [MELD clip A — face video] + [MELD clip B — real audio] → Wav2Lip → fake
@@ -409,23 +451,37 @@ python scripts/evaluate.py \
 
 ## Pipeline Status
 
-### Generation
+### Measured Generation Throughput (RTX 3060 Mobile, Windows 11)
+
+| Stage | Time per clip | Per 930-clip batch | Notes |
+|-------|--------------|-------------------|-------|
+| RVC model training (91 actors) | — | ~16 h total | 40 epochs/actor on CREMA-D audio |
+| TTS + RVC precompute | ~22 s | ~5.7 h | measured batch 2 (after model warm-up) |
+| SadTalker (wav cached) | ~24 s | ~6.2 h | measured batch 1 (talking-head only) |
+| Track 3 full end-to-end | ~46 s | ~11.9 h | TTS+RVC + SadTalker combined |
+| Track 2 Wav2Lip | ~30–60 s | ~8–16 h | varies by resize_factor fallback depth |
+
+**Projected Track 3 completion** (starting from batch 2, sequential):
+- Each batch: precompute ~5.7 h + SadTalker pass ~6.2 h ≈ **~12 h per batch**
+- Batches 2, 3, 4: ~12 h × 3 = **~36 h** of continuous GPU time remaining
+
+### Generation Progress
 
 | Track | Dataset | Total pairs | Done | Status |
 |-------|---------|-------------|------|--------|
-| Track 1 — StyleTTS2+RVC | CREMA-D 20% | 1,484 | **1,452** | ✅ 97.8% complete |
-| Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,266** | ✅ 99.9% complete |
-| Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **150** (batch 1 running) | 🔄 4% — batch 1/4 in progress |
-| Track 4 — Wav2Lip MELD | MELD 50% | 5,070 | **0** | 🟡 Ready to run |
+| Track 1 — StyleTTS2+RVC | CREMA-D 20% | 1,452 | **1,452** | ✅ 100% complete |
+| Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,267** | ✅ 100% complete |
+| Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **1,559** (batch 2 in progress) | 🔄 42% — batch 2 SadTalker running |
+| Track 4 — Wav2Lip MELD | MELD 50% | 2,522 | **5** (test) | 🟡 Ready to run (batch 1 pending) |
 
 ### Data Preparation
 
 | Step | Status |
 |------|--------|
-| CREMA-D parsing + pair manifest | ✅ 7,442 pairs |
+| CREMA-D parsing + pair manifest | ✅ 7,441 pairs (T1: 1,452 + T2: 2,267 + T3: 3,722) |
 | Track split (20/30/50%) | ✅ track1/2/3_pairs.csv |
 | RVC models — all 91 actors | ✅ All trained (40 epochs each) |
-| MELD 50/50 split + pairs | ✅ 4,918 real + 5,070 pairs |
+| MELD 50/50 split + pairs | ✅ 2,387 real + 2,522 pairs (≥2.5 s filter, 4,909 total) |
 | CMU-MOSEI segmentation | 🟡 311 raw videos present, manifest pending |
 
 ### Detection System
@@ -462,8 +518,8 @@ Thesis_G10/
 │   │   │   ├── track2_pairs.csv        ← 2,267 pairs → Track 2
 │   │   │   └── track3_pairs.csv        ← 3,722 pairs → Track 3
 │   │   ├── meld_manifests/
-│   │   │   ├── meld_real.csv           ← 4,918 real clips (label=0)
-│   │   │   └── meld_pairs.csv          ← 5,070 cross-speaker pairs (label=1)
+│   │   │   ├── meld_real.csv           ← 2,387 real clips (label=0, ≥2.5 s)
+│   │   │   └── meld_pairs.csv          ← 2,522 cross-speaker pairs (label=1, ≥2.5 s)
 │   │   ├── rvc_datasets/               ← resampled WAVs per actor (not in git)
 │   │   └── actor_portraits/            ← SadTalker portrait frames (not in git)
 │   │
