@@ -201,7 +201,7 @@ def run_wav2lip(wav2lip_dir: Path, face_mp4: str, audio_wav: str,
             "Clone Wav2Lip to tools/Wav2Lip and download wav2lip_gan.pth."
         )
 
-    for resize in (1, 2, 4):
+    for resize in (1, 2, 4, 8):
         cmd = [
             sys.executable, str(inference_script.resolve()),
             "--checkpoint_path", str(model_path.resolve()),
@@ -226,7 +226,7 @@ def run_wav2lip(wav2lip_dir: Path, face_mp4: str, audio_wav: str,
         log.debug(f"Wav2Lip failed (resize={resize}):\n{result.stderr[-1000:]}")
         return False
 
-    log.error("Wav2Lip face detection failed at all resize factors (1, 2, 4).")
+    log.error("Wav2Lip face detection failed at all resize factors (1, 2, 4, 8).")
     return False
 
 
@@ -327,7 +327,7 @@ class Track2Generator:
                 '--export_format',   'WAV',
             ],
             cwd=str(self.applio_dir),
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
             log.debug(f"Applio infer failed: {result.stderr[:300]}")
@@ -336,7 +336,7 @@ class Track2Generator:
     def _resolve_video_path(self, row: pd.Series) -> str | None:
         video_stem = row.get('video_stem')
         if video_stem:
-            for subdir, ext in [('VideoFlash', '.flv'), ('VideoMP4', '.mp4')]:
+            for subdir, ext in [('VideoMP4', '.mp4'), ('VideoFlash', '.flv')]:
                 p = self.cremad_dir / subdir / f"{video_stem}{ext}"
                 if p.exists():
                     return str(p)

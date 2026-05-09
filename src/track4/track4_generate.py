@@ -112,28 +112,28 @@ def find_wav2lip_model(wav2lip_dir: Path) -> Path | None:
 
 
 def run_wav2lip(wav2lip_dir: Path, face_mp4: str, audio_wav: str,
-                out_video: str, model_path: Path) -> bool:
+                out_video: str, model_path: Path,
+                start_resize: int = 2) -> bool:
     inference_script = wav2lip_dir / "inference.py"
     if not inference_script.exists():
         raise FileNotFoundError(
             f"Wav2Lip inference.py not found at {inference_script}. "
             "Clone Wav2Lip to tools/Wav2Lip and download wav2lip_gan.pth."
         )
-    for resize in (1, 2, 4):
+    resize_factors = [r for r in (1, 2, 4, 8) if r >= start_resize]
+    for resize in resize_factors:
         cmd = [
             sys.executable, str(inference_script.resolve()),
             "--checkpoint_path", str(model_path.resolve()),
             "--face",    os.path.abspath(face_mp4),
             "--audio",   os.path.abspath(audio_wav),
             "--outfile", os.path.abspath(out_video),
-            "--nosmooth",
+            "--resize_factor", str(resize),
         ]
-        if resize > 1:
-            cmd += ["--resize_factor", str(resize)]
         result = subprocess.run(
             cmd,
             cwd=str(wav2lip_dir.resolve()),
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=900,
         )
         if result.returncode == 0 and os.path.exists(out_video):
             return True
@@ -149,7 +149,7 @@ def run_wav2lip(wav2lip_dir: Path, face_mp4: str, audio_wav: str,
 # ── Per-clip generation ────────────────────────────────────────────────────────
 
 def generate_clip(row: pd.Series, out_dir: Path, wav2lip_dir: Path,
-                  wav2lip_model: Path) -> dict:
+                  wav2lip_model: Path, start_resize: int = 2) -> dict:
     video_clip = row["video_clip"]
     audio_clip = row["audio_clip"]
     out_stem   = row["output_stem"] + "_wav2lip"
@@ -170,7 +170,8 @@ def generate_clip(row: pd.Series, out_dir: Path, wav2lip_dir: Path,
     if not extract_audio(audio_clip, donor_wav):
         return {"status": "failed", "error": "audio extraction from donor failed"}
 
-    ok = run_wav2lip(wav2lip_dir, video_clip, donor_wav, out_video, wav2lip_model)
+    ok = run_wav2lip(wav2lip_dir, video_clip, donor_wav, out_video, wav2lip_model,
+                     start_resize=start_resize)
 
     if not ok or not os.path.exists(out_video):
         return {"status": "failed", "error": "Wav2Lip failed"}
@@ -221,8 +222,11 @@ def main():
     parser.add_argument("--max_clips",   type=int, default=None,
                         help="Cap total clips — use for 25%% batches: "
                              "1714 / 3428 / 5142 / (omit for all)")
-    parser.add_argument("--resume",      action="store_true",
+    parser.add_argument("--resume",       action="store_true",
                         help="Skip clips already in checkpoint")
+    parser.add_argument("--resize_factor", type=int, default=2,
+                        help="Starting Wav2Lip resize factor (default 2 for 1280x720 MELD clips). "
+                             "Retries at 4 and 8 on face-detection failure.")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -265,7 +269,8 @@ def main():
     for _, row in tqdm(pairs.iterrows(), total=len(pairs), desc="Generating"):
         stem = row["output_stem"]
         try:
-            result = generate_clip(row, out_dir, wav2lip_dir, wav2lip_model)
+            result = generate_clip(row, out_dir, wav2lip_dir, wav2lip_model,
+                                   start_resize=args.resize_factor)
         except Exception as e:
             result = {"status": "failed", "error": str(e)}
 

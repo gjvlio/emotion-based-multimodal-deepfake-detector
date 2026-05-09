@@ -20,11 +20,28 @@ Outputs:
 """
 
 import argparse
+import json
 import re
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+
+def get_duration(video_path: str) -> float:
+    try:
+        r = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', video_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        d = json.loads(r.stdout)
+        streams = [s for s in d.get('streams', []) if s.get('codec_type') == 'video']
+        if streams:
+            return float(streams[0].get('duration', 0))
+    except Exception:
+        pass
+    return 0.0
 
 SPLIT_DIRS = {
     "train": ("train/train_splits",         "train/train_sent_emo.csv"),
@@ -33,8 +50,20 @@ SPLIT_DIRS = {
 }
 
 
-def load_meld(meld_dir: Path) -> pd.DataFrame:
+EMOTION_MAP = {
+    "neutral":  "neutral",
+    "joy":      "joy",
+    "sadness":  "sadness",
+    "anger":    "anger",
+    "fear":     "fear",
+    "disgust":  "disgust",
+    "surprise": "neutral",  # mapped to neutral per label spec
+}
+
+
+def load_meld(meld_dir: Path, min_duration: float = 2.5) -> pd.DataFrame:
     rows = []
+    skipped_missing = skipped_short = 0
     for split, (vid_subdir, csv_name) in SPLIT_DIRS.items():
         csv_path = meld_dir / csv_name
         vid_dir  = meld_dir / vid_subdir
@@ -46,18 +75,27 @@ def load_meld(meld_dir: Path) -> pd.DataFrame:
             d, u = int(row["Dialogue_ID"]), int(row["Utterance_ID"])
             mp4 = vid_dir / f"dia{d}_utt{u}.mp4"
             if not mp4.exists():
+                skipped_missing += 1
                 continue
+            dur = get_duration(str(mp4))
+            if dur < min_duration:
+                skipped_short += 1
+                continue
+            emo_raw = str(row["Emotion"]).lower()
             rows.append({
-                "split":       split,
-                "dialogue_id": d,
+                "split":        split,
+                "dialogue_id":  d,
                 "utterance_id": u,
-                "speaker":     str(row["Speaker"]),
-                "emotion":     str(row["Emotion"]).lower(),
-                "sentiment":   str(row["Sentiment"]).lower(),
-                "utterance":   str(row["Utterance"]),
-                "video_path":  str(mp4),
-                "clip_id":     f"{split}_dia{d}_utt{u}",
+                "speaker":      str(row["Speaker"]),
+                "emotion":      EMOTION_MAP.get(emo_raw, emo_raw),
+                "emotion_raw":  emo_raw,
+                "sentiment":    str(row["Sentiment"]).lower(),
+                "utterance":    str(row["Utterance"]),
+                "duration":     round(dur, 2),
+                "video_path":   str(mp4),
+                "clip_id":      f"{split}_dia{d}_utt{u}",
             })
+    print(f"  Skipped: {skipped_missing} missing files, {skipped_short} clips < {min_duration}s")
     return pd.DataFrame(rows)
 
 
@@ -97,17 +135,21 @@ def build_pairs(fake_src: pd.DataFrame, seed: int) -> pd.DataFrame:
         donor = same_emo.sample(1, random_state=int(rng.integers(0, 2**31))).iloc[0]
 
         records.append({
-            "video_clip":      row["video_path"],
-            "audio_clip":      donor["video_path"],
-            "video_speaker":   row["speaker"],
-            "audio_speaker":   donor["speaker"],
-            "video_emotion":   row["emotion"],
-            "audio_emotion":   donor["emotion"],
-            "video_clip_id":   row["clip_id"],
-            "audio_clip_id":   donor["clip_id"],
-            "split":           row["split"],
-            "output_stem":     f"FAKE_T4_{row['clip_id']}__AUDIO_{donor['clip_id']}",
-            "label":           1,
+            "video_clip":        row["video_path"],
+            "audio_clip":        donor["video_path"],
+            "video_speaker":     row["speaker"],
+            "audio_speaker":     donor["speaker"],
+            "video_emotion":     row["emotion"],
+            "audio_emotion":     donor["emotion"],
+            "video_utterance":   row["utterance"],
+            "audio_utterance":   donor["utterance"],
+            "video_duration":    row["duration"],
+            "audio_duration":    donor["duration"],
+            "video_clip_id":     row["clip_id"],
+            "audio_clip_id":     donor["clip_id"],
+            "split":             row["split"],
+            "output_stem":       f"FAKE_T4_{row['clip_id']}__AUDIO_{donor['clip_id']}",
+            "label":             1,
         })
 
     return pd.DataFrame(records)
@@ -117,15 +159,18 @@ def main():
     parser = argparse.ArgumentParser(description="MELD 50/50 real/fake split + Track 4 pairs")
     parser.add_argument("--meld_dir", required=True, help="MELD.Raw root directory")
     parser.add_argument("--out_dir",  required=True, help="Output directory for manifests")
-    parser.add_argument("--seed",     type=int, default=42)
+    parser.add_argument("--seed",         type=int,   default=42)
+    parser.add_argument("--min_duration", type=float, default=2.5,
+                        help="Minimum clip duration in seconds (default 2.5). "
+                             "Filters both video and audio sides of each pair.")
     args = parser.parse_args()
 
     meld_dir = Path(args.meld_dir)
     out_dir  = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Loading MELD clips...")
-    df = load_meld(meld_dir)
+    print(f"Loading MELD clips (min_duration={args.min_duration}s)...")
+    df = load_meld(meld_dir, min_duration=args.min_duration)
     print(f"  Found {len(df)} clips across train/dev/test")
     print(f"  Speakers: {sorted(df['speaker'].unique())}")
     print(f"  Emotions: {df['emotion'].value_counts().to_dict()}")

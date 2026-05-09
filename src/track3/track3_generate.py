@@ -351,7 +351,7 @@ class Track3Generator:
     def _resolve_video_path(self, row: pd.Series) -> str | None:
         video_stem = row.get('video_stem')
         if video_stem:
-            for subdir, ext in [('VideoFlash', '.flv'), ('VideoMP4', '.mp4')]:
+            for subdir, ext in [('VideoMP4', '.mp4'), ('VideoFlash', '.flv')]:
                 p = self.cremad_dir / subdir / f"{video_stem}{ext}"
                 if p.exists():
                     return str(p)
@@ -387,14 +387,17 @@ class Track3Generator:
             if not extract_middle_frame(face_mp4, portrait_jpg):
                 return {'status': 'failed', 'error': 'portrait frame extraction failed'}
 
-            if not self._synthesise(sentence_text, tgt_emotion, tts_wav):
-                return {'status': 'failed', 'error': 'StyleTTS synthesis failed'}
+            if os.path.exists(rvc_wav):
+                log.debug(f"Reusing cached RVC wav: {rvc_wav}")
+            else:
+                if not self._synthesise(sentence_text, tgt_emotion, tts_wav):
+                    return {'status': 'failed', 'error': 'StyleTTS synthesis failed'}
 
-            try:
-                if not self._convert_voice(tts_wav, actor_id, rvc_wav):
-                    return {'status': 'failed', 'error': 'RVC conversion failed'}
-            except FileNotFoundError as e:
-                return {'status': 'failed', 'error': str(e)}
+                try:
+                    if not self._convert_voice(tts_wav, actor_id, rvc_wav):
+                        return {'status': 'failed', 'error': 'RVC conversion failed'}
+                except FileNotFoundError as e:
+                    return {'status': 'failed', 'error': str(e)}
 
             extract_audio_from_video(face_mp4, orig_wav)
             if not self.verifier.passes(orig_wav, rvc_wav):
