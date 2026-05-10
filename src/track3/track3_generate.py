@@ -60,6 +60,16 @@ from glob import glob
 import torch
 import numpy as np
 import pandas as pd
+
+if 'numpy.exceptions' not in sys.modules:
+    import types as _types
+    _exc = _types.ModuleType('numpy.exceptions')
+    for _name in ('AxisError', 'ComplexWarning', 'DTypePromotionError',
+                  'ModuleDeprecationWarning', 'RankWarning',
+                  'TooHardError', 'VisibleDeprecationWarning'):
+        if hasattr(np, _name):
+            setattr(_exc, _name, getattr(np, _name))
+    sys.modules['numpy.exceptions'] = _exc
 from tqdm import tqdm
 
 _orig_torch_load = torch.load
@@ -208,6 +218,7 @@ def run_sadtalker(sadtalker_dir: Path, portrait_jpg: str, audio_wav: str,
                   out_video: str, size: int = 256, still: bool = True) -> bool:
     """
     Run SadTalker inference.py to generate talking-head video.
+    Tries --preprocess crop first; falls back to full if face detection fails.
     SadTalker writes to a timestamped subdir — we find and move the output.
     Must run with cwd=sadtalker_dir (SadTalker uses relative src/config paths).
     """
@@ -218,38 +229,44 @@ def run_sadtalker(sadtalker_dir: Path, portrait_jpg: str, audio_wav: str,
             "Clone SadTalker to tools/SadTalker."
         )
 
-    with tempfile.TemporaryDirectory() as tmp_result:
-        cmd = [
-            sys.executable, str(inference_script.resolve()),
-            "--source_image",  os.path.abspath(portrait_jpg),
-            "--driven_audio",  os.path.abspath(audio_wav),
-            "--checkpoint_dir", str((sadtalker_dir / "checkpoints").resolve()),
-            "--result_dir",    tmp_result,
-            "--size",          str(size),
-            "--preprocess",    "crop",
-        ]
-        if still:
-            cmd.append("--still")
+    import shutil
 
-        result = subprocess.run(
-            cmd,
-            cwd=str(sadtalker_dir.resolve()),
-            capture_output=True, text=True, timeout=600,
-        )
+    for preprocess in ("crop", "full"):
+        with tempfile.TemporaryDirectory() as tmp_result:
+            cmd = [
+                sys.executable, str(inference_script.resolve()),
+                "--source_image",  os.path.abspath(portrait_jpg),
+                "--driven_audio",  os.path.abspath(audio_wav),
+                "--checkpoint_dir", str((sadtalker_dir / "checkpoints").resolve()),
+                "--result_dir",    tmp_result,
+                "--size",          str(size),
+                "--preprocess",    preprocess,
+            ]
+            if still:
+                cmd.append("--still")
 
-        if result.returncode != 0:
-            log.debug(f"SadTalker failed:\n{result.stderr[-1000:]}")
-            return False
+            result = subprocess.run(
+                cmd,
+                cwd=str(sadtalker_dir.resolve()),
+                capture_output=True, text=True, timeout=600,
+            )
 
-        # SadTalker writes to tmp_result/<timestamp>/*.mp4
-        mp4s = glob(os.path.join(tmp_result, "**", "*.mp4"), recursive=True)
-        if not mp4s:
-            log.debug("SadTalker produced no MP4 output.")
-            return False
+            if result.returncode != 0:
+                log.debug(f"SadTalker ({preprocess}) failed:\n{result.stderr[-500:]}")
+                continue
 
-        import shutil
-        shutil.move(mp4s[0], out_video)
-        return os.path.exists(out_video)
+            mp4s = glob(os.path.join(tmp_result, "**", "*.mp4"), recursive=True)
+            if not mp4s:
+                log.debug(f"SadTalker ({preprocess}) produced no MP4 output.")
+                continue
+
+            shutil.move(mp4s[0], out_video)
+            if os.path.exists(out_video):
+                if preprocess == "full":
+                    log.info(f"SadTalker succeeded with --preprocess full fallback.")
+                return True
+
+    return False
 
 
 # ── Track 3 generator ─────────────────────────────────────────────────────────
@@ -342,7 +359,7 @@ class Track3Generator:
                 '--export_format',   'WAV',
             ],
             cwd=str(self.applio_dir),
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
             log.debug(f"Applio infer failed: {result.stderr[:300]}")

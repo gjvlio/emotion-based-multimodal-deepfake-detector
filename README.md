@@ -192,6 +192,18 @@ python ... --resume                     # batch 4
   `resize_factor` 1 → 2 → 4 → 8 before marking a clip failed.
 - Applio RVC timeout raised to 600 s for slow-converging actors.
 - Actor 1047 black leader frames: same fix as Track 3 (`VideoMP4/` override, see above).
+- 8 clips failed (actors 1027/1030/1047/1058). Retry with track2_retry.csv after fixes.
+
+**Retry failed clips:**
+```bash
+python src/track2/track2_generate.py \
+  --pairs_csv  data/processed/track1_manifests/track2_retry.csv \
+  --out_dir    data/synthetic/track2_fakes \
+  --applio_dir tools/Applio \
+  --wav2lip_dir tools/Wav2Lip \
+  --cremad_dir data/raw/CREMA-D \
+  --resume
+```
 
 ---
 
@@ -254,7 +266,27 @@ calling StyleTTS2/RVC — on cache hit it proceeds directly to SadTalker.
 - Actor 1047 `IEO_FEA_LO.flv` has black leader frames (0.03–0.23 s) that break face detection.
   Fix: trimmed MP4 at `data/raw/CREMA-D/VideoMP4/1047_IEO_FEA_LO.mp4`; generator checks
   `VideoMP4/` before `VideoFlash/`.
-- Applio RVC timeout raised to 600 s (default was 300 s — insufficient for slow actors).
+- Applio RVC timeout raised to 600 s (was 300 s — insufficient for slow actors).
+- Actors 1061–1062 FLV files fail ffmpeg conversion at runtime. Fix: pre-converted all
+  164 FLVs to `VideoMP4/` via `scripts/preconvert_flv.py`; generator finds MP4 directly.
+- SadTalker `--preprocess crop` fails face detection on some actors. Generator now retries
+  with `--preprocess full` before marking a clip failed.
+- 637 clips failed (actors 1038/1047–1062, batch 3). Retry with track3_retry.csv after fixes.
+
+**Retry failed clips:**
+```bash
+# Step 1: pre-convert FLVs for actors 1061-1062 (already done; skip if VideoMP4/ exists)
+python scripts/preconvert_flv.py --cremad_dir data/raw/CREMA-D --actors 1061 1062
+
+# Step 2: retry all 637 failed clips
+python src/track3/track3_generate.py \
+  --pairs_csv     data/processed/track1_manifests/track3_retry.csv \
+  --out_dir       data/synthetic/track3_fakes \
+  --applio_dir    tools/Applio \
+  --sadtalker_dir tools/SadTalker \
+  --cremad_dir    data/raw/CREMA-D \
+  --resume
+```
 
 ---
 
@@ -471,7 +503,7 @@ python scripts/evaluate.py \
 |-------|---------|-------------|------|--------|
 | Track 1 — StyleTTS2+RVC | CREMA-D 20% | 1,452 | **1,452** | ✅ 100% complete |
 | Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,267** | ✅ 100% complete |
-| Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **1,559** (batch 2 in progress) | 🔄 42% — batch 2 SadTalker running |
+| Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **3,691** (31 actor 1062 permanent — FLV+face det.) | ✅ 99.2% complete |
 | Track 4 — Wav2Lip MELD | MELD 50% | 2,522 | **5** (test) | 🟡 Ready to run (batch 1 pending) |
 
 ### Data Preparation
@@ -492,7 +524,7 @@ python scripts/evaluate.py \
 | Detection model (emotion heads + bilinear + classifier) | ✅ Implemented (`src/models/`) |
 | Training module (multi-task loss, two-phase trainer) | ✅ Implemented (`src/training/`) |
 | Evaluation module (metrics, ablation, OOD) | ✅ Implemented (`src/evaluation/`) |
-| Preprocessing run (cache Z_at, Z_v) | 🟡 Pending — run after generation finishes |
+| Preprocessing run (cache Z_at, Z_v) | 🟡 Pending — CREMA-D generation complete, ready to run |
 | Model training | 🟡 Pending — run after preprocessing |
 
 ---
@@ -529,7 +561,7 @@ Thesis_G10/
 │   │   │   ├── metadata.csv
 │   │   │   └── failed.csv
 │   │   ├── track2_fakes/
-│   │   │   ├── videos/                 ← 2,266 MP4 fakes (not in git)
+│   │   │   ├── videos/                 ← 2,267 MP4 fakes (not in git)
 │   │   │   ├── metadata.csv
 │   │   │   └── failed.csv
 │   │   ├── track3_fakes/
@@ -590,7 +622,9 @@ Thesis_G10/
 │   ├── preprocess_all.py           ← run preprocessing on all clips → Z_at/Z_v cache
 │   ├── train.py                    ← training entry point (Phase 1 / Phase 2)
 │   ├── evaluate.py                 ← evaluation entry point (metrics + ablation + OOD)
-│   └── validate_generation.py      ← health check for generated clips
+│   ├── validate_generation.py      ← health check for generated clips
+│   ├── migrate_stems.py            ← one-off: rename FAKE_T1_ → FAKE_T2_/T3_ (already run)
+│   └── preconvert_flv.py           ← pre-convert FLVs to VideoMP4/ for problem actors
 │
 ├── tools/
 │   ├── README.md

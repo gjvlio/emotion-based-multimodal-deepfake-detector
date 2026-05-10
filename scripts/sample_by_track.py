@@ -130,6 +130,11 @@ def main():
     t2_path = out_dir / "track2_pairs.csv"
     t3_path = out_dir / "track3_pairs.csv"
 
+    t2_pairs = t2_pairs.copy()
+    t2_pairs['output_stem'] = t2_pairs['output_stem'].str.replace('FAKE_T1_', 'FAKE_T2_', regex=False)
+    t3_pairs = t3_pairs.copy()
+    t3_pairs['output_stem'] = t3_pairs['output_stem'].str.replace('FAKE_T1_', 'FAKE_T3_', regex=False)
+
     t1_pairs.to_csv(t1_path, index=False)
     t2_pairs.to_csv(t2_path, index=False)
     t3_pairs.to_csv(t3_path, index=False)
