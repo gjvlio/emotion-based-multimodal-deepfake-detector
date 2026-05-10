@@ -61,6 +61,16 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+if 'numpy.exceptions' not in sys.modules:
+    import types as _types
+    _exc = _types.ModuleType('numpy.exceptions')
+    for _name in ('AxisError', 'ComplexWarning', 'DTypePromotionError',
+                  'ModuleDeprecationWarning', 'RankWarning',
+                  'TooHardError', 'VisibleDeprecationWarning'):
+        if hasattr(np, _name):
+            setattr(_exc, _name, getattr(np, _name))
+    sys.modules['numpy.exceptions'] = _exc
+
 _orig_torch_load = torch.load
 def _torch_load_compat(*args, weights_only=False, **kwargs):
     return _orig_torch_load(*args, weights_only=weights_only, **kwargs)
