@@ -16,6 +16,7 @@ Core hypothesis: deepfake generators process audio and visual modalities indepen
   - [Track 2 — Audio Swap + Lip Correction (+ Wav2Lip)](#track-2--audio-swap--lip-correction--wav2lip)
   - [Track 3 — Full Face Synthesis (+ SadTalker)](#track-3--full-face-synthesis--sadtalker)
   - [Track 4 — Cross-Speaker Lip Sync on MELD](#track-4--cross-speaker-lip-sync-on-meld)
+  - [Track 5 — Emotion-Mismatch Lip Sync on MELD (MuseTalk)](#track-5--emotion-mismatch-lip-sync-on-meld-musetalk)
 - [Phase 2 — Detection System](#phase-2--detection-system)
   - [Architecture](#architecture)
   - [Preprocessing](#preprocessing)
@@ -37,7 +38,8 @@ Core hypothesis: deepfake generators process audio and visual modalities indepen
 │               ► Track 3 (+SadTalker)        │                  │
 │                                              ┘                  │
 │  MELD ────► Track 4 (Wav2Lip cross-speaker) ──► FAKE samples   │
-│  (TV clips) ► 50% kept as-is               ──► REAL samples   │
+│  (TV clips) ► Track 5 (MuseTalk emotion-mismatch) ── FAKE    │
+│             ► 50% kept as-is               ──► REAL samples   │
 │                                                                  │
 │  CMU-MOSEI ─► 100% kept as-is              ──► REAL samples   │
 └─────────────────────────────────────────────────────────────────┘
@@ -74,6 +76,7 @@ External tools are too large for version control — clone them manually:
 | Applio (RVC v2) | `tools/Applio/` | Track 1/2/3 voice conversion |
 | Wav2Lip | `tools/Wav2Lip/` | Track 2 + Track 4 |
 | SadTalker | `tools/SadTalker/` | Track 3 |
+| MuseTalk | `tools/MuseTalk/` | Track 5 (emotion-mismatch lip-sync) |
 
 See [`tools/README.md`](tools/README.md) for setup and Windows patches.
 
@@ -84,7 +87,7 @@ See [`tools/README.md`](tools/README.md) for setup and Windows patches.
 | Dataset | Type | Role |
 |---------|------|------|
 | **CREMA-D** | 91-actor lab recordings, 6 emotions | 100% fake source — Tracks 1/2/3 |
-| **MELD** | TV dialogue (Friends), 7 speakers | 50% real + 50% fake source (Track 4) |
+| **MELD** | TV dialogue (Friends), 7 speakers | 50% real + 50% fake source (Tracks 4 + 5) |
 | **CMU-MOSEI** | In-the-wild YouTube sentiment/emotion | 100% real training samples |
 
 > CREMA-D originals are **never used as real training samples** — they served as generation sources and reusing them as real would introduce label ambiguity.
@@ -321,6 +324,47 @@ python ... --resume                      # batch 4
 
 ---
 
+### Track 5 — Emotion-Mismatch Lip Sync on MELD (MuseTalk)
+> MELD · 50% split · 1,193 pairs (video_emotion ≠ audio_emotion)
+
+```
+[MELD clip A — face video] + [MELD clip B — donor audio, different emotion] → MuseTalk → fake
+```
+
+Face shows emotion A; voice (and lip movement) carries emotion B. Harder to detect than Track 4 — MuseTalk generates lip movements consistent with the donor voice, so the mismatch is purely emotional, not kinematic.
+
+**MuseTalk setup** (clone to `tools/MuseTalk/`, download weights):
+- `models/musetalk/pytorch_model.bin` (3.4 GB), `musetalk.json`
+- `models/dwpose/dw-ll_ucoco_384.pth` (387 MB)
+- `models/face-parse-bisent/79999_iter.pth` (50 MB), `resnet18-5c106cde.pth`
+- `models/sd-vae-ft-mse/config.json` + `diffusion_pytorch_model.bin` (319 MB)
+- `models/whisper/pytorch_model.bin` (144 MB)
+
+> **Note (Windows/CUDA):** DWPose mmpose replaced with `face_alignment` (standard PyPI package) to avoid mmcv/xtcocotools NumPy 2.x ABI incompatibility. Patch already applied to `tools/MuseTalk/musetalk/utils/preprocessing.py`.
+
+```bash
+# Step 1: build emotion-mismatch pairs CSV
+python scripts/sample_meld_mismatch.py \
+  --meld_dir data/raw/MELD/MELD-RAW/MELD.Raw \
+  --out_dir  data/processed/meld_manifests
+
+# Step 2: smoke test (3 clips, verifies VRAM + output)
+python scripts/smoke_test_musetalk.py --n_clips 3
+# Expected: ~2-3 PASS, ~5862 MiB VRAM, ~3-5 min/clip
+
+# Step 3: generate all 1,193 clips
+python src/track5/meld_mismatch_generate.py \
+  --pairs_csv data/processed/meld_manifests/meld_mismatch_pairs.csv \
+  --out_dir   data/synthetic/track5_fakes \
+  --batch_size 4 \
+  --resume
+
+# Lower batch_size if OOM on RTX 4050 6 GB:
+python ... --batch_size 2
+```
+
+---
+
 ## Phase 2 — Detection System
 
 ### Architecture
@@ -505,6 +549,7 @@ python scripts/evaluate.py \
 | Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,267** | ✅ 100% complete |
 | Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **3,722** | ✅ 100% complete |
 | Track 4 — Wav2Lip MELD | MELD 50% | 2,522 | **5** (test) | 🟡 Ready to run (batch 1 pending) |
+| Track 5 — MuseTalk MELD | MELD emotion-mismatch | 1,193 | **0** | 🟡 Smoke test ✅ (2/3 pass, ~5.9 GB VRAM, ~5 min/clip) |
 
 ### Data Preparation
 
