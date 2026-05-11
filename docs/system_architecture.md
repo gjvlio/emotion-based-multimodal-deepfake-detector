@@ -123,17 +123,17 @@ StyleTTS2 → RVC → SadTalker → output
 
 ---
 
-### Track 4 — Cross-Speaker Lip Sync
-> MELD · 50% split
+### Track 4 — Emotion-Mismatch Lip Sync (MuseTalk)
+> MELD · fake-source half · 3,482 pairs (video_emotion ≠ audio_emotion, 100% mismatch rate)
 
 ```
-[MELD clip A — face video] + [MELD clip B — audio] → Wav2Lip → fake
+[MELD clip A — face video] + [MELD clip B — donor audio, different emotion] → MuseTalk → fake
 ```
 
-- No speech synthesis at all — both face and audio are **real** MELD clips from different speakers
-- Wav2Lip reanimates person A's lips to match person B's real speech
-- **In-the-wild attack** — simulates putting real words in another person's mouth
-- Distinct from Tracks 1–3: no TTS artifacts, both signals are authentic human speech
+- Face shows emotion A; voice (and lip movement) carries emotion B
+- MuseTalk (diffusion-based, 2024) generates lip movements consistent with donor voice — mismatch is purely emotional, not kinematic
+- **Hardest MELD track to detect** — requires detector to reason about semantic audio-visual emotional coherence, not low-level artifacts
+- Distinct from Tracks 1–3: no TTS, both signals are real human speech; MuseTalk quality removes low-level lip-seam shortcut
 
 ---
 
@@ -255,8 +255,8 @@ Visual vector v  (m-dim)
               │ 50%                50% │
               ▼                     ▼  │
            Track 4              Real MELD
-        (Wav2Lip               kept as-is
-         cross-speaker)
+        (MuseTalk              kept as-is
+         emotion-mismatch)
               │                     │
               ▼                     ▼
          FAKE samples           REAL samples
@@ -272,7 +272,7 @@ Visual vector v  (m-dim)
 
 | Label | Source |
 |-------|--------|
-| **FAKE** | CREMA-D Tracks 1 + 2 + 3, MELD Track 4 (50% of MELD) |
+| **FAKE** | CREMA-D Tracks 1 + 2 + 3, MELD Track 4 — emotion-mismatch fake half (3,482 clips) |
 | **REAL** | MELD raw (50% of MELD), CMU-MOSEI (100%) |
 
 ---

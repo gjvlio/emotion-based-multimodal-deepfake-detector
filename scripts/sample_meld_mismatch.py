@@ -1,15 +1,15 @@
 """
 sample_meld_mismatch.py
 =======================
-Generate emotion-mismatch pairs for Track 5.
+Generate emotion-mismatch pairs for Track 4 (MuseTalk).
 
-Reads meld_real.csv and samples 50% of clips as video sources. Each video
-clip is paired with a donor clip whose emotion differs — this is the
-manipulated signal: face expresses emotion A while voice carries emotion B.
+Reads meld_fake_src.csv (the fake-source half from sample_meld.py — disjoint
+from the real training pool in meld_real.csv) and pairs every clip with a
+donor whose emotion differs.
 
 Pairing rules:
   - video_emotion != audio_emotion  (hard constraint)
-  - donor sampled proportionally across all other emotions
+  - donor sampled from same fake-source pool (real pool never touched)
   - same clip cannot be both video and audio in the same pair
   - seed fixed for reproducibility
 
@@ -28,14 +28,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-EMOTIONS = ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
-
 
 def sample_mismatch_pairs(df: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     df = df.sample(frac=1, random_state=int(rng.integers(1_000_000))).reset_index(drop=True)
-    n_video = len(df) // 2
-    video_pool = df.iloc[:n_video].copy()
-    donor_pool = df  # donors drawn from ALL clips (a clip can donate audio to others)
+    # Use ALL clips as video sources — entire fake pool becomes Track 4 fakes
+    video_pool = df
+    donor_pool = df
 
     rows = []
     for _, vrow in video_pool.iterrows():
@@ -60,7 +58,7 @@ def sample_mismatch_pairs(df: pd.DataFrame, rng: np.random.Generator) -> pd.Data
             'video_clip_id':   vrow['clip_id'],
             'audio_clip_id':   donor['clip_id'],
             'split':           vrow['split'],
-            'output_stem':     f"FAKE_T5_{vrow['clip_id']}__AUDIO_{donor['clip_id']}",
+            'output_stem':     f"FAKE_T4_{vrow['clip_id']}__AUDIO_{donor['clip_id']}",
             'label':           1,
         })
 
@@ -69,12 +67,12 @@ def sample_mismatch_pairs(df: pd.DataFrame, rng: np.random.Generator) -> pd.Data
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sample emotion-mismatch pairs for Track 5 (MELD audio-swap)"
+        description="Sample emotion-mismatch pairs for Track 4 (MuseTalk on MELD)"
     )
     parser.add_argument(
-        '--real_csv',
-        default='data/processed/meld_manifests/meld_real.csv',
-        help='meld_real.csv produced by the MELD preprocessing step',
+        '--fake_src_csv',
+        default='data/processed/meld_manifests/meld_fake_src.csv',
+        help='meld_fake_src.csv — fake-source half produced by sample_meld.py',
     )
     parser.add_argument(
         '--out_csv',
@@ -83,20 +81,26 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
 
-    real_csv = Path(args.real_csv)
-    if not real_csv.exists():
-        print(f"ERROR: {real_csv} not found.", file=sys.stderr)
+    fake_src_csv = Path(args.fake_src_csv)
+    if not fake_src_csv.exists():
+        print(f"ERROR: {fake_src_csv} not found.", file=sys.stderr)
+        print("Run: python scripts/sample_meld.py  (re-saves meld_fake_src.csv)")
+        print("Or reconstruct from existing meld_pairs.csv:")
+        print("  python scripts/reconstruct_fake_src.py")
         sys.exit(1)
 
-    df = pd.read_csv(real_csv)
-    print(f"Loaded {len(df)} clips from {real_csv}")
+    df = pd.read_csv(fake_src_csv)
+    print(f"Loaded {len(df)} fake-source clips from {fake_src_csv}")
     print(f"Emotion distribution:\n{df['emotion'].value_counts().to_string()}")
 
     rng = np.random.default_rng(args.seed)
     pairs = sample_mismatch_pairs(df, rng)
 
     mismatch_rate = (pairs['video_emotion'] != pairs['audio_emotion']).mean()
+    no_donor = len(df) - len(pairs)
     print(f"\nGenerated {len(pairs)} pairs  (mismatch rate: {mismatch_rate:.1%})")
+    if no_donor:
+        print(f"  {no_donor} clips skipped — no emotion-mismatched donor available")
     print(f"Emotion pair breakdown:")
     pair_counts = (
         pairs.groupby(['video_emotion', 'audio_emotion'])
@@ -110,6 +114,8 @@ def main():
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     pairs.to_csv(out_csv, index=False)
     print(f"\nSaved -> {out_csv}")
+    print(f"\nReal pool  (meld_real.csv):        {len(pd.read_csv(fake_src_csv.parent / 'meld_real.csv'))} clips  label=0")
+    print(f"Fake pairs (meld_mismatch_pairs):  {len(pairs)} clips  label=1")
 
 
 if __name__ == '__main__':

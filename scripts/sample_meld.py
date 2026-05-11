@@ -184,17 +184,23 @@ def main():
     pairs = build_pairs(fake_src, args.seed)
     print(f"  Pairs built:    {len(pairs)}")
 
-    real_path  = out_dir / "meld_real.csv"
-    pairs_path = out_dir / "meld_pairs.csv"
-    real_df.to_csv(real_path,  index=False)
-    pairs.to_csv(pairs_path,   index=False)
+    real_path     = out_dir / "meld_real.csv"
+    pairs_path    = out_dir / "meld_pairs.csv"
+    fake_src_path = out_dir / "meld_fake_src.csv"
+
+    real_df.to_csv(real_path, index=False)
+    pairs.to_csv(pairs_path,  index=False)
+
+    # Save fake-source pool for sample_meld_mismatch.py (Track 4 MuseTalk)
+    fake_src.to_csv(fake_src_path, index=False)
 
     print(f"\n{'='*55}")
     print("MELD SPLIT SUMMARY")
     print(f"{'='*55}")
-    print(f"Total clips:     {len(df)}")
-    print(f"Real class:      {len(real_df)}  -> {real_path.name}")
-    print(f"Track 4 pairs:   {len(pairs)}   -> {pairs_path.name}")
+    print(f"Total clips:       {len(df)}")
+    print(f"Real class:        {len(real_df)}  -> {real_path.name}")
+    print(f"Fake-source pool:  {len(fake_src)}  -> {fake_src_path.name}")
+    print(f"Track 4 pairs:     {len(pairs)}  -> {pairs_path.name}")
     print(f"{'='*55}")
     print(f"\nNext step:")
     print(f"  python src/track4/track4_generate.py \\")

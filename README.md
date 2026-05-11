@@ -15,8 +15,7 @@ Core hypothesis: deepfake generators process audio and visual modalities indepen
   - [Track 1 — Audio Swap (StyleTTS2 + RVC)](#track-1--audio-swap-styletts2--rvc)
   - [Track 2 — Audio Swap + Lip Correction (+ Wav2Lip)](#track-2--audio-swap--lip-correction--wav2lip)
   - [Track 3 — Full Face Synthesis (+ SadTalker)](#track-3--full-face-synthesis--sadtalker)
-  - [Track 4 — Cross-Speaker Lip Sync on MELD](#track-4--cross-speaker-lip-sync-on-meld)
-  - [Track 5 — Emotion-Mismatch Lip Sync on MELD (MuseTalk)](#track-5--emotion-mismatch-lip-sync-on-meld-musetalk)
+  - [Track 4 — Emotion-Mismatch Lip Sync on MELD (MuseTalk)](#track-4--emotion-mismatch-lip-sync-on-meld-musetalk)
 - [Phase 2 — Detection System](#phase-2--detection-system)
   - [Architecture](#architecture)
   - [Preprocessing](#preprocessing)
@@ -37,9 +36,8 @@ Core hypothesis: deepfake generators process audio and visual modalities indepen
 │  (91 actors) ► Track 2 (+Wav2Lip)           ├─► FAKE samples   │
 │               ► Track 3 (+SadTalker)        │                  │
 │                                              ┘                  │
-│  MELD ────► Track 4 (Wav2Lip cross-speaker) ──► FAKE samples   │
-│  (TV clips) ► Track 5 (MuseTalk emotion-mismatch) ── FAKE    │
-│             ► 50% kept as-is               ──► REAL samples   │
+│  MELD ────► Track 4 (MuseTalk emotion-mismatch) ──► FAKE samples │
+│  (TV clips) ► 50% kept as-is               ──► REAL samples   │
 │                                                                  │
 │  CMU-MOSEI ─► 100% kept as-is              ──► REAL samples   │
 └─────────────────────────────────────────────────────────────────┘
@@ -74,9 +72,9 @@ External tools are too large for version control — clone them manually:
 | Tool | Location | Required for |
 |------|----------|--------------|
 | Applio (RVC v2) | `tools/Applio/` | Track 1/2/3 voice conversion |
-| Wav2Lip | `tools/Wav2Lip/` | Track 2 + Track 4 |
+| Wav2Lip | `tools/Wav2Lip/` | Track 2 |
 | SadTalker | `tools/SadTalker/` | Track 3 |
-| MuseTalk | `tools/MuseTalk/` | Track 5 (emotion-mismatch lip-sync) |
+| MuseTalk | `tools/MuseTalk/` | Track 4 (emotion-mismatch lip-sync) |
 
 See [`tools/README.md`](tools/README.md) for setup and Windows patches.
 
@@ -87,7 +85,7 @@ See [`tools/README.md`](tools/README.md) for setup and Windows patches.
 | Dataset | Type | Role |
 |---------|------|------|
 | **CREMA-D** | 91-actor lab recordings, 6 emotions | 100% fake source — Tracks 1/2/3 |
-| **MELD** | TV dialogue (Friends), 7 speakers | 50% real + 50% fake source (Tracks 4 + 5) |
+| **MELD** | TV dialogue (Friends), ~13.7k utterances | 6,816 usable (≥2.5 s, train+dev+test) — 50% real + 50% fake → Track 4 |
 | **CMU-MOSEI** | In-the-wild YouTube sentiment/emotion | 100% real training samples |
 
 > CREMA-D originals are **never used as real training samples** — they served as generation sources and reusing them as real would introduce label ambiguity.
@@ -104,6 +102,8 @@ See [`tools/README.md`](tools/README.md) for setup and Windows patches.
 | 5 | Disgust | DIS | disgust |
 
 MELD `surprise` → mapped to neutral. CMU-MOSEI dimensional → mapped to nearest class.
+
+> **MELD usable clip count:** ~13,708 annotated utterances across train/dev/test. After ≥2.5 s duration filter: **6,816 clips** (6,890 dropped — most are short conversational turns like "Yes.", "I know."). `sample_meld.py` loads all three splits and applies the filter automatically.
 
 ---
 
@@ -293,45 +293,14 @@ python src/track3/track3_generate.py \
 
 ---
 
-### Track 4 — Cross-Speaker Lip Sync on MELD
-> MELD · 50% split · 4,909 clips ≥2.5 s → 2,522 pairs (2,387 real)
-
-```
-[MELD clip A — face video] + [MELD clip B — real audio] → Wav2Lip → fake
-```
-
-No speech synthesis — both face and audio are genuine MELD utterances from different speakers. Simulates putting real words in another person's mouth. Distinct from Tracks 1–3: no TTS artifacts.
-
-```bash
-# Step 1: split MELD 50/50 and build cross-speaker pairs
-python scripts/sample_meld.py \
-  --meld_dir data/raw/MELD/MELD-RAW/MELD.Raw \
-  --out_dir  data/processed/meld_manifests
-
-# Step 2: generate
-python src/track4/track4_generate.py \
-  --pairs_csv   data/processed/meld_manifests/meld_pairs.csv \
-  --out_dir     data/synthetic/track4_fakes \
-  --wav2lip_dir tools/Wav2Lip \
-  --resume
-
-# 25% batches (~1,268 clips each):
-python ... --max_clips 1268              # batch 1
-python ... --max_clips 2535 --resume     # batch 2
-python ... --max_clips 3803 --resume     # batch 3
-python ... --resume                      # batch 4
-```
-
----
-
-### Track 5 — Emotion-Mismatch Lip Sync on MELD (MuseTalk)
-> MELD · 50% split · 1,193 pairs (video_emotion ≠ audio_emotion)
+### Track 4 — Emotion-Mismatch Lip Sync on MELD (MuseTalk)
+> MELD · fake-source half · 3,482 pairs (video_emotion ≠ audio_emotion, 100% mismatch rate)
 
 ```
 [MELD clip A — face video] + [MELD clip B — donor audio, different emotion] → MuseTalk → fake
 ```
 
-Face shows emotion A; voice (and lip movement) carries emotion B. Harder to detect than Track 4 — MuseTalk generates lip movements consistent with the donor voice, so the mismatch is purely emotional, not kinematic.
+Face shows emotion A; voice (and lip movement) carries emotion B. MuseTalk (diffusion-based, 2024) generates lip movements consistent with the donor voice — mismatch is purely emotional, not kinematic. No TTS artifacts; both signals are real human speech.
 
 **MuseTalk setup** (clone to `tools/MuseTalk/`, download weights):
 - `models/musetalk/pytorch_model.bin` (3.4 GB), `musetalk.json`
@@ -343,21 +312,28 @@ Face shows emotion A; voice (and lip movement) carries emotion B. Harder to dete
 > **Note (Windows/CUDA):** DWPose mmpose replaced with `face_alignment` (standard PyPI package) to avoid mmcv/xtcocotools NumPy 2.x ABI incompatibility. Patch already applied to `tools/MuseTalk/musetalk/utils/preprocessing.py`.
 
 ```bash
-# Step 1: build emotion-mismatch pairs CSV
-python scripts/sample_meld_mismatch.py \
+# Step 1: split MELD 50/50 and build fake-source pool
+#   Loads train+dev+test splits, applies ≥2.5 s filter (6,816 usable of ~13,708 total)
+#   6,890 clips dropped — short conversational turns (<2.5 s)
+python scripts/sample_meld.py \
   --meld_dir data/raw/MELD/MELD-RAW/MELD.Raw \
   --out_dir  data/processed/meld_manifests
+# Outputs: meld_real.csv (3,334 real), meld_fake_src.csv (3,482 fake sources)
 
-# Step 2: smoke test (3 clips, verifies VRAM + output)
-python scripts/smoke_test_musetalk.py --n_clips 3
-# Expected: ~2-3 PASS, ~5862 MiB VRAM, ~3-5 min/clip
+# Step 2: build emotion-mismatch pairs from fake-source pool
+python scripts/sample_meld_mismatch.py
+# Output: meld_mismatch_pairs.csv (3,482 pairs, 100% video_emotion ≠ audio_emotion)
+# Real pool (meld_real.csv) is NEVER touched — clean 50/50 partition
 
-# Step 3: generate all 1,193 clips
-python src/track5/meld_mismatch_generate.py \
-  --pairs_csv data/processed/meld_manifests/meld_mismatch_pairs.csv \
-  --out_dir   data/synthetic/track5_fakes \
-  --batch_size 4 \
-  --resume
+# Step 3: smoke test (5 clips, verifies VRAM + output)
+python scripts/smoke_test_musetalk.py --n_clips 5
+# Expected: 5/5 PASS, ~5913 MiB VRAM, ~2.5 min/clip (tested on 2.5–4.9 s clips)
+
+# Step 4: generate all 3,482 clips in 10 batches (~348 clips each, ~15 hrs/batch)
+python src/track4/track4_generate.py --max_clips 348
+python src/track4/track4_generate.py --max_clips 696 --resume
+python src/track4/track4_generate.py --max_clips 1044 --resume
+# ... continue in 348-clip increments until done (~150 hrs total)
 
 # Lower batch_size if OOM on RTX 4050 6 GB:
 python ... --batch_size 2
@@ -496,7 +472,7 @@ L_total = L_BCE(P(fake), fake_label)
 | Track 1 fake | 1 | target emotion | source emotion |
 | Track 2 fake | 1 | target emotion | target emotion |
 | Track 3 fake | 1 | target emotion | target emotion |
-| Track 4 fake | 1 | audio speaker | video speaker |
+| Track 4 fake | 1 | audio_emotion (donor) | video_emotion (face) |
 
 ---
 
@@ -548,8 +524,7 @@ python scripts/evaluate.py \
 | Track 1 — StyleTTS2+RVC | CREMA-D 20% | 1,452 | **1,452** | ✅ 100% complete |
 | Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,267** | ✅ 100% complete |
 | Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **3,722** | ✅ 100% complete |
-| Track 4 — Wav2Lip MELD | MELD 50% | 2,522 | **5** (test) | 🟡 Ready to run (batch 1 pending) |
-| Track 5 — MuseTalk MELD | MELD emotion-mismatch | 1,193 | **0** | 🟡 Smoke test ✅ (2/3 pass, ~5.9 GB VRAM, ~5 min/clip) |
+| Track 4 — MuseTalk MELD | MELD emotion-mismatch | 3,482 | **0** | 🟡 Smoke test ✅ (5/5 pass, ~5913 MiB VRAM, ~2.5 min/clip) |
 
 ### Data Preparation
 
@@ -558,7 +533,7 @@ python scripts/evaluate.py \
 | CREMA-D parsing + pair manifest | ✅ 7,441 pairs (T1: 1,452 + T2: 2,267 + T3: 3,722) |
 | Track split (20/30/50%) | ✅ track1/2/3_pairs.csv |
 | RVC models — all 91 actors | ✅ All trained (40 epochs each) |
-| MELD 50/50 split + pairs | ✅ 2,387 real + 2,522 pairs (≥2.5 s filter, 4,909 total) |
+| MELD split + mismatch pairs | ✅ 3,334 real + 3,482 fake pairs (≥2.5 s, train+dev+test, 6,816 usable of ~13.7k) |
 | CMU-MOSEI segmentation | 🟡 311 raw videos present, manifest pending |
 
 ### Detection System
@@ -595,8 +570,10 @@ Thesis_G10/
 │   │   │   ├── track2_pairs.csv        ← 2,267 pairs → Track 2
 │   │   │   └── track3_pairs.csv        ← 3,722 pairs → Track 3
 │   │   ├── meld_manifests/
-│   │   │   ├── meld_real.csv           ← 2,387 real clips (label=0, ≥2.5 s)
-│   │   │   └── meld_pairs.csv          ← 2,522 cross-speaker pairs (label=1, ≥2.5 s)
+│   │   │   ├── meld_real.csv               ← 3,334 real clips (label=0, ≥2.5 s, train+dev+test)
+│   │   │   ├── meld_fake_src.csv           ← 3,482 fake-source clips (disjoint from real pool)
+│   │   │   ├── meld_pairs.csv              ← cross-speaker pairs (reference only)
+│   │   │   └── meld_mismatch_pairs.csv     ← 3,482 emotion-mismatch pairs → Track 4
 │   │   ├── rvc_datasets/               ← resampled WAVs per actor (not in git)
 │   │   └── actor_portraits/            ← SadTalker portrait frames (not in git)
 │   │
@@ -633,7 +610,7 @@ Thesis_G10/
 │   │   ├── extract_actor_frames.py ← portrait extraction for SadTalker
 │   │   └── track3_generate.py      ← +SadTalker full face synthesis
 │   ├── track4/
-│   │   └── track4_generate.py      ← Wav2Lip cross-speaker on MELD
+│   │   └── track4_generate.py      ← MuseTalk emotion-mismatch on MELD
 │   │
 │   ├── preprocessing/
 │   │   ├── filters.py              ← Haar coarse filter + keyframe selection
@@ -663,7 +640,9 @@ Thesis_G10/
 │
 ├── scripts/
 │   ├── sample_by_track.py          ← split swap_pairs.csv into T1/T2/T3 manifests
-│   ├── sample_meld.py              ← split MELD 50/50, build Track 4 pairs
+│   ├── sample_meld.py              ← split MELD 50/50, build meld_pairs.csv
+│   ├── sample_meld_mismatch.py     ← build emotion-mismatch pairs → Track 4
+│   ├── smoke_test_musetalk.py      ← 5-clip MuseTalk smoke test
 │   ├── preprocess_all.py           ← run preprocessing on all clips → Z_at/Z_v cache
 │   ├── train.py                    ← training entry point (Phase 1 / Phase 2)
 │   ├── evaluate.py                 ← evaluation entry point (metrics + ablation + OOD)
@@ -675,7 +654,8 @@ Thesis_G10/
 │   ├── README.md
 │   ├── Applio/                     ← RVC v2 tool (not in git, clone separately)
 │   ├── Wav2Lip/                    ← lip sync tool (not in git, clone separately)
-│   └── SadTalker/                  ← talking head tool (not in git, clone separately)
+│   ├── SadTalker/                  ← talking head tool (not in git, clone separately)
+│   └── MuseTalk/                   ← diffusion lip-sync tool (not in git, clone separately)
 │
 ├── checkpoints/                    ← saved model checkpoints (not in git)
 ├── logs/                           ← TensorBoard logs (not in git)
