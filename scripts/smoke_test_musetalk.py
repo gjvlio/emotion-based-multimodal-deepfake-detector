@@ -54,11 +54,26 @@ def run_ffmpeg(cmd: list[str]) -> bool:
     return r.returncode == 0
 
 
-def extract_audio(video_path: str, wav_path: str) -> bool:
-    return run_ffmpeg([
-        "-i", video_path, "-vn",
-        "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", wav_path,
-    ])
+def get_duration(video_path: str) -> float | None:
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return None
+
+
+def extract_audio(video_path: str, wav_path: str,
+                  max_duration: float | None = None) -> bool:
+    cmd = ["-i", video_path, "-vn",
+           "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1"]
+    if max_duration is not None:
+        cmd += ["-t", str(max_duration)]
+    cmd.append(wav_path)
+    return run_ffmpeg(cmd)
 
 
 def poll_vram(stop: threading.Event, out: list):
@@ -202,7 +217,8 @@ def main():
             records.append({"stem": stem, "status": "skip", "error": "file missing"})
             continue
 
-        if not extract_audio(audio_src, donor_wav):
+        face_dur = get_duration(face_mp4)
+        if not extract_audio(audio_src, donor_wav, max_duration=face_dur):
             print("    FAIL  donor audio extraction")
             records.append({"stem": stem, "status": "fail", "error": "audio extraction"})
             continue
