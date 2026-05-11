@@ -503,7 +503,7 @@ python scripts/evaluate.py \
 |-------|---------|-------------|------|--------|
 | Track 1 — StyleTTS2+RVC | CREMA-D 20% | 1,452 | **1,452** | ✅ 100% complete |
 | Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,267** | ✅ 100% complete |
-| Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **3,691** (31 actor 1062 permanent — FLV+face det.) | ✅ 99.2% complete |
+| Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **3,722** | ✅ 100% complete |
 | Track 4 — Wav2Lip MELD | MELD 50% | 2,522 | **5** (test) | 🟡 Ready to run (batch 1 pending) |
 
 ### Data Preparation
