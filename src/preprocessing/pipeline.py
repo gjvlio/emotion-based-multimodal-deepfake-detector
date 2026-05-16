@@ -12,10 +12,8 @@ Re-running on an already-processed clip is a no-op (cached files respected).
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -43,27 +41,33 @@ class PreprocessingPipeline:
 
     def __init__(
         self,
-        cache_dir:       str | Path = "data/preprocessed",
-        wav2vec_model:   str = "facebook/wav2vec2-base",
-        bert_model:      str = "bert-base-uncased",
-        whisper_model:   str = "openai/whisper-base",
-        vit_model:       str = "google/vit-base-patch16-224",
-        face_detector:   str = "retinaface",
-        n_keyframes:     int = 8,
-        frame_size:      int = 224,
-        max_audio_sec:   int = 30,
-        device:          str = "cpu",
+        cache_dir:            str | Path = "data/preprocessed",
+        wav2vec_model:        str   = "facebook/wav2vec2-base",
+        bert_model:           str   = "bert-base-uncased",
+        whisper_model:        str   = "openai/whisper-base",
+        vit_model:            str   = "google/vit-base-patch16-224",
+        face_detector:        str   = "retinaface",
+        n_keyframes:          int   = 8,
+        frame_size:           int   = 224,
+        max_audio_sec:        int   = 30,
+        target_fps:           float = 25.0,
+        motion_threshold:     float = 0.3,
+        confidence_threshold: float = 0.7,
+        device:               str   = "cpu",
     ):
-        self.cache_dir     = Path(cache_dir)
-        self.wav2vec_model = wav2vec_model
-        self.bert_model    = bert_model
-        self.whisper_model = whisper_model
-        self.vit_model     = vit_model
-        self.face_detector = face_detector
-        self.n_keyframes   = n_keyframes
-        self.frame_size    = frame_size
-        self.max_audio_sec = max_audio_sec
-        self.device        = device
+        self.cache_dir            = Path(cache_dir)
+        self.wav2vec_model        = wav2vec_model
+        self.bert_model           = bert_model
+        self.whisper_model        = whisper_model
+        self.vit_model            = vit_model
+        self.face_detector        = face_detector
+        self.n_keyframes          = n_keyframes
+        self.frame_size           = frame_size
+        self.max_audio_sec        = max_audio_sec
+        self.target_fps           = target_fps
+        self.motion_threshold     = motion_threshold
+        self.confidence_threshold = confidence_threshold
+        self.device               = device
 
         (self.cache_dir / "audio").mkdir(parents=True, exist_ok=True)
         (self.cache_dir / "transcripts").mkdir(parents=True, exist_ok=True)
@@ -113,7 +117,6 @@ class PreprocessingPipeline:
             ok = extract_audio_to_wav(video_path, wav)
             if not ok or not wav.exists():
                 log.warning(f"Audio extraction failed: {clip_id}")
-                # Some track1 outputs may already be WAV
                 if video_path.suffix.lower() == ".wav":
                     import shutil
                     shutil.copy2(video_path, wav)
@@ -144,13 +147,20 @@ class PreprocessingPipeline:
         else:
             z_at = torch.load(z_at_path, weights_only=True)
 
-        # Step 4: Z_v — visual keyframe ViT
+        # Step 4: Z_v — visual keyframe ViT (AU-saliency guided selection)
         z_v_path = self._z_v_path(clip_id)
         if not z_v_path.exists() or force:
             try:
                 z_v = get_z_v(
-                    video_path, self.vit_model, self.face_detector,
-                    self.n_keyframes, self.frame_size, self.device,
+                    video_path,
+                    vit_model_name=self.vit_model,
+                    detector=self.face_detector,
+                    n_keyframes=self.n_keyframes,
+                    frame_size=self.frame_size,
+                    target_fps=self.target_fps,
+                    motion_threshold=self.motion_threshold,
+                    confidence_threshold=self.confidence_threshold,
+                    device=self.device,
                 )
                 torch.save(z_v, z_v_path)
             except Exception as e:

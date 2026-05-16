@@ -1,6 +1,6 @@
 from .detection_model import DeepfakeDetector, DetectorOutput
 from .emotion_heads import EmotionHeadA, EmotionHeadB
-from .bilinear import BilinearFusion
+from .bilinear import CompactBilinearFusion, BilinearFusion
 from .classifier import ClassifierMLP
 
 __all__ = [
@@ -8,6 +8,7 @@ __all__ = [
     "DetectorOutput",
     "EmotionHeadA",
     "EmotionHeadB",
+    "CompactBilinearFusion",
     "BilinearFusion",
     "ClassifierMLP",
 ]
