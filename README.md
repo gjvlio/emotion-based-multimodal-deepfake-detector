@@ -51,7 +51,7 @@ Core hypothesis: deepfake generators process audio and visual modalities indepen
 │  Detection model:                                                │
 │    Z_at ──► Emotion Head A ──► emotion_A (6-class)              │
 │    Z_v  ──► Emotion Head B ──► emotion_B (6-class)              │
-│    Z_at, Z_v ──► Bilinear Fusion ──► fused (65536-dim)          │
+│    Z_at, Z_v ──► Compact Bilinear Pooling ──► fused (8192-dim)  │
 │    Δ = |emotion_A − emotion_B|  ──► (6-dim)                     │
 │    [fused ; Δ] ──► MLP ──► P(fake) ∈ [0, 1]                    │
 └─────────────────────────────────────────────────────────────────┘
@@ -325,18 +325,14 @@ python scripts/sample_meld_mismatch.py
 # Output: meld_mismatch_pairs.csv (3,482 pairs, 100% video_emotion ≠ audio_emotion)
 # Real pool (meld_real.csv) is NEVER touched — clean 50/50 partition
 
-# Step 3: smoke test (5 clips, verifies VRAM + output)
-python scripts/smoke_test_musetalk.py --n_clips 5
-# Expected: 5/5 PASS, ~5913 MiB VRAM, ~2.5 min/clip (tested on 2.5–4.9 s clips)
+# Step 3: smoke test (2 clips)
+python scripts/generate_track4_musetalk.py --max_pairs 2
+# Expected: 2 .mp4 files in data/synthetic/track4_fakes/, metadata.csv updated
 
-# Step 4: generate all 3,482 clips in 10 batches (~348 clips each, ~15 hrs/batch)
-python src/track4/track4_generate.py --max_clips 348
-python src/track4/track4_generate.py --max_clips 696 --resume
-python src/track4/track4_generate.py --max_clips 1044 --resume
-# ... continue in 348-clip increments until done (~150 hrs total)
-
-# Lower batch_size if OOM on RTX 4050 6 GB:
-python ... --batch_size 2
+# Step 4: generate all pairs (auto-resumes on restart, skips already-done clips)
+python scripts/generate_track4_musetalk.py
+# Optional: control batch size (default 500)
+python scripts/generate_track4_musetalk.py --batch_size 200
 ```
 
 ---
@@ -359,15 +355,15 @@ The detector takes one video clip and outputs **P(fake) ∈ [0, 1]**.
       emotion_A       │                      │   emotion_B
                       └──────────┬───────────┘
                                  ▼
-                         Bilinear Fusion
-                    (proj_256 ⊗ proj_256 → 65,536)
+                    Compact Bilinear Pooling
+                    (Tensor Sketch → 8,192-dim)
                                  │
                                  ▼         Δ = |softmax(A) − softmax(B)|
                                  │                     │
                                  └──────[concat]───────┘
                                               │
                                         Classifier MLP
-                                    (65,542 → 512 → 128 → 1)
+                                    (8,198 → 512 → 128 → 1)
                                               │
                                           sigmoid
                                               │
@@ -377,7 +373,7 @@ The detector takes one video clip and outputs **P(fake) ∈ [0, 1]**.
 **Key constraints:**
 - Bilinear fusion operates on **raw embeddings only** — emotion probabilities are NOT fed into it
 - Δ and bilinear output are **parallel inputs** to the classifier — not chained
-- 256-dim projection before outer product is mandatory (avoids 768×768 = 590K OOM on RTX 3060)
+- Compact Bilinear Pooling (Tensor Sketch, Fukui et al. 2016) approximates the outer product in 8,192-dim — no linear projection layers, zero learned parameters in the fusion layer
 
 ### Z_at — Audio-Text Embedding (1536-dim)
 
@@ -401,7 +397,8 @@ Video frames
       │
       ├── RetinaFace (MobileNet) — precise face bounding box + alignment
       │
-      ├── Fine filter — select top 8 keyframes by (confidence × sharpness)
+      ├── Fine filter — select top 8 keyframes by (confidence × sharpness × AU_saliency)
+      │   AU saliency = FACS Action Unit intensity sum (py-feat); falls back to conf × sharpness
       │
       └── ViT (google/vit-base-patch16-224) — CLS token per keyframe
           mean-pool across keyframes → (768,)
@@ -524,7 +521,7 @@ python scripts/evaluate.py \
 | Track 1 — StyleTTS2+RVC | CREMA-D 20% | 1,452 | **1,452** | ✅ 100% complete |
 | Track 2 — +Wav2Lip | CREMA-D 30% | 2,267 | **2,267** | ✅ 100% complete |
 | Track 3 — +SadTalker | CREMA-D 50% | 3,722 | **3,722** | ✅ 100% complete |
-| Track 4 — MuseTalk MELD | MELD emotion-mismatch | 3,482 | **0** | 🟡 Smoke test ✅ (5/5 pass, ~5913 MiB VRAM, ~2.5 min/clip) |
+| Track 4 — MuseTalk MELD | MELD emotion-mismatch | 3,482 | **in progress** | 🟡 Smoke test ✅ — full generation running |
 
 ### Data Preparation
 
@@ -609,8 +606,7 @@ Thesis_G10/
 │   ├── track3/
 │   │   ├── extract_actor_frames.py ← portrait extraction for SadTalker
 │   │   └── track3_generate.py      ← +SadTalker full face synthesis
-│   ├── track4/
-│   │   └── track4_generate.py      ← MuseTalk emotion-mismatch on MELD
+│   ├── track4/                     ← (legacy; generation moved to scripts/)
 │   │
 │   ├── preprocessing/
 │   │   ├── filters.py              ← Haar coarse filter + keyframe selection
@@ -620,8 +616,8 @@ Thesis_G10/
 │   │
 │   ├── models/
 │   │   ├── emotion_heads.py        ← EmotionHeadA (audio) + EmotionHeadB (visual)
-│   │   ├── bilinear.py             ← BilinearFusion (256-dim projection + outer product)
-│   │   ├── classifier.py           ← ClassifierMLP (65542→512→128→1)
+│   │   ├── bilinear.py             ← CompactBilinearFusion (Tensor Sketch 8,192-dim CBP, Fukui et al. 2016)
+│   │   ├── classifier.py           ← ClassifierMLP (8198→512→128→1)
 │   │   └── detection_model.py      ← DeepfakeDetector (full model + freeze/unfreeze)
 │   │
 │   ├── training/
@@ -642,7 +638,8 @@ Thesis_G10/
 │   ├── sample_by_track.py          ← split swap_pairs.csv into T1/T2/T3 manifests
 │   ├── sample_meld.py              ← split MELD 50/50, build meld_pairs.csv
 │   ├── sample_meld_mismatch.py     ← build emotion-mismatch pairs → Track 4
-│   ├── smoke_test_musetalk.py      ← 5-clip MuseTalk smoke test
+│   ├── generate_track4_musetalk.py ← Track 4 generation (resume-safe, Ctrl+C-safe)
+│   ├── smoke_test_pipeline.py      ← pipeline smoke test
 │   ├── preprocess_all.py           ← run preprocessing on all clips → Z_at/Z_v cache
 │   ├── train.py                    ← training entry point (Phase 1 / Phase 2)
 │   ├── evaluate.py                 ← evaluation entry point (metrics + ablation + OOD)

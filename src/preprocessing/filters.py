@@ -43,16 +43,24 @@ def select_keyframes(
     frames: List[np.ndarray],
     scores: List[float],
     k: int = 8,
+    score_threshold: float = 0.0,
 ) -> List[np.ndarray]:
     """
     Return top-K frames ranked by (face confidence × sharpness).
-    Falls back to uniform sampling if fewer than k frames pass filtering.
+    Frames with score < score_threshold are discarded before ranking.
+    Falls back to all frames if nothing passes the threshold.
     """
     if not frames:
         return []
-    ranked = sorted(zip(scores, frames), key=lambda x: x[0], reverse=True)
+    pairs = list(zip(scores, frames))
+    if score_threshold > 0.0:
+        filtered = [(s, f) for s, f in pairs if s >= score_threshold]
+        if not filtered:
+            filtered = pairs   # fallback: threshold too strict, use all
+    else:
+        filtered = pairs
+    ranked = sorted(filtered, key=lambda x: x[0], reverse=True)
     selected = [f for _, f in ranked[:k]]
-    # If fewer than k, pad by repeating last frame
     while len(selected) < k:
         selected.append(selected[-1])
     return selected[:k]

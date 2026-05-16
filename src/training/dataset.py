@@ -128,7 +128,7 @@ def _build_real_records(
             "z_v_path":          str(z_v_path),
             "fake_label":        0,
             "audio_emotion":     emo,
-            "visual_emotion":    emo,  # real: same annotation for both modalities
+            "visual_emotion":    emo,
             "source_pipeline":   source_name,
         })
     return records

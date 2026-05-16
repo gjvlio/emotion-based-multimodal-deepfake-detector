@@ -44,7 +44,7 @@ class DeepfakeDetector(nn.Module):
 
     Z_AT_DIM = 1536   # 768 (Wav2Vec) + 768 (BERT)
     Z_V_DIM  = 768    # ViT CLS token
-    PROJ_DIM = 256    # bilinear projection → 256×256 = 65536
+    CBP_DIM  = 8192   # Compact Bilinear Pooling output dimension
 
     def __init__(
         self,
@@ -52,7 +52,7 @@ class DeepfakeDetector(nn.Module):
         bert_model:    str = "bert-base-uncased",
         vit_model:     str = "google/vit-base-patch16-224",
         n_emotions:    int = 6,
-        proj_dim:      int = 256,
+        cbp_dim:       int = 8192,
         dropout_heads: float = 0.3,
         dropout_cls:   float = 0.4,
     ):
@@ -64,8 +64,8 @@ class DeepfakeDetector(nn.Module):
         # Detection components (always present)
         self.emotion_head_a  = EmotionHeadA(self.Z_AT_DIM, n_emotions, dropout_heads)
         self.emotion_head_b  = EmotionHeadB(self.Z_V_DIM,  n_emotions, dropout_heads)
-        self.bilinear_fusion = BilinearFusion(self.Z_AT_DIM, self.Z_V_DIM, proj_dim)
-        fused_dim = proj_dim * proj_dim + n_emotions   # 65536 + 6
+        self.bilinear_fusion = BilinearFusion(self.Z_AT_DIM, self.Z_V_DIM, cbp_dim)
+        fused_dim = cbp_dim + n_emotions   # 8192 + 6
         self.classifier = ClassifierMLP(fused_dim, dropout=dropout_cls)
 
         # Backbones — loaded on demand
@@ -84,7 +84,6 @@ class DeepfakeDetector(nn.Module):
         self._wav2vec = Wav2Vec2Model.from_pretrained(self._wav2vec_name)
         self._bert    = BertModel.from_pretrained(self._bert_name)
         self._vit     = ViTModel.from_pretrained(self._vit_name)
-        # register as submodules so state_dict / .to(device) work correctly
         self.wav2vec2 = self._wav2vec
         self.bert     = self._bert
         self.vit      = self._vit
@@ -107,19 +106,15 @@ class DeepfakeDetector(nn.Module):
 
     def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor) -> DetectorOutput:
         """Shared logic after feature extraction."""
-        # Emotion heads (return logits)
         emo_a = self.emotion_head_a(z_at)  # (B, 6)
         emo_b = self.emotion_head_b(z_v)   # (B, 6)
 
-        # Bilinear fusion on raw embeddings — NOT on emotion outputs
         fused = self.bilinear_fusion(z_at, z_v)  # (B, 65536)
 
-        # Delta: element-wise absolute difference of softmax probabilities
         delta = torch.abs(
             F.softmax(emo_a, dim=-1) - F.softmax(emo_b, dim=-1)
         )  # (B, 6)
 
-        # Classifier: [fused ; delta] → raw logit
         combined = torch.cat([fused, delta], dim=-1)  # (B, 65542)
         logit = self.classifier(combined)              # (B, 1)
 

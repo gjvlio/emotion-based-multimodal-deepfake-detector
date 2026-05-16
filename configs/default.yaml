@@ -1,5 +1,5 @@
 model:
-  proj_dim: 256            # bilinear projection dim (256×256 avoids 768×768 OOM)
+  cbp_dim: 8192            # Compact Bilinear Pooling output dimension (Fukui et al., 2016)
   n_emotions: 6
   dropout_heads: 0.3
   dropout_classifier: 0.4
@@ -30,9 +30,9 @@ training:
     patience: 5
   lambda_a: 0.5
   lambda_b: 0.5
-  train_ratio: 0.70
-  val_ratio: 0.15
-  test_ratio: 0.15
+  train_ratio: 0.80
+  val_ratio: 0.10
+  test_ratio: 0.10
 
 paths:
   data_root: "data"

@@ -17,7 +17,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class ModelConfig:
-    proj_dim: int = 256
+    cbp_dim: int = 8192
     n_emotions: int = 6
     dropout_heads: float = 0.3
     dropout_classifier: float = 0.4
@@ -29,11 +29,14 @@ class ModelConfig:
 
 @dataclass
 class PreprocessingConfig:
-    audio_sample_rate: int = 16000
-    max_audio_seconds: int = 30
-    n_keyframes: int = 8
-    frame_size: int = 224
-    face_detector: str = "retinaface"
+    audio_sample_rate:    int   = 16000
+    max_audio_seconds:    int   = 30
+    n_keyframes:          int   = 8
+    frame_size:           int   = 224
+    face_detector:        str   = "retinaface"
+    target_fps:           float = 25.0
+    motion_threshold:     float = 0.3
+    confidence_threshold: float = 0.7
 
 
 @dataclass
@@ -52,9 +55,9 @@ class TrainingConfig:
     phase2: PhaseConfig = field(default_factory=lambda: PhaseConfig(lr=1e-5, max_epochs=20))
     lambda_a: float = 0.5
     lambda_b: float = 0.5
-    train_ratio: float = 0.70
-    val_ratio: float = 0.15
-    test_ratio: float = 0.15
+    train_ratio: float = 0.80
+    val_ratio: float = 0.10
+    test_ratio: float = 0.10
 
 
 @dataclass
