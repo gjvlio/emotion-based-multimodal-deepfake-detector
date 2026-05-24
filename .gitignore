@@ -39,6 +39,7 @@ tools/Applio/
 tools/Wav2Lip/
 tools/Hallo/
 tools/SadTalker/
+tools/MuseTalk/
 
 # =============================================================================
 # Audio / video files anywhere in the repo
@@ -83,3 +84,7 @@ Thumbs.db
 # =============================================================================
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+/knowledge
+/docs
+/logs
+/scripts
