@@ -17,6 +17,7 @@ Visual emotion assignment per track (per sys_archi_memory.md):
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -52,6 +53,17 @@ def _emo(code: Optional[str]) -> int:
     if code is None or (isinstance(code, float) and np.isnan(code)):
         return UNKNOWN_EMOTION
     return EMOTION_TO_IDX.get(str(code).strip(), UNKNOWN_EMOTION)
+
+
+def _speaker_from_row(row: dict) -> str:
+    """Extract speaker ID from a metadata row, trying common column names."""
+    for col in ("actor_id", "video_speaker", "speaker", "speaker_id"):
+        val = row.get(col)
+        if val is not None and not (isinstance(val, float) and np.isnan(val)):
+            s = str(val).strip()
+            if s:
+                return s
+    return "unknown"
 
 
 # ── Record builder ────────────────────────────────────────────────────────────
@@ -96,6 +108,7 @@ def _build_records(
             "audio_emotion":     aud_emo,
             "visual_emotion":    vis_emo,
             "source_pipeline":   source_pipeline,
+            "speaker_id":        _speaker_from_row(row.to_dict()),
         })
     return records
 
@@ -106,6 +119,7 @@ def _build_real_records(
     preprocessed_dir: Path,
     clip_id_col: str = "clip_id",
     emotion_col: str = "emotion",
+    speaker_col: str = "speaker",
 ) -> List[dict]:
     p = Path(real_csv)
     if not p.exists():
@@ -122,6 +136,13 @@ def _build_real_records(
         if not z_at_path.exists() or not z_v_path.exists():
             continue
         emo = _emo(row.get(emotion_col))
+
+        # Speaker: try named column first, fall back to first segment of clip_id
+        row_dict = row.to_dict()
+        spk = _speaker_from_row({**row_dict, "speaker": row_dict.get(speaker_col, "")})
+        if spk == "unknown":
+            spk = clip_id.split("_")[0]
+
         records.append({
             "clip_id":           clip_id,
             "z_at_path":         str(z_at_path),
@@ -130,6 +151,7 @@ def _build_real_records(
             "audio_emotion":     emo,
             "visual_emotion":    emo,
             "source_pipeline":   source_name,
+            "speaker_id":        spk,
         })
     return records
 
@@ -148,6 +170,7 @@ class DeepfakeDataset(Dataset):
         visual_emotion  scalar int  0-5 or -1
         source_pipeline str
         clip_id         str
+        speaker_id      str
     """
 
     def __init__(
@@ -178,14 +201,14 @@ class DeepfakeDataset(Dataset):
         if meld_real_csv:
             all_records += _build_real_records(
                 meld_real_csv, "meld_real", self.preprocessed_dir,
-                clip_id_col="clip_id", emotion_col="emotion",
+                clip_id_col="clip_id", emotion_col="emotion", speaker_col="speaker",
             )
 
         # Real samples — CMU-MOSEI
         if mosei_real_csv:
             all_records += _build_real_records(
                 mosei_real_csv, "mosei_real", self.preprocessed_dir,
-                clip_id_col="clip_id", emotion_col="emotion",
+                clip_id_col="clip_id", emotion_col="emotion", speaker_col="speaker",
             )
 
         self._records = all_records if indices is None else [all_records[i] for i in indices]
@@ -206,21 +229,25 @@ class DeepfakeDataset(Dataset):
             "visual_emotion":  torch.tensor(r["visual_emotion"], dtype=torch.long),
             "source_pipeline": r["source_pipeline"],
             "clip_id":         r["clip_id"],
+            "speaker_id":      r["speaker_id"],
         }
 
-    # ── Stratified split ──────────────────────────────────────────────────────
+    # ── Speaker-independent stratified split ──────────────────────────────────
 
     @classmethod
     def stratified_split(
         cls,
         preprocessed_dir: str | Path,
-        train_ratio: float = 0.70,
-        val_ratio:   float = 0.15,
+        train_ratio: float = 0.80,
+        val_ratio:   float = 0.10,
         seed:        int   = 42,
         **kwargs,
     ) -> Tuple["DeepfakeDataset", "DeepfakeDataset", "DeepfakeDataset"]:
         """
-        Build the full dataset, then stratify by (fake_label, source_pipeline).
+        Build the full dataset, then split by speaker to prevent speaker leakage.
+        Speakers are assigned to train/val/test as whole groups — no speaker
+        appears in more than one split. Proportions apply to the number of
+        speakers, not clips (clip counts may vary slightly from ratios).
         Returns (train_ds, val_ds, test_ds).
         """
         full = cls(preprocessed_dir=preprocessed_dir, **kwargs)
@@ -228,23 +255,39 @@ class DeepfakeDataset(Dataset):
         if n == 0:
             raise ValueError("Dataset is empty — run preprocess_all.py first.")
 
-        # Stratify key per sample
-        keys = np.array([
-            f"{r['fake_label']}_{r['source_pipeline']}" for r in full._records
-        ])
         rng = np.random.default_rng(seed)
+
+        # Group record indices by speaker_id
+        speaker_to_indices: dict[str, list] = defaultdict(list)
+        for i, r in enumerate(full._records):
+            speaker_to_indices[r["speaker_id"]].append(i)
+
+        speakers = list(speaker_to_indices.keys())
+        rng.shuffle(speakers)
+
+        n_spk   = len(speakers)
+        n_train = int(n_spk * train_ratio)
+        n_val   = int(n_spk * val_ratio)
+
+        train_speakers = set(speakers[:n_train])
+        val_speakers   = set(speakers[n_train:n_train + n_val])
+        # remaining speakers → test
+
         train_idx, val_idx, test_idx = [], [], []
+        for spk, idxs in speaker_to_indices.items():
+            if spk in train_speakers:
+                train_idx.extend(idxs)
+            elif spk in val_speakers:
+                val_idx.extend(idxs)
+            else:
+                test_idx.extend(idxs)
 
-        for key in np.unique(keys):
-            group = np.where(keys == key)[0]
-            rng.shuffle(group)
-            n_train = int(len(group) * train_ratio)
-            n_val   = int(len(group) * val_ratio)
-            train_idx.extend(group[:n_train].tolist())
-            val_idx.extend(group[n_train:n_train + n_val].tolist())
-            test_idx.extend(group[n_train + n_val:].tolist())
-
-        log.info(f"Split — train: {len(train_idx)}, val: {len(val_idx)}, test: {len(test_idx)}")
+        log.info(
+            f"Speaker-independent split — "
+            f"speakers: {n_train}/{n_val}/{n_spk - n_train - n_val} "
+            f"(train/val/test) | "
+            f"clips: {len(train_idx)}/{len(val_idx)}/{len(test_idx)}"
+        )
 
         def _subset(indices):
             ds = cls.__new__(cls)

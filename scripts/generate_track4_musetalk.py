@@ -71,14 +71,13 @@ def resolve_path(rel: str) -> Path:
 
 
 def duration_ok(row: dict, max_ratio: float = 1.5) -> bool:
-    """Skip pairs where durations differ by more than max_ratio (avoids frozen frames)."""
+    """Skip only when audio is much longer than video (causes frozen frames at end)."""
     try:
         vd = float(row["video_duration"])
         ad = float(row["audio_duration"])
         if vd <= 0 or ad <= 0:
             return False
-        ratio = max(vd, ad) / min(vd, ad)
-        return ratio <= max_ratio
+        return ad / vd <= max_ratio
     except (KeyError, ValueError, ZeroDivisionError):
         return True
 

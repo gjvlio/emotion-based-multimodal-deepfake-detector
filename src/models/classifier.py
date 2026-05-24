@@ -1,8 +1,8 @@
 """
 classifier.py — MLP that maps [bilinear_fused ; delta] → P(fake) logit.
 
-Input:  (B, 65542)  = 65536 (bilinear) + 6 (delta = |emotion_A - emotion_B|)
-Output: (B, 1)      raw logit — sigmoid applied externally by BCEWithLogitsLoss.
+Input:  (B, 8198)  = 8192 (CBP) + 6 (delta = |emotion_A - emotion_B|)
+Output: (B, 1)     raw logit — sigmoid applied externally by BCEWithLogitsLoss.
 
 At inference, call torch.sigmoid(logit) to get P(fake) ∈ [0, 1].
 """
@@ -15,7 +15,7 @@ import torch.nn as nn
 class ClassifierMLP(nn.Module):
     def __init__(
         self,
-        input_dim: int = 65542,   # 65536 + 6
+        input_dim: int = 8198,   # 8192 (CBP) + 6 (delta)
         hidden1: int = 512,
         hidden2: int = 128,
         dropout: float = 0.4,
@@ -31,5 +31,5 @@ class ClassifierMLP(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Args: x (B, 65542). Returns logit (B, 1)."""
+        """Args: x (B, 8198). Returns logit (B, 1)."""
         return self.net(x)

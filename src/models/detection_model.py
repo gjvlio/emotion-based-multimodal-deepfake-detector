@@ -109,13 +109,13 @@ class DeepfakeDetector(nn.Module):
         emo_a = self.emotion_head_a(z_at)  # (B, 6)
         emo_b = self.emotion_head_b(z_v)   # (B, 6)
 
-        fused = self.bilinear_fusion(z_at, z_v)  # (B, 65536)
+        fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192)
 
         delta = torch.abs(
             F.softmax(emo_a, dim=-1) - F.softmax(emo_b, dim=-1)
         )  # (B, 6)
 
-        combined = torch.cat([fused, delta], dim=-1)  # (B, 65542)
+        combined = torch.cat([fused, delta], dim=-1)  # (B, 8198)
         logit = self.classifier(combined)              # (B, 1)
 
         return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b)
