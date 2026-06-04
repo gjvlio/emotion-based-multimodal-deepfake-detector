@@ -7,10 +7,11 @@ Two forward paths:
   forward_from_features(z_at, z_v)
       — bypasses backbones, uses precomputed feature vectors (Phase 1 / inference)
 
-Output: DetectorOutput(logit, emotion_a, emotion_b)
+Output: DetectorOutput(logit, emotion_a, emotion_b, sarcasm)
   logit      — (B, 1) raw fake score; apply sigmoid for P(fake)
   emotion_a  — (B, 6) audio emotion logits
   emotion_b  — (B, 6) visual emotion logits
+  sarcasm    — (B, 1) raw sarcasm score; apply sigmoid for P(sarcastic)
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import torch.nn.functional as F
 from .emotion_heads import EmotionHeadA, EmotionHeadB
 from .bilinear import BilinearFusion
 from .classifier import ClassifierMLP
+from .sarcasm_head import SarcasmHead
 
 
 @dataclass
@@ -31,6 +33,7 @@ class DetectorOutput:
     logit: torch.Tensor       # (B, 1) — raw, no sigmoid
     emotion_a: torch.Tensor   # (B, 6) — audio emotion logits
     emotion_b: torch.Tensor   # (B, 6) — visual emotion logits
+    sarcasm: torch.Tensor     # (B, 1) — raw sarcasm logit
 
 
 class DeepfakeDetector(nn.Module):
@@ -64,8 +67,9 @@ class DeepfakeDetector(nn.Module):
         # Detection components (always present)
         self.emotion_head_a  = EmotionHeadA(self.Z_AT_DIM, n_emotions, dropout_heads)
         self.emotion_head_b  = EmotionHeadB(self.Z_V_DIM,  n_emotions, dropout_heads)
+        self.sarcasm_head    = SarcasmHead(self.Z_AT_DIM, dropout=dropout_heads)
         self.bilinear_fusion = BilinearFusion(self.Z_AT_DIM, self.Z_V_DIM, cbp_dim)
-        fused_dim = cbp_dim + n_emotions   # 8192 + 6
+        fused_dim = cbp_dim + n_emotions + 1   # 8192 + 6 (delta) + 1 (P_sarcasm)
         self.classifier = ClassifierMLP(fused_dim, dropout=dropout_cls)
 
         # Backbones — loaded on demand
@@ -80,10 +84,12 @@ class DeepfakeDetector(nn.Module):
         """Instantiate Wav2Vec2, BERT, ViT. Safe to call multiple times."""
         if self._backbones_loaded:
             return
+        device = next(self.classifier.parameters()).device
         from transformers import Wav2Vec2Model, BertModel, ViTModel
-        self._wav2vec = Wav2Vec2Model.from_pretrained(self._wav2vec_name)
-        self._bert    = BertModel.from_pretrained(self._bert_name)
-        self._vit     = ViTModel.from_pretrained(self._vit_name)
+        self._wav2vec = Wav2Vec2Model.from_pretrained(self._wav2vec_name).to(device)
+        self._wav2vec.gradient_checkpointing_disable()
+        self._bert    = BertModel.from_pretrained(self._bert_name).to(device)
+        self._vit     = ViTModel.from_pretrained(self._vit_name).to(device)
         self.wav2vec2 = self._wav2vec
         self.bert     = self._bert
         self.vit      = self._vit
@@ -108,6 +114,7 @@ class DeepfakeDetector(nn.Module):
         """Shared logic after feature extraction."""
         emo_a = self.emotion_head_a(z_at)  # (B, 6)
         emo_b = self.emotion_head_b(z_v)   # (B, 6)
+        sarc  = self.sarcasm_head(z_at)    # (B, 1)
 
         fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192)
 
@@ -115,10 +122,10 @@ class DeepfakeDetector(nn.Module):
             F.softmax(emo_a, dim=-1) - F.softmax(emo_b, dim=-1)
         )  # (B, 6)
 
-        combined = torch.cat([fused, delta], dim=-1)  # (B, 8198)
-        logit = self.classifier(combined)              # (B, 1)
+        combined = torch.cat([fused, delta, sarc], dim=-1)  # (B, 8199)
+        logit = self.classifier(combined)                    # (B, 1)
 
-        return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b)
+        return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b, sarcasm=sarc)
 
     # ── Phase 1 path (cached features) ────────────────────────────────────────
 
@@ -153,13 +160,14 @@ class DeepfakeDetector(nn.Module):
                 "or use forward_from_features() for Phase 1 training."
             )
 
-        # Audio branch — Wav2Vec2
-        w2v_out = self._wav2vec(audio_values).last_hidden_state  # (B, T', 768)
-        w2v_emb = w2v_out.mean(dim=1)                            # (B, 768)
+        # Wav2Vec2 conv layers are not FP16-safe — run in float32 outside autocast
+        with torch.amp.autocast("cuda", enabled=False):
+            w2v_out = self._wav2vec(audio_values.float()).last_hidden_state  # (B, T', 768)
+            w2v_emb = w2v_out.mean(dim=1).to(audio_values.dtype)            # (B, 768)
 
         # Text branch — BERT on ASR transcript tokens
         bert_out = self._bert(input_ids=input_ids, attention_mask=attention_mask)
-        bert_emb = bert_out.last_hidden_state[:, 0, :]           # (B, 768) CLS token
+        bert_emb = bert_out.last_hidden_state[:, 0, :]            # (B, 768) CLS token
 
         z_at = torch.cat([w2v_emb, bert_emb], dim=-1)            # (B, 1536)
 

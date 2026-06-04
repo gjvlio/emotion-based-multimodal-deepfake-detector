@@ -6,7 +6,7 @@ optical_flow_gate(frames, threshold)     → motion-filtered frame subset
 detect_and_align_faces(frames, detector) → list of (aligned_frame, score)
 get_z_v(video_path, ...)                 → (768,) tensor from AU-saliency guided Top-8 ViT
 
-Keyframe scoring: score = RetinaFace_conf × sharpness × AU_saliency
+Keyframe scoring: score = insightface_conf × sharpness × AU_saliency
 AU_saliency = sum of FACS AU intensities (py-feat). Prioritizes frames with active
 facial muscle movement (microexpression-relevant) over merely sharp/confident frames.
 Falls back to conf × sharpness if py-feat unavailable.
@@ -26,9 +26,25 @@ from .filters import coarse_has_face, sharpness_score, select_keyframes, frames_
 
 log = logging.getLogger(__name__)
 
-_vit_model      = None
-_vit_processor  = None
-_feat_detector  = None
+_vit_model       = None
+_vit_processor   = None
+_feat_detector   = None
+_insightface_app = None
+
+# Check once at import — avoid per-frame spam
+try:
+    import feat as _feat_pkg  # noqa: F401
+    _FEAT_AVAILABLE = True
+except ImportError:
+    _FEAT_AVAILABLE = False
+    log.warning("py-feat not installed — AU saliency unavailable. Keyframe scoring: conf × sharpness only. Install: pip install feat")
+
+try:
+    import insightface as _insightface_pkg  # noqa: F401
+    _INSIGHTFACE_AVAILABLE = True
+except ImportError:
+    _INSIGHTFACE_AVAILABLE = False
+    log.warning("insightface not installed — face detection will use Haar cascade fallback. Install: pip install insightface")
 
 
 def _load_vit(model_name: str = "google/vit-base-patch16-224") -> Tuple:
@@ -57,6 +73,8 @@ def _au_saliency(crop: np.ndarray) -> float:
     Higher = more facial muscle activity = more expression-relevant.
     Returns 1.0 on failure so score degrades to conf × sharpness.
     """
+    if not _FEAT_AVAILABLE:
+        return 1.0
     try:
         det = _load_feat_detector()
         rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
@@ -66,8 +84,6 @@ def _au_saliency(crop: np.ndarray) -> float:
             au_cols = [c for c in result.columns if c.startswith("AU")]
             if au_cols:
                 return float(result[au_cols].values[0].sum())
-    except ImportError:
-        log.warning("py-feat not installed — AU saliency unavailable. Install: pip install feat")
     except Exception as e:
         log.debug(f"AU saliency error: {e}")
     return 1.0
@@ -136,39 +152,53 @@ def optical_flow_gate(
 
 # ── Face detection & alignment ─────────────────────────────────────────────────
 
-def _retinaface_detect(
+def _load_insightface_app():
+    global _insightface_app
+    if _insightface_app is None:
+        from insightface.app import FaceAnalysis
+        _insightface_app = FaceAnalysis(
+            name="buffalo_s",
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        _insightface_app.prepare(ctx_id=0, det_size=(640, 640))
+    return _insightface_app
+
+
+def _insightface_detect(
     frames: List[np.ndarray],
     confidence_threshold: float = 0.7,
 ) -> List[Tuple[np.ndarray, float]]:
     """
-    RetinaFace detection with AU-saliency weighted scoring.
+    insightface (ONNX RetinaFace) detection with AU-saliency weighted scoring.
     score = conf × sharpness × AU_saliency
     Only keeps detections with conf >= confidence_threshold.
     """
+    if not _INSIGHTFACE_AVAILABLE:
+        return _haar_fallback(frames)
     try:
-        from retinaface import RetinaFace
-    except ImportError:
-        log.warning("retinaface not installed — falling back to Haar cascade.")
+        app = _load_insightface_app()
+    except Exception as e:
+        log.warning(f"insightface load failed: {e} — falling back to Haar cascade")
         return _haar_fallback(frames)
 
     results = []
     for frame in frames:
         try:
-            detections = RetinaFace.detect_faces(frame)
-            if not detections:
+            faces = app.get(frame)
+            if not faces:
                 continue
-            best = max(detections.values(), key=lambda d: d["score"])
-            if best["score"] < confidence_threshold:
+            best = max(faces, key=lambda f: f.det_score)
+            if best.det_score < confidence_threshold:
                 continue
-            x1, y1, x2, y2 = best["facial_area"]
+            x1, y1, x2, y2 = best.bbox.astype(int)
             crop = frame[max(0, y1):y2, max(0, x1):x2]
             if crop.size == 0:
                 continue
             au_sal = _au_saliency(crop)
-            score  = best["score"] * sharpness_score(crop) * au_sal
+            score  = float(best.det_score) * sharpness_score(crop) * au_sal
             results.append((crop, score))
         except Exception as e:
-            log.debug(f"RetinaFace error: {e}")
+            log.debug(f"insightface error: {e}")
     return results
 
 
@@ -204,7 +234,7 @@ def detect_and_align_faces(
         candidates = frames
 
     if detector == "retinaface":
-        return _retinaface_detect(candidates, confidence_threshold)
+        return _insightface_detect(candidates, confidence_threshold)
     return _haar_fallback(candidates)
 
 
