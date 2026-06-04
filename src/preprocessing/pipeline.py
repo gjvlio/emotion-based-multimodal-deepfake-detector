@@ -126,7 +126,7 @@ class PreprocessingPipeline:
         # Step 2: ASR transcription
         txt_file = self._txt_path(clip_id)
         if not txt_file.exists() or force:
-            transcript = transcribe(wav, self.whisper_model)
+            transcript = transcribe(wav, self.whisper_model, device=self.device)
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()

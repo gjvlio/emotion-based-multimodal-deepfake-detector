@@ -13,6 +13,10 @@ Visual emotion assignment per track (per sys_archi_memory.md):
     Track 3:  visual_emotion = target audio emotion (audio_emotion column — face synthesised)
     Track 4:  visual_emotion = video speaker emotion (video_emotion column)
     Real:     visual_emotion = audio_emotion (same annotation)
+
+Sarcasm label space:
+    0 = not sarcastic   1 = sarcastic   -1 = unknown (masked in BCE loss)
+    Only MUStARD clips carry a sarcasm label; all others default to -1.
 """
 from __future__ import annotations
 
@@ -46,7 +50,8 @@ EMOTION_TO_IDX: Dict[str, int] = {
     "excited": 1,
 }
 
-UNKNOWN_EMOTION = -1   # masked in CrossEntropyLoss
+UNKNOWN_EMOTION   = -1   # masked in CrossEntropyLoss
+UNKNOWN_SARCASM   = -1   # masked in BCEWithLogitsLoss
 
 
 def _emo(code: Optional[str]) -> int:
@@ -107,6 +112,7 @@ def _build_records(
             "fake_label":        fake_label,
             "audio_emotion":     aud_emo,
             "visual_emotion":    vis_emo,
+            "sarcasm_label":     UNKNOWN_SARCASM,
             "source_pipeline":   source_pipeline,
             "speaker_id":        _speaker_from_row(row.to_dict()),
         })
@@ -137,7 +143,6 @@ def _build_real_records(
             continue
         emo = _emo(row.get(emotion_col))
 
-        # Speaker: try named column first, fall back to first segment of clip_id
         row_dict = row.to_dict()
         spk = _speaker_from_row({**row_dict, "speaker": row_dict.get(speaker_col, "")})
         if spk == "unknown":
@@ -150,8 +155,45 @@ def _build_real_records(
             "fake_label":        0,
             "audio_emotion":     emo,
             "visual_emotion":    emo,
+            "sarcasm_label":     UNKNOWN_SARCASM,
             "source_pipeline":   source_name,
             "speaker_id":        spk,
+        })
+    return records
+
+
+def _build_mustard_records(
+    mustard_csv: str | Path,
+    preprocessed_dir: Path,
+) -> List[dict]:
+    """Load MUStARD sarcasm clips. clip_id = stem of the video filename."""
+    p = Path(mustard_csv)
+    if not p.exists():
+        log.warning(f"MUStARD CSV not found, skipping: {p}")
+        return []
+    df = pd.read_csv(p)
+    records = []
+    for _, row in df.iterrows():
+        clip_id = str(row.get("clip_id", ""))
+        if not clip_id:
+            continue
+        z_at_path = preprocessed_dir / "features" / "z_at" / f"{clip_id}.pt"
+        z_v_path  = preprocessed_dir / "features" / "z_v"  / f"{clip_id}.pt"
+        if not z_at_path.exists() or not z_v_path.exists():
+            continue
+
+        sarc = int(row.get("sarcasm_label", UNKNOWN_SARCASM))
+
+        records.append({
+            "clip_id":           clip_id,
+            "z_at_path":         str(z_at_path),
+            "z_v_path":          str(z_v_path),
+            "fake_label":        -1,          # MUStARD not used for fake/real BCE
+            "audio_emotion":     UNKNOWN_EMOTION,
+            "visual_emotion":    UNKNOWN_EMOTION,
+            "sarcasm_label":     sarc,
+            "source_pipeline":   "mustard",
+            "speaker_id":        clip_id.split("_")[0],
         })
     return records
 
@@ -165,9 +207,10 @@ class DeepfakeDataset(Dataset):
     Each item is a dict:
         z_at            (1536,) float32
         z_v             (768,)  float32
-        fake_label      scalar int  0/1
+        fake_label      scalar int  0/1 (-1 for MUStARD-only clips)
         audio_emotion   scalar int  0-5 or -1
         visual_emotion  scalar int  0-5 or -1
+        sarcasm_label   scalar int  0/1 or -1 (only MUStARD annotated)
         source_pipeline str
         clip_id         str
         speaker_id      str
@@ -176,12 +219,13 @@ class DeepfakeDataset(Dataset):
     def __init__(
         self,
         preprocessed_dir: str | Path,
-        track1_meta:  Optional[str | Path] = None,
-        track2_meta:  Optional[str | Path] = None,
-        track3_meta:  Optional[str | Path] = None,
-        track4_meta:  Optional[str | Path] = None,
+        track1_meta:   Optional[str | Path] = None,
+        track2_meta:   Optional[str | Path] = None,
+        track3_meta:   Optional[str | Path] = None,
+        track4_meta:   Optional[str | Path] = None,
         meld_real_csv: Optional[str | Path] = None,
         mosei_real_csv: Optional[str | Path] = None,
+        mustard_csv:   Optional[str | Path] = None,
         indices: Optional[List[int]] = None,   # for train/val/test splits
     ):
         self.preprocessed_dir = Path(preprocessed_dir)
@@ -211,6 +255,10 @@ class DeepfakeDataset(Dataset):
                 clip_id_col="clip_id", emotion_col="emotion", speaker_col="speaker",
             )
 
+        # MUStARD sarcasm clips
+        if mustard_csv:
+            all_records += _build_mustard_records(mustard_csv, self.preprocessed_dir)
+
         self._records = all_records if indices is None else [all_records[i] for i in indices]
         log.info(f"Dataset: {len(self._records)} samples loaded.")
 
@@ -227,6 +275,7 @@ class DeepfakeDataset(Dataset):
             "fake_label":      torch.tensor(r["fake_label"],     dtype=torch.long),
             "audio_emotion":   torch.tensor(r["audio_emotion"],  dtype=torch.long),
             "visual_emotion":  torch.tensor(r["visual_emotion"], dtype=torch.long),
+            "sarcasm_label":   torch.tensor(r["sarcasm_label"],  dtype=torch.long),
             "source_pipeline": r["source_pipeline"],
             "clip_id":         r["clip_id"],
             "speaker_id":      r["speaker_id"],
@@ -271,7 +320,6 @@ class DeepfakeDataset(Dataset):
 
         train_speakers = set(speakers[:n_train])
         val_speakers   = set(speakers[n_train:n_train + n_val])
-        # remaining speakers → test
 
         train_idx, val_idx, test_idx = [], [], []
         for spk, idxs in speaker_to_indices.items():

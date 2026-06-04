@@ -87,6 +87,58 @@ def run_ffmpeg(cmd: list, timeout: int = 120) -> bool:
         sys.exit(1)
 
 
+def crop_to_primary_face(video_path: str, out_path: str, padding: float = 0.4) -> bool:
+    """
+    Detect largest face in first frame via insightface, crop entire video to
+    that region + padding. Returns True if crop succeeded, False if no face found.
+    Used to isolate one speaker in group shots before MuseTalk.
+    """
+    import cv2
+    import numpy as np
+    cap = cv2.VideoCapture(video_path)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return False
+
+    try:
+        from insightface.app import FaceAnalysis
+        app = FaceAnalysis(name="buffalo_s",
+                           providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        app.prepare(ctx_id=0, det_size=(640, 640))
+        faces = app.get(frame)
+    except Exception as e:
+        log.debug(f"insightface error: {e}")
+        return False
+
+    if not faces:
+        return False
+
+    # Pick largest face by bbox area
+    best = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+    x1, y1, x2, y2 = best.bbox.astype(int)
+    h, w = frame.shape[:2]
+
+    # Add padding around face
+    bw, bh = x2 - x1, y2 - y1
+    pad_x, pad_y = int(bw * padding), int(bh * padding)
+    cx1 = max(0, x1 - pad_x)
+    cy1 = max(0, y1 - pad_y)
+    cx2 = min(w, x2 + pad_x)
+    cy2 = min(h, y2 + pad_y)
+
+    # Ensure even dimensions (required by H.264)
+    cw = ((cx2 - cx1) // 2) * 2
+    ch = ((cy2 - cy1) // 2) * 2
+
+    return run_ffmpeg([
+        '-i', video_path,
+        '-vf', f'crop={cw}:{ch}:{cx1}:{cy1}',
+        '-c:v', 'libx264', '-c:a', 'aac',
+        out_path,
+    ], timeout=60)
+
+
 def get_duration(video_path: str) -> float | None:
     try:
         r = subprocess.run(
@@ -184,7 +236,17 @@ def generate_clip(row: pd.Series, video_dir: Path, musetalk_dir: Path,
 
         src = find_output_mp4(result_dir)
         if src is None:
-            return {'status': 'failed', 'error': 'MuseTalk produced no output mp4'}
+            # Retry: crop video to primary face (handles group shots / multiple faces)
+            log.debug(f"MuseTalk no output — retrying with face crop: {stem}")
+            cropped_video = os.path.join(tmp, "face_crop.mp4")
+            if crop_to_primary_face(video_path, cropped_video):
+                write_musetalk_config(config_path, cropped_video, donor_wav, bbox_shift)
+                result_dir2 = os.path.join(tmp, "results2")
+                os.makedirs(result_dir2)
+                ok2, err2 = run_musetalk(musetalk_dir, config_path, result_dir2, batch_size)
+                src = find_output_mp4(result_dir2) if ok2 else None
+            if src is None:
+                return {'status': 'failed', 'error': 'MuseTalk produced no output mp4'}
 
         shutil.copy(src, out_video)
 

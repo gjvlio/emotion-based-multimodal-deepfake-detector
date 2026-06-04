@@ -50,13 +50,16 @@ def _load_bert(model_name: str = "bert-base-uncased") -> Tuple:
     return _bert_model, _bert_tokenizer
 
 
-def _load_whisper(model_name: str = "openai/whisper-base") -> object:
-    global _whisper_model
-    if _whisper_model is None:
+_whisper_device: str = "cpu"
+
+def _load_whisper(model_name: str = "openai/whisper-base", device: str = "cpu") -> object:
+    global _whisper_model, _whisper_device
+    if _whisper_model is None or _whisper_device != device:
         import whisper
-        log.info(f"Loading Whisper: {model_name.split('/')[-1]}")
+        log.info(f"Loading Whisper: {model_name.split('/')[-1]} on {device}")
         size = model_name.split("/")[-1].replace("whisper-", "")
-        _whisper_model = whisper.load_model(size)
+        _whisper_model  = whisper.load_model(size, device=device)
+        _whisper_device = device
     return _whisper_model
 
 
@@ -121,11 +124,13 @@ def get_acoustic_embedding(
 def transcribe(
     wav_path: str | Path,
     model_name: str = "openai/whisper-base",
+    device: str = "cpu",
 ) -> str:
     """Transcribe WAV file using Whisper. Returns text string."""
     try:
-        wm = _load_whisper(model_name)
-        result = wm.transcribe(str(wav_path), fp16=False)
+        wm = _load_whisper(model_name, device=device)
+        use_fp16 = device.startswith("cuda")
+        result = wm.transcribe(str(wav_path), fp16=use_fp16)
         return result.get("text", "").strip()
     except Exception as e:
         log.warning(f"Whisper transcription failed for {wav_path}: {e}")
@@ -176,7 +181,7 @@ def get_z_at(
     If transcript is None, runs Whisper first.
     """
     if transcript is None:
-        transcript = transcribe(wav_path)
+        transcript = transcribe(wav_path, device=device)
 
     acoustic   = get_acoustic_embedding(wav_path, wav2vec_model, device, max_seconds)
     linguistic = get_linguistic_embedding(transcript, bert_model, device)
