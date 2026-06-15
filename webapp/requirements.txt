@@ -1,0 +1,6 @@
+# Web service layer (on top of the project's existing ML deps:
+# torch, transformers, torchaudio, openai-whisper, insightface, etc.)
+fastapi>=0.110
+uvicorn[standard]>=0.23
+python-multipart>=0.0.9
+pydantic>=2.0

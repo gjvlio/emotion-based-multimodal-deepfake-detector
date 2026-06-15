@@ -663,3 +663,79 @@ Thesis_G10/
 ├── requirements.txt
 └── .gitignore
 ```
+
+---
+
+## Web Application (Detector UI)
+
+A FastAPI service that serves the trained detector behind a single-page web UI and
+**auto-equips the latest training checkpoint** — when training writes a newer
+`checkpoints/full/best_phase*.pt`, the running server hot-reloads it (no restart).
+
+```
+webapp/
+├── main.py            ← FastAPI app + routes + SPA shell serving
+├── model_service.py   ← checkpoint hot-reload + warmup + inference
+├── config.py          ← paths / device / settings (env-overridable)
+├── schemas.py         ← typed JSON responses
+└── static/            ← SPA frontend (index.html, css/, js/, img/, docs/)
+```
+
+### Run
+
+```powershell
+# install web deps (project ML deps must already be installed in the venv)
+pip install -r webapp/requirements.txt
+
+# start (from repo root) — CPU
+uvicorn webapp.main:app --port 8000
+
+# GPU (recommended; ~3–8 s per clip vs ~8–20 s on CPU)
+$env:DEEPSENTINEL_DEVICE="cuda"; uvicorn webapp.main:app --port 8000
+```
+
+Open <http://localhost:8000>. Interactive API docs at `/docs`.
+
+### Pages
+
+| Route | Screen |
+|---|---|
+| `/` | Landing |
+| `/upload` | Upload a clip |
+| `/analyzing` | Live pipeline progress |
+| `/results` | Verdict %, sarcasm read, Δ mismatch, per-modality emotion |
+| `/about/thesis` | Abstract + paper download |
+| `/about/researchers` | Team profiles |
+
+### API
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET  | `/health` | service status + equipped checkpoint |
+| GET  | `/model/info` | checkpoint metadata (phase, epoch, val_loss, mtime) |
+| POST | `/model/reload` | force a checkpoint re-check (normally automatic) |
+| POST | `/detect` | upload a video → real/fake verdict + emotion evidence |
+
+```bash
+curl -F "file=@clip.mp4" http://localhost:8000/detect
+```
+
+### Config (env vars)
+
+| Var | Default | Meaning |
+|---|---|---|
+| `DEEPSENTINEL_DEVICE` | `cpu` | `cpu` or `cuda` |
+| `DEEPSENTINEL_CHECKPOINT_DIR` | `checkpoints/full` | where the trainer writes checkpoints |
+| `DEEPSENTINEL_WARMUP` | `1` | preload models at startup (set `0` to disable) |
+| `DEEPSENTINEL_WATCH_INTERVAL_SEC` | `15` | idle checkpoint re-check cadence |
+| `DEEPSENTINEL_UPLOAD_DIR` | `webapp/uploads` | uploaded videos (gitignored; not auto-deleted) |
+
+### Notes
+
+- **Inference fidelity:** a web upload is a raw video, so the service runs the project's
+  real `PreprocessingPipeline` (Wav2Vec2 + BERT + ViT + face/ASR) → `forward_from_features`.
+  This is exact for **Phase 1** checkpoints. Phase 2 (fine-tuned backbones) needs the
+  end-to-end path — see the `_predict_e2e` seam in `model_service.py`.
+- **Release gate:** the current model is Phase 1 (FakeAVCeleb AUC ≈ 0.50 on unseen fakes).
+  The backend auto-equips Phase 2 the moment it is trained, but do not ship publicly until
+  a Phase 2 checkpoint clears AUC ≥ 0.70.

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepSentinel — Multimodal Deepfake Detection</title>
+  <link rel="icon" href="/static/img/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <!-- ── Aurora background ─────────────────────────────────────────────────── -->
+  <div class="aurora" aria-hidden="true">
+    <span class="silk"></span>
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+    <div class="gridlines"></div>
+    <div class="grain"></div>
+  </div>
+  <div class="sparkles" id="sparkles" aria-hidden="true"></div>
+
+  <!-- ── Header ────────────────────────────────────────────────────────────── -->
+  <header class="site-header glass" id="header">
+    <a class="brand" href="/" data-link>
+      <img src="/static/img/logo.svg" alt="" class="brand-logo" />
+      <span class="brand-name">DeepSentinel</span>
+    </a>
+    <nav class="nav" id="nav">
+      <a href="/" data-link class="nav-link"><span>Home</span></a>
+      <div class="nav-dropdown">
+        <button class="nav-link nav-dropdown-toggle" aria-haspopup="true" aria-expanded="false">
+          <span>About</span>
+          <svg class="chev" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <div class="nav-menu glass">
+          <a href="/about/thesis" data-link class="nav-menu-item">
+            <strong>The Thesis</strong><span>Abstract &amp; paper download</span>
+          </a>
+          <a href="/about/researchers" data-link class="nav-menu-item">
+            <strong>Researchers</strong><span>The team behind DeepSentinel</span>
+          </a>
+        </div>
+      </div>
+    </nav>
+    <button class="nav-burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
+  </header>
+
+  <main id="app">
+    <!-- ── Landing ─────────────────────────────────────────────────────────── -->
+    <section class="view" data-view="landing">
+      <div class="hero">
+        <div class="hero-sprites" aria-hidden="true">
+          <span class="shape s-ring"></span>
+          <span class="shape s-ring2"></span>
+          <span class="shape s-ring3"></span>
+          <span class="shape s-square"></span>
+          <span class="shape s-square2"></span>
+          <span class="shape s-plus"></span>
+          <span class="shape s-dot"></span>
+          <span class="shape s-dot2"></span>
+        </div>
+        <p class="eyebrow" data-reveal>// MULTIMODAL DEEPFAKE DETECTION</p>
+        <h1 class="display" data-reveal>The face can lie.<br />The <em>emotion</em> can't.</h1>
+        <p class="lede" data-reveal>
+          DeepSentinel cross-examines a voice against a face. When their emotions disagree, the clip
+          is almost certainly synthetic — and it shows you exactly where the seam is.
+        </p>
+        <div class="cta-row" data-reveal>
+          <a href="/upload" data-link class="btn btn-primary magnetic">
+            <span>Start Detecting</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a href="/about/thesis" data-link class="btn btn-glass magnetic">Read the thesis</a>
+        </div>
+        <div class="hero-features glass" data-reveal>
+          <div class="hf">
+            <span class="hf-ic ic-blue"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h2l2-5 3 12 3-16 3 13 2-4h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div class="hf-txt"><strong>Hears the voice</strong><span>Wav2Vec&nbsp;2.0 + BERT</span></div>
+          </div>
+          <span class="hf-div"></span>
+          <div class="hf">
+            <span class="hf-ic ic-teal"><svg viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/></svg></span>
+            <div class="hf-txt"><strong>Reads the face</strong><span>Vision Transformer</span></div>
+          </div>
+          <span class="hf-div"></span>
+          <div class="hf">
+            <span class="hf-ic ic-copper"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M5 7l-2 4h4l-2-4zM19 7l-2 4h4l-2-4zM4 21h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div class="hf-txt"><strong>Finds the mismatch</strong><span>Discrepancy Δ + fusion</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Upload ──────────────────────────────────────────────────────────── -->
+    <section class="view" data-view="upload">
+      <div class="stage">
+        <p class="eyebrow center" data-reveal>// ANALYZE A CLIP</p>
+        <h2 class="stage-title" data-reveal>Upload a video to inspect</h2>
+        <div id="dropzone" class="dropzone glass-card" tabindex="0" data-reveal>
+          <div class="dz-sheen"></div>
+          <div class="dz-empty">
+            <span class="dz-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 16V5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8 9l4-4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </span>
+            <h3>Drop your video here</h3>
+            <p class="muted">or click to browse files</p>
+            <p class="hint">Max 10 seconds · MP4, MOV, WEBM</p>
+          </div>
+          <div class="dz-file" hidden>
+            <span class="dz-icon">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M10 9.5v5l4-2.5-4-2.5z" fill="currentColor"/></svg>
+            </span>
+            <p class="dz-file-name">file.mp4</p>
+          </div>
+          <input id="file-input" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden />
+        </div>
+        <button id="run-btn" class="btn btn-primary btn-block magnetic" hidden>
+          <span>Run Analysis</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <p id="upload-error" class="error-text" hidden></p>
+      </div>
+    </section>
+
+    <!-- ── Analyzing ───────────────────────────────────────────────────────── -->
+    <section class="view" data-view="analyzing">
+      <div class="stage stage-center">
+        <div class="loader">
+          <svg class="loader-ring" viewBox="0 0 80 80">
+            <defs>
+              <linearGradient id="loaderGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#1EA896" /><stop offset="1" stop-color="#72A1E5" />
+              </linearGradient>
+            </defs>
+            <circle class="track" cx="40" cy="40" r="34" />
+            <circle class="arc" cx="40" cy="40" r="34" />
+          </svg>
+          <span class="loader-core"></span>
+        </div>
+        <h2 class="stage-title">Analyzing video</h2>
+        <p class="muted" id="analyzing-file">—</p>
+        <ul class="steps glass-card" id="steps">
+          <li data-step><span class="step-dot"></span>Extracting audio waveform</li>
+          <li data-step><span class="step-dot"></span>Wav2Vec&nbsp;2.0 + BERT encoder → Z<sub>at</sub></li>
+          <li data-step><span class="step-dot"></span>Selecting video keyframes (Top-8)</li>
+          <li data-step><span class="step-dot"></span>Vision Transformer encoder → Z<sub>v</sub></li>
+          <li data-step><span class="step-dot"></span>Emotion heads A + B</li>
+          <li data-step><span class="step-dot"></span>Discrepancy score Δ</li>
+          <li data-step><span class="step-dot"></span>Bilinear fusion + classifier → P(fake)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ── Results ─────────────────────────────────────────────────────────── -->
+    <section class="view" data-view="results">
+      <div class="stage stage-wide">
+
+        <!-- plain-language how-to -->
+        <div class="howto glass" data-reveal>
+          <span class="ht-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.1h6c0-.8.4-1.5 1-2.1A6 6 0 0 0 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <p><strong>How to read this.</strong> DeepSentinel compares the emotion in the <em>voice</em> with the emotion on the <em>face</em>. When they disagree, the clip is more likely manipulated. Each panel has an <span class="mono">i</span> button explaining what its numbers mean.</p>
+        </div>
+
+        <!-- headline verdict -->
+        <div class="verdict-card glass-card" id="verdict-card" data-reveal>
+          <span class="verdict-tag" id="verdict-tag">—</span>
+          <div class="verdict-pct" id="verdict-pct">0%</div>
+          <div class="verdict-label" id="verdict-label">—</div>
+          <p class="verdict-sub" id="verdict-sub">—</p>
+          <div class="info-row" style="display:flex;justify-content:center;margin-top:14px">
+            <button class="info-btn" data-guide="g-verdict" aria-expanded="false" aria-label="What does this score mean?">
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
+            </button>
+          </div>
+          <div class="guide-note" id="g-verdict"><div><p>This percentage is how likely the clip is a <b>deepfake</b>, based on whether the emotions in the voice and face match. Above 50% leans fake; below 50% leans authentic. It is an estimate, not proof.</p></div></div>
+        </div>
+
+        <!-- sarcasm + plain-language interpretation -->
+        <div class="glass-card sarc-card" data-reveal>
+          <div class="sarc-head">
+            <span class="sarc-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-5A8 8 0 1 1 21 12z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.5 10.5c.6-1 2-1 2.5 0M13 10.5c.5-1 2-1 2.5 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+            <strong>Tone &amp; meaning</strong>
+            <button class="info-btn" data-guide="g-sarc" aria-expanded="false" aria-label="What is the sarcasm reading?" style="margin-left:auto">
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
+            </button>
+          </div>
+          <p class="interpret" id="interpret">—</p>
+          <div class="meter"><span class="meter-marker" id="sarc-marker"></span></div>
+          <div class="meter-scale"><span>Sincere</span><span id="sarc-pct">0% sarcastic</span><span>Sarcastic</span></div>
+          <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b class="ok">tone, not authenticity</b>. A real person can be sarcastic, and a fake can sound sincere — so this is read separately from the deepfake score. It uses the words and the voice to judge whether the speech is meant literally.</p></div></div>
+        </div>
+
+        <!-- dominant emotion mismatch -->
+        <div class="glass-card mismatch-card" data-reveal>
+          <div class="row-between">
+            <strong id="dom-title">Dominant mismatch · —</strong>
+            <span class="mono-tag" id="dom-delta">Δ = 0.00</span>
+          </div>
+          <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
+          <p class="hint" id="dom-desc">—</p>
+        </div>
+
+        <!-- two emotion reads -->
+        <div class="grid-2">
+          <div class="glass-card" data-reveal>
+            <div class="card-head"><strong>Head A — audio</strong><span class="hint">what the voice expresses</span></div>
+            <div class="dist" id="head-a"></div>
+          </div>
+          <div class="glass-card" data-reveal>
+            <div class="card-head"><strong>Head B — visual</strong><span class="hint">what the face shows</span></div>
+            <div class="dist" id="head-b"></div>
+          </div>
+        </div>
+
+        <!-- delta per class -->
+        <div class="glass-card" data-reveal>
+          <div class="card-head">
+            <strong>Δ per emotion class</strong>
+            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
+            </button>
+          </div>
+          <div class="dist dist-delta" id="delta-list"></div>
+          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures, for each emotion, how much the voice and the face disagree — from 0 (perfect agreement) to 1 (total disagreement). Authentic clips stay <b class="ok">low</b> across the board; a big spike on any emotion is a classic sign of a stitched-together fake.</p></div></div>
+        </div>
+
+        <div class="results-foot">
+          <a href="/upload" data-link class="btn btn-glass magnetic">Analyze another</a>
+          <p class="disclaimer">DeepSentinel is a research prototype. Results are probabilistic estimates of emotional consistency, not legal proof of authenticity.</p>
+          <span class="served-by mono" id="served-by"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── About: Thesis ───────────────────────────────────────────────────── -->
+    <section class="view" data-view="about-thesis">
+      <div class="stage doc thesis-doc">
+        <div class="thesis-left">
+          <p class="eyebrow" data-reveal>// THE THESIS</p>
+          <h1 class="doc-title" data-reveal>A multimodal, emotion-aware approach to <em>deepfake detection</em></h1>
+          <div class="doc-meta" data-reveal>
+            <div class="glass-card"><span class="hint">Institution</span><strong>Polytechnic University of the Philippines — Manila</strong></div>
+            <div class="glass-card"><span class="hint">Program</span><strong>Bachelor of Science in Computer Science</strong></div>
+            <div class="glass-card"><span class="hint">Academic Year</span><strong>2025–2026</strong></div>
+          </div>
+          <a href="/static/docs/thesis-paper.pdf" class="btn btn-primary magnetic" download data-reveal>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l3-3m-3 3L5 7M3 13h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Download Paper (PDF)</span>
+          </a>
+        </div>
+        <div class="thesis-right" data-reveal>
+          <p class="lede">
+            Advances in artificial intelligence have made deepfakes—synthetic media that manipulate a person's face, voice, or both—increasingly realistic. Existing detectors perform well in controlled settings but depend on the visual artifacts left by generative models, leaving them prone to obsolescence as those models improve. This study proposes a multimodal detection framework that instead uses cross-modal emotional inconsistency as its primary signal. Genuine human emotion is biologically coordinated across facial expression, vocal tone, and linguistic content—a coherence that current deepfake pipelines cannot reproduce, since each modality is synthesized independently. Three encoders extract features—Vision Transformer (facial expression), Wav2Vec 2.0 (vocal prosody), and BERT (linguistic sentiment)—fused through bilinear pooling to capture pairwise interactions between modalities. Trained on CREMA-D, MELD, and CMU-MOSEI with synthetic deepfake augmentation, and benchmarked on DFDC, WildDeepfake, FakeAVCeleb, and DigiFakeAV, the model is evaluated by accuracy, precision, recall, F1-score, and AUC. The study assesses how reliably audio–visual emotional mismatch separates genuine from deepfake content across generation methods and real-world recording conditions.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── About: Researchers ──────────────────────────────────────────────── -->
+    <section class="view" data-view="about-researchers">
+      <div class="stage stage-wide doc">
+        <p class="eyebrow" data-reveal>// RESEARCHERS</p>
+        <h1 class="doc-title" data-reveal>The team behind <em>DeepSentinel</em></h1>
+        <p class="lede" data-reveal>Four researchers from the Polytechnic University of the Philippines. Select a card to read their profile.</p>
+        <div class="team-row" id="team-grid" data-reveal></div>
+        <p class="team-hint hint" data-reveal>Select a card to expand it.</p>
+        <p class="team-desc" data-reveal>
+          DeepSentinel is an undergraduate thesis project built across data generation, multimodal
+          feature engineering, model training, and evaluation. Each member led a pillar of the system
+          while contributing to the shared goal: a deepfake detector that reasons about emotional
+          coherence between voice and face.
+        </p>
+      </div>
+    </section>
+  </main>
+
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
