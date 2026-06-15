@@ -16,6 +16,7 @@ build/
 venv/
 env/
 .venv/
+.venv-feat/
 .env
 .env.local
 
@@ -87,3 +88,8 @@ Thumbs.db
 /knowledge
 /docs
 /logs
+
+# =============================================================================
+# Web app — runtime artifacts (keep source + static assets tracked)
+# =============================================================================
+webapp/uploads/
