@@ -66,6 +66,7 @@ class Trainer:
         lambda_a:       float      = 0.5,
         lambda_b:       float      = 0.5,
         lambda_sarcasm: float      = 0.3,
+        pos_weight:     float | None = None,
         device:         str        = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         self.model   = model.to(device)
@@ -74,7 +75,7 @@ class Trainer:
         self._amp_device = "cuda" if device == "cuda" else "cpu"
         self.train_loader = train_loader
         self.val_loader   = val_loader
-        self.criterion    = MultiTaskLoss(lambda_a, lambda_b, lambda_sarcasm)
+        self.criterion    = MultiTaskLoss(lambda_a, lambda_b, lambda_sarcasm, pos_weight)
         self.scaler       = GradScaler("cuda", enabled=self.fp16)
         self.ckpt_dir     = Path(checkpoint_dir)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +88,7 @@ class Trainer:
         print(f"  lambda_a     : {lambda_a}  (audio emotion loss weight)")
         print(f"  lambda_b     : {lambda_b}  (visual emotion loss weight)")
         print(f"  lambda_sarc  : {lambda_sarcasm}  (sarcasm loss weight)")
+        print(f"  pos_weight   : {pos_weight}  (BCE fake class weight — None=balanced)")
         print(f"  Train batches: {len(train_loader)}")
         print(f"  Val   batches: {len(val_loader)}")
         print(f"{'='*60}\n")
@@ -309,21 +311,29 @@ class Trainer:
 
     def train_phase2(
         self,
-        lr:           float = 1e-5,
-        weight_decay: float = 1e-4,
-        max_epochs:   int   = 20,
-        patience:     int   = 5,
+        lr:             float = 1e-5,
+        weight_decay:   float = 1e-4,
+        max_epochs:     int   = 20,
+        patience:       int   = 5,
+        freeze_layers:  int   = 0,
+        grad_ckpt:      bool  = True,
     ) -> None:
-        """Full fine-tune — all parameters including backbones."""
+        """Fine-tune backbones. freeze_layers>0 unfreezes only top N layers per backbone."""
+        mode = f"top-{freeze_layers} layers" if freeze_layers > 0 else "ALL layers"
         print(f"\n{'='*60}")
-        print(f"  PHASE 2 — Full fine-tune (all parameters)")
-        print(f"  Backprop: ALL params including Wav2Vec2 + BERT + ViT")
+        print(f"  PHASE 2 — Backbone fine-tune ({mode})")
+        print(f"  grad_checkpointing: {grad_ckpt}  (saves VRAM, ~2x slower)")
         print(f"  LR={lr}  weight_decay={weight_decay}  max_epochs={max_epochs}")
         print(f"{'='*60}\n")
 
-        log.info("=== Phase 2: full fine-tune (all parameters) ===")
+        log.info(f"=== Phase 2: backbone fine-tune ({mode}) ===")
         self.model.load_backbones()
-        self.model.unfreeze_backbones()
+        if freeze_layers > 0:
+            self.model.unfreeze_top_layers(freeze_layers)
+        else:
+            self.model.unfreeze_backbones()
+        if grad_ckpt:
+            self.model.enable_gradient_checkpointing()
         optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = ReduceLROnPlateau(optimizer, patience=2, factor=0.5)
         stopper   = EarlyStopping(patience=patience)
