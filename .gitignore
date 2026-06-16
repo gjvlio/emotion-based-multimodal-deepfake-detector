@@ -87,3 +87,14 @@ Thumbs.db
 /knowledge
 /docs
 /logs
+
+# =============================================================================
+# Preprocessing / data outputs (regenerable, too large for git)
+# =============================================================================
+data/preprocessed/
+data/processed/
+
+# Scratch (throwaway test scripts + install logs)
+.venv-feat*.log
+scripts/_au_*.py
+.venv-feat/
