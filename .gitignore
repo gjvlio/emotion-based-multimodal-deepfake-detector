@@ -16,6 +16,7 @@ build/
 venv/
 env/
 .venv/
+.venv-feat/
 .env
 .env.local
 
@@ -98,3 +99,6 @@ data/processed/
 .venv-feat*.log
 scripts/_au_*.py
 .venv-feat/
+# Web app — runtime artifacts (keep source + static assets tracked)
+# =============================================================================
+webapp/uploads/
