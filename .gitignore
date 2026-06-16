@@ -93,3 +93,13 @@ Thumbs.db
 # Web app — runtime artifacts (keep source + static assets tracked)
 # =============================================================================
 webapp/uploads/
+
+# =============================================================================
+# Preprocessing / data outputs (regenerable, too large for git)
+# =============================================================================
+data/preprocessed/
+data/processed/
+
+# Scratch (throwaway test scripts + install logs)
+.venv-feat*.log
+scripts/_au_*.py

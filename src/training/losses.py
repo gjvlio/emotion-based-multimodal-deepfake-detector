@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 @dataclass
@@ -33,11 +34,13 @@ class MultiTaskLoss(nn.Module):
         lambda_a: float = 0.5,
         lambda_b: float = 0.5,
         lambda_sarcasm: float = 0.3,
+        pos_weight: float | None = None,
     ):
         super().__init__()
         self.lambda_a       = lambda_a
         self.lambda_b       = lambda_b
         self.lambda_sarcasm = lambda_sarcasm
+        self._pw      = pos_weight
         self._bce     = nn.BCEWithLogitsLoss()
         self._ce      = nn.CrossEntropyLoss(ignore_index=-1)
         self._bce_sum = nn.BCEWithLogitsLoss(reduction="sum")
@@ -56,10 +59,13 @@ class MultiTaskLoss(nn.Module):
         # Detection BCE — mask MUStARD clips (fake_label=-1, no ground truth)
         fake_mask = fake_label != -1
         if fake_mask.any():
-            l_bce = self._bce(
-                fake_logit.squeeze(1)[fake_mask],
-                fake_label[fake_mask].float(),
-            )
+            logits = fake_logit.squeeze(1)[fake_mask]
+            labels = fake_label[fake_mask].float()
+            if self._pw is not None:
+                pw = torch.tensor([self._pw], device=logits.device, dtype=logits.dtype)
+                l_bce = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=pw)
+            else:
+                l_bce = self._bce(logits, labels)
         else:
             l_bce = fake_logit.new_zeros(1).squeeze()
 
