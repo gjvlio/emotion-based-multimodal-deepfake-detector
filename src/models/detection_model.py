@@ -108,6 +108,43 @@ class DeepfakeDetector(nn.Module):
             for p in m.parameters():
                 p.requires_grad = True
 
+    def unfreeze_top_layers(self, n_layers: int = 2) -> None:
+        """Unfreeze only the top N transformer blocks of each backbone.
+        Much lower VRAM than full unfreeze — gradients only for last N layers."""
+        if not self._backbones_loaded:
+            raise RuntimeError("Call load_backbones() before unfreeze_top_layers().")
+        # Keep everything frozen first
+        for m in (self._wav2vec, self._bert, self._vit):
+            for p in m.parameters():
+                p.requires_grad = False
+
+        # Wav2Vec2: encoder.layers[-n_layers:]
+        for layer in self._wav2vec.encoder.layers[-n_layers:]:
+            for p in layer.parameters():
+                p.requires_grad = True
+
+        # BERT: encoder.layer[-n_layers:]
+        for layer in self._bert.encoder.layer[-n_layers:]:
+            for p in layer.parameters():
+                p.requires_grad = True
+        for p in self._bert.pooler.parameters():
+            p.requires_grad = True
+
+        # ViT: encoder.layer[-n_layers:]
+        for layer in self._vit.encoder.layer[-n_layers:]:
+            for p in layer.parameters():
+                p.requires_grad = True
+        for p in self._vit.layernorm.parameters():
+            p.requires_grad = True
+
+    def enable_gradient_checkpointing(self) -> None:
+        """Trade compute for memory — recompute activations on backward pass."""
+        if not self._backbones_loaded:
+            raise RuntimeError("Call load_backbones() first.")
+        self._wav2vec.gradient_checkpointing_enable()
+        self._bert.gradient_checkpointing_enable()
+        self._vit.gradient_checkpointing_enable()
+
     # ── Core detection logic ───────────────────────────────────────────────────
 
     def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor) -> DetectorOutput:

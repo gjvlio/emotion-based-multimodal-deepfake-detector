@@ -58,35 +58,74 @@ def _load_vit(model_name: str = "google/vit-base-patch16-224") -> Tuple:
     return _vit_model, _vit_processor
 
 
-def _load_feat_detector():
-    global _feat_detector
-    if _feat_detector is None:
+# ── AU saliency configuration ──────────────────────────────────────────────────
+# Disabled by default → keyframe scoring is conf × sharpness, byte-identical to the
+# original cached features. Enable explicitly (e.g. for the AU ablation re-preprocess)
+# via configure_au(enabled=True, device="cuda"). AU runs only on the top-K frames
+# (by conf × sharpness) to keep the py-feat waterfall cost bounded.
+_AU_ENABLED = False
+_AU_DEVICE  = "cpu"
+_AU_TOP_K   = 12
+_feat_device = "cpu"
+
+
+def configure_au(enabled: bool = False, device: str = "cpu", top_k: int = 12) -> None:
+    global _AU_ENABLED, _AU_DEVICE, _AU_TOP_K
+    _AU_ENABLED, _AU_DEVICE, _AU_TOP_K = enabled, device, top_k
+    log.info(f"AU saliency: enabled={enabled} device={device} top_k={top_k}")
+
+
+def _load_feat_detector(device: str = "cpu"):
+    global _feat_detector, _feat_device
+    if _feat_detector is None or _feat_device != device:
         from feat import Detector
-        log.info("Loading py-feat AU Detector")
-        _feat_detector = Detector(au_model="xgb", device="cpu")
+        log.info(f"Loading py-feat AU Detector on {device}")
+        _feat_detector = Detector(au_model="xgb", device=device)
+        _feat_device = device
     return _feat_detector
 
 
-def _au_saliency(crop: np.ndarray) -> float:
+def _au_saliency(crop: np.ndarray, device: str = "cpu") -> float:
     """
     Sum of FACS AU intensities for one face crop.
     Higher = more facial muscle activity = more expression-relevant.
     Returns 1.0 on failure so score degrades to conf × sharpness.
+
+    py-feat's detect_image() takes FILE PATHS, so the crop is written to a temp
+    PNG and passed by path (passing an array/PIL yields 0 detections → 1.0).
     """
     if not _FEAT_AVAILABLE:
         return 1.0
+    import os
+    import tempfile
     try:
-        det = _load_feat_detector()
-        rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        pil = Image.fromarray(rgb)
-        result = det.detect_image(pil)
+        det = _load_feat_detector(device)
+        with tempfile.TemporaryDirectory() as td:
+            fp = os.path.join(td, "crop.png")
+            cv2.imwrite(fp, crop)
+            result = det.detect_image([fp], face_detection_threshold=0.5)
         if result is not None and not result.empty:
             au_cols = [c for c in result.columns if c.startswith("AU")]
             if au_cols:
-                return float(result[au_cols].values[0].sum())
+                s = float(np.nansum(result[au_cols].values[0]))
+                return s if s > 0 else 1.0
     except Exception as e:
         log.debug(f"AU saliency error: {e}")
     return 1.0
+
+
+def _rescore_with_au(results: List[Tuple[np.ndarray, float]]) -> List[Tuple[np.ndarray, float]]:
+    """If AU is enabled, multiply the top-K crops (by conf × sharpness) by their AU
+    saliency. AU only runs on the K most promising frames so per-clip cost stays
+    bounded (K × ~1.4s GPU) instead of scaling with every detected frame."""
+    if not _AU_ENABLED or not _FEAT_AVAILABLE or not results:
+        return results
+    order = sorted(range(len(results)), key=lambda i: results[i][1], reverse=True)
+    topk = set(order[:_AU_TOP_K])
+    rescored = []
+    for i, (crop, base) in enumerate(results):
+        rescored.append((crop, base * _au_saliency(crop, _AU_DEVICE)) if i in topk else (crop, base))
+    return rescored
 
 
 # ── Frame extraction ───────────────────────────────────────────────────────────
@@ -194,12 +233,11 @@ def _insightface_detect(
             crop = frame[max(0, y1):y2, max(0, x1):x2]
             if crop.size == 0:
                 continue
-            au_sal = _au_saliency(crop)
-            score  = float(best.det_score) * sharpness_score(crop) * au_sal
-            results.append((crop, score))
+            base = float(best.det_score) * sharpness_score(crop)
+            results.append((crop, base))
         except Exception as e:
             log.debug(f"insightface error: {e}")
-    return results
+    return _rescore_with_au(results)
 
 
 def _haar_fallback(frames: List[np.ndarray]) -> List[Tuple[np.ndarray, float]]:
@@ -214,10 +252,9 @@ def _haar_fallback(frames: List[np.ndarray]) -> List[Tuple[np.ndarray, float]]:
             continue
         x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
         crop    = frame[y:y+h, x:x+w]
-        au_sal  = _au_saliency(crop)
-        score   = sharpness_score(crop) * au_sal
-        results.append((crop, score))
-    return results
+        base    = sharpness_score(crop)
+        results.append((crop, base))
+    return _rescore_with_au(results)
 
 
 def detect_and_align_faces(
