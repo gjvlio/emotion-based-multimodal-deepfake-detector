@@ -3,11 +3,17 @@ bilinear.py — Compact Bilinear Pooling of audio-text and visual feature vector
 
 Implements Tensor Sketch (Fukui et al., 2016): approximates the cross-modal
 outer product in output_dim space (default 8192) via Count Sketch + FFT convolution.
-Reduces the full 65,536-dim outer product to 8,192 dims while preserving
-cross-modal multiplicative interactions between Z_at and Z_v.
+Reduces the full 1,179,648-dim outer product (1536 x 768) to 8,192 dims while
+preserving cross-modal multiplicative interactions between Z_at and Z_v.
+
+The output is post-processed with signed square-root + L2 normalization
+(Fukui et al., 2016). This is essential: without it the raw CBP magnitude is
+unbounded (~380 here) and the downstream classifier logits explode into the
+hundreds, saturating the sigmoid to exactly 0/1. Normalization keeps the
+representation bounded so the model can express calibrated uncertainty.
 
 Input:  Z_at (B, 1536), Z_v (B, 768)
-Output: fused (B, output_dim) — default (B, 8192)
+Output: fused (B, output_dim) — default (B, 8192), L2-normalized
 """
 from __future__ import annotations
 
@@ -69,7 +75,16 @@ class CompactBilinearFusion(nn.Module):
 
         fft_at = torch.fft.rfft(psi_at)
         fft_v  = torch.fft.rfft(psi_v)
-        return torch.fft.irfft(fft_at * fft_v, n=self.output_dim)  # (B, output_dim)
+        fused = torch.fft.irfft(fft_at * fft_v, n=self.output_dim)  # (B, output_dim)
+
+        # Signed square-root + L2 normalization (Fukui et al., 2016).
+        # Without this the CBP output magnitude is unbounded (norm ~380 here),
+        # which drives the classifier logits to the hundreds -> sigmoid saturates
+        # to exactly 0/1. These two steps bound the representation so probabilities
+        # stay meaningful and the model can express uncertainty.
+        fused = torch.sign(fused) * torch.sqrt(torch.abs(fused) + 1e-12)
+        fused = torch.nn.functional.normalize(fused, p=2, dim=-1)
+        return fused
 
 
 # Backward-compatible alias
