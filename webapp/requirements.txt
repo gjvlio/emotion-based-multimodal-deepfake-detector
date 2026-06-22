@@ -1,5 +1,9 @@
-# Web service layer (on top of the project's existing ML deps:
-# torch, transformers, torchaudio, openai-whisper, insightface, etc.)
+# ── DEMO / standalone (this alone runs the UI + /demo, no ML stack needed) ──
+# Install with:  pip install -r webapp/requirements.txt
+# Then:          uvicorn webapp.main:app --port 8000   ->   open http://127.0.0.1:8000/demo
+#
+# For LIVE /detect (real model), also install the project ML deps from the root
+# requirements.txt (torch, transformers, torchaudio, openai-whisper, insightface, ...).
 fastapi>=0.110
 uvicorn[standard]>=0.23
 python-multipart>=0.0.9

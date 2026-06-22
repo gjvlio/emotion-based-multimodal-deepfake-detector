@@ -26,7 +26,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
-from .model_service import get_service
 from .schemas import DetectionResult, HealthResponse, ModelInfo
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -37,17 +36,46 @@ log = logging.getLogger("deepsentinel.api")
 
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wav"}
 
+# The model backend (torch/transformers/...) is OPTIONAL. A lightweight checkout
+# with only FastAPI installed still serves the full UI and the /demo flow — only
+# the live /detect endpoint needs the ML stack. So the heavy imports are lazy and
+# tolerated: if they fail, the app runs in demo/static-only mode.
+_svc_cache = None
+_svc_tried = False
+
+
+def _service():
+    global _svc_cache, _svc_tried
+    if not _svc_tried:
+        _svc_tried = True
+        try:
+            from .model_service import get_service
+            _svc_cache = get_service()
+        except Exception as e:  # noqa: BLE001 — torch / ML deps not installed
+            log.warning(f"Model backend unavailable ({type(e).__name__}: {e}). "
+                        f"Running in demo/static mode — /detect disabled; UI + /demo work.")
+            _svc_cache = None
+    return _svc_cache
+
+
+def _demo_info(note: str) -> ModelInfo:
+    return ModelInfo(loaded=False, device="n/a", note=note)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Build the model service, start the auto-equip watcher, and preload models.
-    svc = get_service()
-    svc.start_watcher()
-    if settings.warmup_on_start:
-        svc.start_warmup()  # background — boot stays fast, /detect warms behind it
-    log.info("DeepSentinel service ready (models warming in background).")
+    # Build the model service if the ML stack is present; otherwise demo/static mode.
+    svc = _service()
+    if svc:
+        svc.start_watcher()
+        if settings.warmup_on_start:
+            svc.start_warmup()  # background — boot stays fast, /detect warms behind it
+        log.info("DeepSentinel service ready (models warming in background).")
+    else:
+        log.info("DeepSentinel running in DEMO/STATIC mode (no model backend installed).")
     yield
-    svc.stop_watcher()
+    if svc:
+        svc.stop_watcher()
 
 
 app = FastAPI(
@@ -71,7 +99,9 @@ async def no_cache(request, call_next):
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    svc = get_service()
+    svc = _service()
+    if not svc:
+        return HealthResponse(status="demo_only", model=_demo_info("Demo/static mode — ML backend not installed."))
     svc.maybe_reload()
     meta = svc.info()
     return HealthResponse(status="ok" if meta.loaded else "no_model", model=meta)
@@ -79,14 +109,18 @@ def health():
 
 @app.get("/model/info", response_model=ModelInfo)
 def model_info():
-    svc = get_service()
+    svc = _service()
+    if not svc:
+        return _demo_info("Demo/static mode — ML backend not installed.")
     svc.maybe_reload()
     return svc.info()
 
 
 @app.post("/model/reload", response_model=ModelInfo)
 def model_reload():
-    svc = get_service()
+    svc = _service()
+    if not svc:
+        return _demo_info("Demo/static mode — nothing to reload.")
     reloaded = svc.maybe_reload(force=True)
     meta = svc.info()
     meta.note = (meta.note or "") + (" [reloaded]" if reloaded else " [no change]")
@@ -95,6 +129,14 @@ def model_reload():
 
 @app.post("/detect", response_model=DetectionResult)
 async def detect(file: UploadFile = File(...)):
+    svc = _service()
+    if not svc:
+        raise HTTPException(
+            status_code=503,
+            detail="Live detection needs the ML stack (torch/transformers), not installed on this "
+                   "checkout. Use Demo mode (/demo) for the hardcoded walkthrough.",
+        )
+
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(
@@ -108,7 +150,6 @@ async def detect(file: UploadFile = File(...)):
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    svc = get_service()
     try:
         return svc.predict(dest)
     except ValueError as e:
