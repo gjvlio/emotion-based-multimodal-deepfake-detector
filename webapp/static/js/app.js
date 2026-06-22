@@ -244,7 +244,10 @@
   const runBtn = document.getElementById("run-btn");
   const uploadError = document.getElementById("upload-error");
   const ALLOWED = [".mp4", ".mov", ".webm"];
-  const fmtSize = (b) => (b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : (b / 1e6).toFixed(0) + " MB");
+  const fmtSize = (b) =>
+    b >= 1e9 ? (b / 1e9).toFixed(1) + " GB"
+    : b >= 1e6 ? (b / 1e6).toFixed(0) + " MB"
+    : (b / 1e3).toFixed(0) + " KB";
 
   function pickFile(file) {
     if (!file) return;
@@ -306,7 +309,9 @@
     steps.forEach((s) => s.classList.remove("done", "active"));
     // randomised per-step delays so it reads like real, uneven processing
     // demo: stretch to ~10-15s total (7 steps) so reviewers can watch the progress
-    const delays = steps.map(() => (reduce ? 110 : isDemo ? 1350 + Math.random() * 800 : 340 + Math.random() * 640));
+    // ~10-15s total across 7 steps so reviewers can watch the progress.
+    // NOT gated on reduced-motion — this is step pacing (content), not a vestibular animation.
+    const delays = steps.map(() => 1500 + Math.random() * 800);
     let i = 0, cancelled = false, resolveDone;
     const done = new Promise((r) => (resolveDone = r));
     (function next() {
@@ -342,7 +347,7 @@
       const v = dist[k] ?? 0;
       const row = document.createElement("div");
       row.className = "drow";
-      row.innerHTML = `<span class="dlabel">${EMO_LABEL[k]}</span><div class="bar"><div class="bar-fill ${barClass}"></div></div><span class="dval">${v.toFixed(2)}</span>`;
+      row.innerHTML = `<span class="dlabel">${EMO_LABEL[k]}</span><div class="bar"><div class="bar-fill ${barClass}"></div></div><span class="dval">${Math.round(v * 100)}%</span>`;
       container.appendChild(row);
       const fill = row.querySelector(".bar-fill");
       setTimeout(() => (fill.style.width = (v * 100).toFixed(1) + "%"), 80 + idx * 60);
@@ -356,7 +361,7 @@
       const [tag, cls] = deltaTag(v);
       const row = document.createElement("div");
       row.className = "drow";
-      row.innerHTML = `<span class="dlabel">${EMO_LABEL[k]}</span><span class="dval" style="text-align:left">${v.toFixed(2)}</span><div class="bar"><div class="bar-fill bar-pink"></div></div><span class="dtag ${cls}">${tag}</span>`;
+      row.innerHTML = `<span class="dlabel">${EMO_LABEL[k]}</span><div class="bar"><div class="bar-fill bar-pink"></div></div><span class="dval">${Math.round(v * 100)}%</span><span class="dtag ${cls}">${tag}</span>`;
       container.appendChild(row);
       const fill = row.querySelector(".bar-fill");
       setTimeout(() => (fill.style.width = (v * 100).toFixed(1) + "%"), 80 + idx * 60);
@@ -387,6 +392,7 @@
     else sentence = `This looks ${auth}, and the speech also reads as <b>sarcastic</b>.`;
     document.getElementById("interpret").innerHTML = sentence;
     const marker = document.getElementById("sarc-marker");
+    document.getElementById("sarc-val").textContent = Math.round(pSarc * 100) + "%";
     marker.style.left = "0%";
     setTimeout(() => (marker.style.left = (pSarc * 100).toFixed(0) + "%"), 180);
 
@@ -394,6 +400,7 @@
     let domKey = EMO_ORDER[0], domVal = -1;
     for (const k of EMO_ORDER) if ((delta[k] ?? 0) > domVal) { domVal = delta[k] ?? 0; domKey = k; }
     document.getElementById("dom-title").textContent = `Biggest emotion gap · ${EMO_LABEL[domKey]}`;
+    document.getElementById("gap-val").textContent = Math.round(domVal * 100) + "%";
     const sig = domVal > 0.5 ? "high" : domVal > 0.3 ? "moderate" : "low";
     document.getElementById("dom-desc").textContent =
       `the voice reads ${(r.audio_text_emotion?.label || "").toLowerCase()}, the face reads ${(r.visual_emotion?.label || "").toLowerCase()} · ${sig} fake signal`;

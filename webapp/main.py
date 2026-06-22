@@ -59,6 +59,16 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def no_cache(request, call_next):
+    """Never cache anything — guarantees the browser always gets the latest UI."""
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.get("/health", response_model=HealthResponse)
 def health():
     svc = get_service()
@@ -132,5 +142,6 @@ def spa_shell(full_path: str):
     if p == "/demo" or p.startswith("/demo/"):
         p = p[len("/demo"):] or "/"
     if p in SPA_PATHS or full_path == "":
-        return FileResponse(STATIC_DIR / "index.html")
+        # never cache the shell so updated css/js are always picked up
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
     raise HTTPException(status_code=404, detail="Not found")

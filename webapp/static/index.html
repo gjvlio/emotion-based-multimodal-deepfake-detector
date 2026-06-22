@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/style.css?v=9" />
 </head>
 <body>
   <!-- ── Aurora background ─────────────────────────────────────────────────── -->
@@ -145,11 +145,11 @@
         <p class="muted" id="analyzing-file">—</p>
         <ul class="steps glass-card" id="steps">
           <li data-step><span class="step-dot"></span>Listening to the voice</li>
-          <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">Wav2Vec&nbsp;2.0 · BERT</span></li>
+          <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">(Wav2Vec&nbsp;2.0 · BERT)</span></li>
           <li data-step><span class="step-dot"></span>Picking the clearest face frames</li>
-          <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">Vision Transformer</span></li>
+          <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">(Vision Transformer)</span></li>
           <li data-step><span class="step-dot"></span>Comparing voice emotion vs face emotion</li>
-          <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">Δ</span></li>
+          <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">(Δ)</span></li>
           <li data-step><span class="step-dot"></span>Reaching a verdict</li>
         </ul>
       </div>
@@ -162,7 +162,7 @@
         <!-- plain-language how-to -->
         <div class="howto glass" data-reveal>
           <span class="ht-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.1h6c0-.8.4-1.5 1-2.1A6 6 0 0 0 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <p><strong>How to read this.</strong> DeepSentinel compares the emotion in the <em>voice</em> with the emotion on the <em>face</em>. When they disagree, the clip is more likely manipulated. Each panel has an <span class="mono">i</span> button explaining what its numbers mean.</p>
+          <p><strong>How to read this.</strong> DeepSentinel compares the emotion in the <em>voice</em> with the emotion on the <em>face</em>. When they disagree, the clip is more likely manipulated. Every number below is a percentage.</p>
         </div>
 
         <!-- headline verdict -->
@@ -189,7 +189,7 @@
             </button>
           </div>
           <p class="interpret" id="interpret">—</p>
-          <div class="meter"><span class="meter-marker" id="sarc-marker"></span></div>
+          <div class="meter"><span class="meter-marker" id="sarc-marker"><span class="meter-val" id="sarc-val"></span></span></div>
           <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
           <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b class="ok">tone, not authenticity</b>. A real person can be sarcastic, and a fake can sound sincere — so this is read separately from the deepfake score. It uses the words and the voice to judge whether the speech is meant literally.</p></div></div>
         </div>
@@ -198,9 +198,16 @@
         <div class="glass-card mismatch-card" data-reveal>
           <div class="row-between">
             <strong id="dom-title">Biggest emotion gap · —</strong>
+            <span style="display:flex;align-items:center;gap:8px">
+              <span class="gap-val" id="gap-val">—</span>
+              <button class="info-btn" data-guide="g-gap" aria-expanded="false" aria-label="What is the biggest emotion gap?">
+                <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
+              </button>
+            </span>
           </div>
           <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
           <p class="hint" id="dom-desc">—</p>
+          <div class="guide-note" id="g-gap"><div><p>The single feeling where the voice and the face disagree most. A long bar here means a big gap — a strong sign the clip was stitched together from different sources.</p></div></div>
         </div>
 
         <!-- two emotion reads -->
@@ -275,6 +282,6 @@
   </main>
 
 
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=9"></script>
 </body>
 </html>
