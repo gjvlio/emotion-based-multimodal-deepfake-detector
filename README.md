@@ -681,17 +681,40 @@ webapp/
 └── static/            ← SPA frontend (index.html, css/, js/, img/, docs/)
 ```
 
-### Run
+### Quick start — Demo (no ML stack needed)
+
+The demo runs the **full UI with hardcoded results** — no torch, no datasets, no GPU,
+no trained model. Anyone can run it in under a minute.
+
+> **Use Python 3.11 or 3.12** (not 3.13/3.14 — many wheels don't exist yet).
+> **Do not** run the root `requirements.txt` — that's the full thesis pipeline
+> (torch, RVC, faiss) and will fail to resolve. The demo only needs `webapp/requirements.txt`.
 
 ```powershell
-# install web deps (project ML deps must already be installed in the venv)
-pip install -r webapp/requirements.txt
+# on the webapp branch, from the repo root
+py -3.11 -m venv venv
+venv\Scripts\activate
 
-# start (from repo root) — CPU
-uvicorn webapp.main:app --port 8000
+pip install -r webapp/requirements.txt      # 4 packages, a few seconds
 
-# GPU (recommended; ~3–8 s per clip vs ~8–20 s on CPU)
-$env:DEEPSENTINEL_DEVICE="cuda"; uvicorn webapp.main:app --port 8000
+uvicorn webapp.main:app --port 8000          # note the "8000" — --port needs a number
+```
+
+Open **<http://localhost:8000/demo>**, upload any short clip, click **Run Analysis**.
+It cycles three preset results (deepfake / genuine / genuine-but-sarcastic) with a
+~10–15 s staged progress screen. Live `/detect` is disabled in this mode (returns 503) —
+that's expected; the demo needs no model.
+
+### Full run — live detection
+
+Requires the project ML stack (torch, transformers, torchaudio, openai-whisper,
+insightface) installed in the venv, plus a trained checkpoint in `checkpoints/full/`.
+
+```powershell
+pip install -r webapp/requirements.txt       # web layer (ML stack must also be installed)
+
+uvicorn webapp.main:app --port 8000                                   # CPU (~8–20 s/clip)
+$env:DEEPSENTINEL_DEVICE="cuda"; uvicorn webapp.main:app --port 8000  # GPU (~3–8 s/clip)
 ```
 
 Open <http://localhost:8000>. Interactive API docs at `/docs`.
