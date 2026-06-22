@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css?v=9" />
+  <link rel="stylesheet" href="/static/css/style.css?v=10" />
 </head>
 <body>
   <!-- ── Aurora background ─────────────────────────────────────────────────── -->
@@ -194,22 +194,6 @@
           <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b class="ok">tone, not authenticity</b>. A real person can be sarcastic, and a fake can sound sincere — so this is read separately from the deepfake score. It uses the words and the voice to judge whether the speech is meant literally.</p></div></div>
         </div>
 
-        <!-- dominant emotion mismatch -->
-        <div class="glass-card mismatch-card" data-reveal>
-          <div class="row-between">
-            <strong id="dom-title">Biggest emotion gap · —</strong>
-            <span style="display:flex;align-items:center;gap:8px">
-              <span class="gap-val" id="gap-val">—</span>
-              <button class="info-btn" data-guide="g-gap" aria-expanded="false" aria-label="What is the biggest emotion gap?">
-                <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
-              </button>
-            </span>
-          </div>
-          <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
-          <p class="hint" id="dom-desc">—</p>
-          <div class="guide-note" id="g-gap"><div><p>The single feeling where the voice and the face disagree most. A long bar here means a big gap — a strong sign the clip was stitched together from different sources.</p></div></div>
-        </div>
-
         <!-- two emotion reads -->
         <div class="grid-2">
           <div class="glass-card" data-reveal>
@@ -232,6 +216,22 @@
           </div>
           <div class="dist dist-delta" id="delta-list"></div>
           <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures, for each emotion, how much the voice and the face disagree — from 0 (perfect agreement) to 1 (total disagreement). Authentic clips stay <b class="ok">low</b> across the board; a big spike on any emotion is a classic sign of a stitched-together fake.</p></div></div>
+        </div>
+
+        <!-- biggest emotion gap — the summary / conclusion of the per-feeling gaps -->
+        <div class="glass-card mismatch-card" data-reveal>
+          <div class="row-between">
+            <strong id="dom-title">Biggest emotion gap · —</strong>
+            <span style="display:flex;align-items:center;gap:8px">
+              <span class="gap-val" id="gap-val">—</span>
+              <button class="info-btn" data-guide="g-gap" aria-expanded="false" aria-label="What is the biggest emotion gap?">
+                <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
+              </button>
+            </span>
+          </div>
+          <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
+          <p class="hint" id="dom-desc">—</p>
+          <div class="guide-note" id="g-gap"><div><p>The single feeling where the voice and the face disagree most. A long bar here means a big gap — a strong sign the clip was stitched together from different sources.</p></div></div>
         </div>
 
         <div class="results-foot">
@@ -282,6 +282,6 @@
   </main>
 
 
-  <script src="/static/js/app.js?v=9"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>
