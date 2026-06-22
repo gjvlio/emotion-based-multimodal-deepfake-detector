@@ -311,7 +311,7 @@
     // demo: stretch to ~10-15s total (7 steps) so reviewers can watch the progress
     // ~10-15s total across 7 steps so reviewers can watch the progress.
     // NOT gated on reduced-motion — this is step pacing (content), not a vestibular animation.
-    const delays = steps.map(() => 1500 + Math.random() * 800);
+    const delays = steps.map(() => 900 + Math.random() * 500);
     let i = 0, cancelled = false, resolveDone;
     const done = new Promise((r) => (resolveDone = r));
     (function next() {
