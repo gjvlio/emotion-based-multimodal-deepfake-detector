@@ -119,12 +119,18 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 SPA_PATHS = {
     "/", "/upload", "/analyzing", "/results",
     "/about", "/about/thesis", "/about/researchers",
+    "/demo", "/demo/upload", "/demo/analyzing", "/demo/results",
+    "/demo/about", "/demo/about/thesis", "/demo/about/researchers",
 }
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_shell(full_path: str):
-    """Serve the SPA shell for known view routes; 404 otherwise."""
-    if ("/" + full_path) in SPA_PATHS or full_path == "":
+    """Serve the SPA shell for known view routes; 404 otherwise.
+    The optional /demo prefix maps onto the same views (hardcoded demo mode)."""
+    p = "/" + full_path
+    if p == "/demo" or p.startswith("/demo/"):
+        p = p[len("/demo"):] or "/"
+    if p in SPA_PATHS or full_path == "":
         return FileResponse(STATIC_DIR / "index.html")
     raise HTTPException(status_code=404, detail="Not found")

@@ -16,6 +16,95 @@
 
   let selectedFile = null;
   let lastResult = null;
+  let demoMode = location.pathname.startsWith("/demo");
+  let demoResultIndex = 0;
+
+  const demoServedBy = {
+    loaded: true,
+    checkpoint: "demo-static",
+    checkpoint_path: null,
+    phase: 0,
+    epoch: null,
+    val_loss: null,
+    last_modified: null,
+    device: "demo",
+    warmed: true,
+    note: "Hardcoded demo result",
+  };
+
+  const DEMO_RESULTS = [
+    () => ({
+      verdict: "FAKE",
+      p_fake: 0.74,
+      threshold: 0.5,
+      audio_text_emotion: {
+        label: "happy",
+        confidence: 0.61,
+        distribution: { neutral: 0.11, happy: 0.61, sad: 0.08, angry: 0.10, fear: 0.05, disgust: 0.05 },
+      },
+      visual_emotion: {
+        label: "sad",
+        confidence: 0.64,
+        distribution: { neutral: 0.09, happy: 0.06, sad: 0.64, angry: 0.11, fear: 0.05, disgust: 0.05 },
+      },
+      emotion_mismatch: { neutral: 0.08, happy: 0.61, sad: 0.68, angry: 0.42, fear: 0.21, disgust: 0.17 },
+      p_sarcasm: 0.12,
+      transcript: "I am absolutely thrilled to be here.",
+      served_by: demoServedBy,
+    }),
+    () => ({
+      verdict: "REAL",
+      p_fake: 0.18,
+      threshold: 0.5,
+      audio_text_emotion: {
+        label: "neutral",
+        confidence: 0.74,
+        distribution: { neutral: 0.74, happy: 0.09, sad: 0.06, angry: 0.04, fear: 0.04, disgust: 0.03 },
+      },
+      visual_emotion: {
+        label: "neutral",
+        confidence: 0.77,
+        distribution: { neutral: 0.77, happy: 0.08, sad: 0.05, angry: 0.04, fear: 0.03, disgust: 0.03 },
+      },
+      emotion_mismatch: { neutral: 0.04, happy: 0.03, sad: 0.02, angry: 0.03, fear: 0.02, disgust: 0.02 },
+      p_sarcasm: 0.09,
+      transcript: "The clip is stable and the emotions line up across modalities.",
+      served_by: demoServedBy,
+    }),
+    () => ({
+      verdict: "REAL",
+      p_fake: 0.24,
+      threshold: 0.5,
+      audio_text_emotion: {
+        label: "neutral",
+        confidence: 0.57,
+        distribution: { neutral: 0.57, happy: 0.17, sad: 0.08, angry: 0.06, fear: 0.06, disgust: 0.06 },
+      },
+      visual_emotion: {
+        label: "neutral",
+        confidence: 0.61,
+        distribution: { neutral: 0.61, happy: 0.14, sad: 0.07, angry: 0.06, fear: 0.06, disgust: 0.06 },
+      },
+      emotion_mismatch: { neutral: 0.05, happy: 0.04, sad: 0.03, angry: 0.03, fear: 0.03, disgust: 0.02 },
+      p_sarcasm: 0.81,
+      transcript: "Sure, that was the best surprise ever.",
+      served_by: demoServedBy,
+    }),
+  ];
+
+  function nextDemoResult() {
+    const makeResult = DEMO_RESULTS[demoResultIndex % DEMO_RESULTS.length];
+    demoResultIndex += 1;
+    return makeResult();
+  }
+
+  function routePath(path) {
+    return demoMode ? (path === "/" ? "/demo" : "/demo" + path) : path;
+  }
+
+  function normalizeDemoPath(path) {
+    return path.startsWith("/demo") ? (path.slice(5) || "/") : path;
+  }
 
   // ── Routing ───────────────────────────────────────────────────────────────
   function navigate(path, replace = false) {
@@ -26,9 +115,11 @@
 
   function render() {
     let path = location.pathname;
-    let view = ROUTES[path] || "landing";
-    if (view === "analyzing" && !selectedFile) { view = "upload"; history.replaceState({}, "", "/upload"); }
-    if (view === "results" && !lastResult) { view = "upload"; history.replaceState({}, "", "/upload"); }
+    demoMode = path.startsWith("/demo");
+    const logicalPath = normalizeDemoPath(path);
+    let view = ROUTES[logicalPath] || "landing";
+    if (view === "analyzing" && !selectedFile) { view = "upload"; history.replaceState({}, "", routePath("/upload")); }
+    if (view === "results" && !lastResult) { view = "upload"; history.replaceState({}, "", routePath("/upload")); }
 
     Object.values(views).forEach((v) => v.classList.remove("active"));
     const el = views[view] || views.landing;
@@ -37,8 +128,8 @@
     window.scrollTo({ top: 0 });
 
     document.querySelectorAll(".nav-link").forEach((l) => l.classList.remove("active"));
-    if (path === "/") document.querySelector('.nav-link[href="/"]')?.classList.add("active");
-    if (path.startsWith("/about")) document.querySelector(".nav-dropdown-toggle")?.classList.add("active");
+    if (logicalPath === "/") document.querySelector('.nav-link[href="/"]')?.classList.add("active");
+    if (logicalPath.startsWith("/about")) document.querySelector(".nav-dropdown-toggle")?.classList.add("active");
 
     document.body.classList.toggle("no-scroll", view === "landing" || view === "about-thesis");
     if (view === "upload") resetUpload();
@@ -67,7 +158,7 @@
     const a = e.target.closest("a[data-link]");
     if (!a) return;
     e.preventDefault();
-    navigate(a.getAttribute("href"));
+    navigate(routePath(a.getAttribute("href")));
   });
   window.addEventListener("popstate", render);
 
@@ -189,28 +280,33 @@
   async function runAnalysis() {
     if (!selectedFile) return;
     document.getElementById("analyzing-file").textContent = `${selectedFile.name} · ${fmtSize(selectedFile.size)}`;
-    navigate("/analyzing");
-    const stepsDone = animateSteps();
-    const form = new FormData();
-    form.append("file", selectedFile);
+    navigate(routePath("/analyzing"));
+    const stepsDone = animateSteps(demoMode);
     try {
-      const res = await fetch("/detect", { method: "POST", body: form });
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Server error (${res.status})`); }
-      lastResult = await res.json();
+      if (demoMode) {
+        lastResult = nextDemoResult();
+      } else {
+        const form = new FormData();
+        form.append("file", selectedFile);
+        const res = await fetch("/detect", { method: "POST", body: form });
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Server error (${res.status})`); }
+        lastResult = await res.json();
+      }
       await stepsDone();
       renderResults(lastResult);
-      navigate("/results");
+      navigate(routePath("/results"));
     } catch (err) {
-      navigate("/upload");
+      navigate(routePath("/upload"));
       showError(err.message || "Analysis failed.");
     }
   }
 
-  function animateSteps() {
+  function animateSteps(isDemo = false) {
     const steps = [...document.querySelectorAll("#steps li")];
     steps.forEach((s) => s.classList.remove("done", "active"));
     // randomised per-step delays so it reads like real, uneven processing
-    const delays = steps.map(() => (reduce ? 110 : 340 + Math.random() * 640));
+    // demo: stretch to ~10-15s total (7 steps) so reviewers can watch the progress
+    const delays = steps.map(() => (reduce ? 110 : isDemo ? 1350 + Math.random() * 800 : 340 + Math.random() * 640));
     let i = 0, cancelled = false, resolveDone;
     const done = new Promise((r) => (resolveDone = r));
     (function next() {
@@ -276,8 +372,8 @@
     document.getElementById("verdict-tag").textContent = isFake ? "Fake" : "Real";
     document.getElementById("verdict-label").textContent = isFake ? "Likely deepfake" : "Likely authentic";
     document.getElementById("verdict-sub").textContent = isFake
-      ? "Strong emotional mismatch detected across modalities."
-      : "Emotions are consistent across audio and visual modalities.";
+      ? "The voice and the face show different emotions."
+      : "The voice and the face agree on the emotion.";
     countUp(document.getElementById("verdict-pct"), pct);
 
     // sarcasm + plain-language interpretation
@@ -290,7 +386,6 @@
     else if (isFake && !sarcastic) sentence = `This looks ${auth} — the emotion in the voice and the face do not line up.`;
     else sentence = `This looks ${auth}, and the speech also reads as <b>sarcastic</b>.`;
     document.getElementById("interpret").innerHTML = sentence;
-    document.getElementById("sarc-pct").textContent = `${Math.round(pSarc * 100)}% sarcastic`;
     const marker = document.getElementById("sarc-marker");
     marker.style.left = "0%";
     setTimeout(() => (marker.style.left = (pSarc * 100).toFixed(0) + "%"), 180);
@@ -298,11 +393,10 @@
     const delta = r.emotion_mismatch || {};
     let domKey = EMO_ORDER[0], domVal = -1;
     for (const k of EMO_ORDER) if ((delta[k] ?? 0) > domVal) { domVal = delta[k] ?? 0; domKey = k; }
-    document.getElementById("dom-title").textContent = `Dominant mismatch · ${EMO_LABEL[domKey]}`;
-    document.getElementById("dom-delta").textContent = `Δ = ${domVal.toFixed(2)}`;
+    document.getElementById("dom-title").textContent = `Biggest emotion gap · ${EMO_LABEL[domKey]}`;
     const sig = domVal > 0.5 ? "high" : domVal > 0.3 ? "moderate" : "low";
     document.getElementById("dom-desc").textContent =
-      `audio reads ${(r.audio_text_emotion?.label || "").toLowerCase()}, face reads ${(r.visual_emotion?.label || "").toLowerCase()} · ${sig} fake signal`;
+      `the voice reads ${(r.audio_text_emotion?.label || "").toLowerCase()}, the face reads ${(r.visual_emotion?.label || "").toLowerCase()} · ${sig} fake signal`;
     const domBar = document.getElementById("dom-bar");
     domBar.style.width = "0%";
     setTimeout(() => (domBar.style.width = (domVal * 100).toFixed(1) + "%"), 140);

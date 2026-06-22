@@ -242,8 +242,11 @@ class ModelService:
 
         out = self.model.forward_from_features(z_at, z_v)
 
-        p_fake = torch.sigmoid(out.logit.squeeze()).item()
-        p_sarc = torch.sigmoid(out.sarcasm.squeeze()).item()
+        # Temperature scaling — softens overconfident (saturated) sigmoids.
+        # Does not change the verdict: sign of the logit is preserved.
+        T = max(float(settings.temperature), 1e-3)
+        p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
+        p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
         pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
         pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         delta = torch.abs(pa - pb)

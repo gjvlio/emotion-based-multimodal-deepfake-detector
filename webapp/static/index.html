@@ -73,6 +73,7 @@
             <span>Start Detecting</span>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </a>
+          <a href="/demo/upload" data-link class="btn btn-glass magnetic">Demo mode</a>
           <a href="/about/thesis" data-link class="btn btn-glass magnetic">Read the thesis</a>
         </div>
         <div class="hero-features glass" data-reveal>
@@ -143,13 +144,13 @@
         <h2 class="stage-title">Analyzing video</h2>
         <p class="muted" id="analyzing-file">—</p>
         <ul class="steps glass-card" id="steps">
-          <li data-step><span class="step-dot"></span>Extracting audio waveform</li>
-          <li data-step><span class="step-dot"></span>Wav2Vec&nbsp;2.0 + BERT encoder → Z<sub>at</sub></li>
-          <li data-step><span class="step-dot"></span>Selecting video keyframes (Top-8)</li>
-          <li data-step><span class="step-dot"></span>Vision Transformer encoder → Z<sub>v</sub></li>
-          <li data-step><span class="step-dot"></span>Emotion heads A + B</li>
-          <li data-step><span class="step-dot"></span>Discrepancy score Δ</li>
-          <li data-step><span class="step-dot"></span>Bilinear fusion + classifier → P(fake)</li>
+          <li data-step><span class="step-dot"></span>Listening to the voice</li>
+          <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">Wav2Vec&nbsp;2.0 · BERT</span></li>
+          <li data-step><span class="step-dot"></span>Picking the clearest face frames</li>
+          <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">Vision Transformer</span></li>
+          <li data-step><span class="step-dot"></span>Comparing voice emotion vs face emotion</li>
+          <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">Δ</span></li>
+          <li data-step><span class="step-dot"></span>Reaching a verdict</li>
         </ul>
       </div>
     </section>
@@ -189,15 +190,14 @@
           </div>
           <p class="interpret" id="interpret">—</p>
           <div class="meter"><span class="meter-marker" id="sarc-marker"></span></div>
-          <div class="meter-scale"><span>Sincere</span><span id="sarc-pct">0% sarcastic</span><span>Sarcastic</span></div>
+          <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
           <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b class="ok">tone, not authenticity</b>. A real person can be sarcastic, and a fake can sound sincere — so this is read separately from the deepfake score. It uses the words and the voice to judge whether the speech is meant literally.</p></div></div>
         </div>
 
         <!-- dominant emotion mismatch -->
         <div class="glass-card mismatch-card" data-reveal>
           <div class="row-between">
-            <strong id="dom-title">Dominant mismatch · —</strong>
-            <span class="mono-tag" id="dom-delta">Δ = 0.00</span>
+            <strong id="dom-title">Biggest emotion gap · —</strong>
           </div>
           <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
           <p class="hint" id="dom-desc">—</p>
@@ -206,11 +206,11 @@
         <!-- two emotion reads -->
         <div class="grid-2">
           <div class="glass-card" data-reveal>
-            <div class="card-head"><strong>Head A — audio</strong><span class="hint">what the voice expresses</span></div>
+            <div class="card-head"><strong>Voice emotion</strong><span class="hint">what the voice expresses</span></div>
             <div class="dist" id="head-a"></div>
           </div>
           <div class="glass-card" data-reveal>
-            <div class="card-head"><strong>Head B — visual</strong><span class="hint">what the face shows</span></div>
+            <div class="card-head"><strong>Face emotion</strong><span class="hint">what the face shows</span></div>
             <div class="dist" id="head-b"></div>
           </div>
         </div>
@@ -218,7 +218,7 @@
         <!-- delta per class -->
         <div class="glass-card" data-reveal>
           <div class="card-head">
-            <strong>Δ per emotion class</strong>
+            <strong>Emotion gap per feeling <span class="step-tech">(Δ)</span></strong>
             <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
@@ -246,14 +246,11 @@
             <div class="glass-card"><span class="hint">Program</span><strong>Bachelor of Science in Computer Science</strong></div>
             <div class="glass-card"><span class="hint">Academic Year</span><strong>2025–2026</strong></div>
           </div>
-          <a href="/static/docs/thesis-paper.pdf" class="btn btn-primary magnetic" download data-reveal>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l3-3m-3 3L5 7M3 13h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span>Download Paper (PDF)</span>
-          </a>
+          <p class="hint" data-reveal>The full paper is confidential and available on request.</p>
         </div>
         <div class="thesis-right" data-reveal>
           <p class="lede">
-            Advances in artificial intelligence have made deepfakes—synthetic media that manipulate a person's face, voice, or both—increasingly realistic. Existing detectors perform well in controlled settings but depend on the visual artifacts left by generative models, leaving them prone to obsolescence as those models improve. This study proposes a multimodal detection framework that instead uses cross-modal emotional inconsistency as its primary signal. Genuine human emotion is biologically coordinated across facial expression, vocal tone, and linguistic content—a coherence that current deepfake pipelines cannot reproduce, since each modality is synthesized independently. Three encoders extract features—Vision Transformer (facial expression), Wav2Vec 2.0 (vocal prosody), and BERT (linguistic sentiment)—fused through bilinear pooling to capture pairwise interactions between modalities. Trained on CREMA-D, MELD, and CMU-MOSEI with synthetic deepfake augmentation, and benchmarked on DFDC, WildDeepfake, FakeAVCeleb, and DigiFakeAV, the model is evaluated by accuracy, precision, recall, F1-score, and AUC. The study assesses how reliably audio–visual emotional mismatch separates genuine from deepfake content across generation methods and real-world recording conditions.
+            Advances in artificial intelligence have made deepfakes, synthetic media that manipulate a person's face, voice, or both that are increasingly realistic. Existing detectors perform well in controlled settings but depend on the visual artifacts left by generative models, leaving them prone to obsolescence as those models improve. This study proposes a multimodal detection framework that instead uses cross-modal emotional inconsistency as its primary signal. Genuine human emotion is biologically coordinated across facial expression, vocal tone, and linguistic content: a coherence that current deepfake pipelines cannot reproduce, since each modality is synthesized independently. Three encoders extract features: Vision Transformer (facial expression), Wav2Vec 2.0 (vocal prosody), and BERT (linguistic sentiment), that are fused through bilinear pooling to capture pairwise interactions between modalities. Trained on CREMA-D, MELD, and CMU-MOSEI with synthetic deepfake augmentation, and benchmarked on DFDC, WildDeepfake, FakeAVCeleb, and DigiFakeAV, the model is evaluated by accuracy, precision, recall, F1-score, and AUC. The study assesses how reliably audio–visual emotional mismatch separates genuine from deepfake content across generation methods and real-world recording conditions.
           </p>
         </div>
       </div>

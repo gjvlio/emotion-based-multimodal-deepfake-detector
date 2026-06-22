@@ -119,6 +119,7 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .eyebrow.center { text-align: center; }
 .mono { font-family: var(--f-mono); } .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 13px; }
+.step-tech { font-family: var(--f-mono); font-size: 11px; color: var(--muted); margin-left: 7px; font-weight: 400; }
 
 /* ── Hero ─────────────────────────────────────────────────────────────────── */
 .hero { text-align: center; padding: 48px 0 0; position: relative; }
@@ -208,6 +209,8 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .howto .ht-icon svg { width: 18px; height: 18px; }
 .howto p { margin: 0; font-size: 13.5px; color: var(--gun-soft); }
 .howto strong { font-family: var(--f-display); color: var(--gun); }
+/* keep "voice"/"face" legible — plain bold (not thin serif italic), still gradient-tinted */
+.howto em { font-family: var(--f-body); font-style: normal; font-weight: 600; font-size: 1em; }
 
 /* info button + guide note */
 .info-btn { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.5);
@@ -244,7 +247,7 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .meter { position: relative; height: 12px; border-radius: 999px; background: linear-gradient(90deg, rgba(30,168,150,.18), rgba(114,161,229,.32)); overflow: visible; margin: 8px 0 8px; }
 .meter-marker { position: absolute; top: 50%; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid var(--wisteria);
   transform: translate(-50%,-50%); left: 0; box-shadow: var(--shadow); transition: left 1s var(--e-out); }
-.meter-scale { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+.meter-scale { display: flex; justify-content: space-between; font-family: var(--f-display); font-size: 12.5px; font-weight: 500; color: var(--gun-soft); margin-top: 8px; }
 
 .dist { display: flex; flex-direction: column; gap: 12px; }
 .drow { display: grid; grid-template-columns: 66px 1fr 42px; align-items: center; gap: 12px; font-size: 13.5px; }

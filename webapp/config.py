@@ -58,6 +58,12 @@ class Settings:
 
     decision_threshold: float = 0.5  # P(fake) > threshold ⇒ FAKE
 
+    # Post-hoc temperature scaling (Guo et al., 2017): logit /= T before sigmoid.
+    # T=1.0 is the raw model output. T>1 softens overconfident probabilities WITHOUT
+    # changing the verdict (sign of the logit is unchanged). The methodologically
+    # correct T is fit on a validation set (minimise NLL/ECE) — see notes in README.
+    temperature: float = float(_env("TEMPERATURE", "1.0"))
+
 
 settings = Settings()
 
