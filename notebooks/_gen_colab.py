@@ -64,8 +64,8 @@ def shard_notebook(shard: int, person: int) -> dict:
             f"SHARD_INDEX = {shard}\n"
             f"NUM_SHARDS  = {NUM_SHARDS}\n\n"
             f'DRIVE_ROOT  = "{DRIVE_ROOT}"          # SHARED folder — SAME for all 4 people\n'
-            f'DRIVE_RAR_PATH   = DRIVE_ROOT + "/segments.rar"   # uploaded once by the leader\n'
-            f'DRIVE_OUTPUT_DIR = DRIVE_ROOT                     # shard zips go here\n\n'
+            f'DRIVE_SEG_ARCHIVE = DRIVE_ROOT + "/segments.zip"  # segments.zip (or .rar) — leader uploads once\n'
+            f'DRIVE_OUTPUT_DIR  = DRIVE_ROOT                    # shard zips go here\n\n'
             f'REPO_URL    = "{REPO_URL}"\n'
             f'REPO_BRANCH = "{BRANCH}"\n'
         ),
@@ -75,7 +75,7 @@ def shard_notebook(shard: int, person: int) -> dict:
             "import os\n"
             "drive.mount('/content/drive')\n"
             "os.makedirs(DRIVE_OUTPUT_DIR, exist_ok=True)\n"
-            "assert os.path.exists(DRIVE_RAR_PATH), f'segments.rar not found at {DRIVE_RAR_PATH} — check DRIVE_ROOT'\n"
+            "assert os.path.exists(DRIVE_SEG_ARCHIVE), f'segments archive not found at {DRIVE_SEG_ARCHIVE} — check DRIVE_ROOT'\n"
             "print('Drive OK. Output →', DRIVE_OUTPUT_DIR)"
         ),
         md("## Cell 3 — Install tools + deps"),
@@ -84,16 +84,20 @@ def shard_notebook(shard: int, person: int) -> dict:
             "!pip install -q openai-whisper transformers timm insightface onnxruntime-gpu librosa soundfile torchaudio\n"
             "print('Deps installed.')"
         ),
-        md("## Cell 4 — Extract the segments RAR"),
+        md("## Cell 4 — Extract the segments archive (.zip or .rar)"),
         code(
-            "import subprocess\n"
+            "import subprocess, zipfile\n"
             "from pathlib import Path\n"
             "SEGMENTS_DIR = '/content/mosei_segments'\n"
             "os.makedirs(SEGMENTS_DIR, exist_ok=True)\n"
-            "print(f'Extracting {DRIVE_RAR_PATH} ({os.path.getsize(DRIVE_RAR_PATH)/1e9:.2f} GB)...')\n"
-            "r = subprocess.run(['unrar','x','-y',DRIVE_RAR_PATH,SEGMENTS_DIR+'/'], capture_output=True, text=True)\n"
-            "if r.returncode != 0:\n"
-            "    print(r.stderr[-1500:]); raise RuntimeError('unrar failed')\n"
+            "arc = DRIVE_SEG_ARCHIVE\n"
+            "print(f'Extracting {arc} ({os.path.getsize(arc)/1e9:.2f} GB)...')\n"
+            "if arc.lower().endswith('.zip'):\n"
+            "    with zipfile.ZipFile(arc) as z: z.extractall(SEGMENTS_DIR)\n"
+            "else:\n"
+            "    r = subprocess.run(['unrar','x','-y',arc,SEGMENTS_DIR+'/'], capture_output=True, text=True)\n"
+            "    if r.returncode != 0:\n"
+            "        print(r.stderr[-1500:]); raise RuntimeError('unrar failed')\n"
             "mp4s = list(Path(SEGMENTS_DIR).rglob('*.mp4'))\n"
             "assert mp4s, 'no MP4s after extract'\n"
             "ACTUAL_SEGMENTS_DIR = str(mp4s[0].parent)\n"
