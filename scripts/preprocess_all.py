@@ -145,7 +145,14 @@ def main():
     parser.add_argument("--smoke",     action="store_true", help="Use smoke manifests (fast ~1k clip test)")
     parser.add_argument("--max_clips", type=int, default=None,
                         help="Stop after processing this many NEW clips (resume-safe sharding)")
+    parser.add_argument("--num_shards", type=int, default=1,
+                        help="Split the whole clip list into N shards for parallel machines (e.g. 4 Colabs)")
+    parser.add_argument("--shard", type=int, default=0,
+                        help="This machine's shard index (0..num_shards-1)")
     args = parser.parse_args()
+
+    if args.num_shards < 1 or not (0 <= args.shard < args.num_shards):
+        parser.error(f"--shard must be in [0, {args.num_shards - 1}] with --num_shards {args.num_shards}")
 
     cfg = Config.from_yaml(args.config)
 
@@ -172,6 +179,15 @@ def main():
     )
 
     clips = _collect_clips(cfg, smoke=args.smoke)
+
+    # Stable shard partition — applied to the FULL list (before cache check) so each
+    # machine's assignment never shifts on resume. Strided = balanced across shards.
+    if args.num_shards > 1:
+        total = len(clips)
+        clips = clips[args.shard::args.num_shards]
+        _section(f"SHARD {args.shard} / {args.num_shards}")
+        print(f"  This machine handles {len(clips)} of {total} clips "
+              f"(every {args.num_shards}th, starting at index {args.shard}).")
 
     _section("Cache check")
     already_done = sum(1 for cid, _, _ in clips if pipeline.is_cached(cid))
