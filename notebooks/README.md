@@ -70,6 +70,24 @@ Benchmark the Phase-2 checkpoint on FakeAVCeleb (release gate: **AUC ≥ 0.70**)
 
 ---
 
+## AU saliency — these notebooks are AU-OFF (deliberate)
+
+The Colab notebooks score keyframes by **conf × sharpness** (AU-OFF), matching the existing
+14k cached features. Do **not** turn AU on for MOSEI only — mixing AU-on and AU-off features
+in one training set is invalid.
+
+Real AU saliency (`pip install py-feat`) needs an **old numpy/torch stack** that conflicts with
+Colab's pre-installed environment (the reason the local `.venv-feat` exists). So the AU-on run is
+a **separate, local** job, not a Colab one:
+
+```powershell
+# in the isolated .venv-feat (already set up), re-preprocess EVERYTHING AU-on into a
+# separate feature store so the AU-off baseline is preserved for the ablation
+.\.venv-feat\Scripts\python.exe scripts/preprocess_all.py --device cuda --use_au --au_top_k 12
+```
+This is the Option-C ablation path (AU-on vs AU-off). It is slow (~seconds/crop) and must cover
+**all** clips, not just MOSEI. Keep the AU-off features for the baseline comparison.
+
 ## Notes
 - **Why sharded, not `--max_clips`:** the shard is a *stable, disjoint* partition (`clips[i::4]`),
   so restarts never re-assign work — no gaps, no double-processing.

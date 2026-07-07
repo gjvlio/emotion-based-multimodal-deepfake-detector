@@ -149,10 +149,24 @@ def main():
                         help="Split the whole clip list into N shards for parallel machines (e.g. 4 Colabs)")
     parser.add_argument("--shard", type=int, default=0,
                         help="This machine's shard index (0..num_shards-1)")
+    parser.add_argument("--use_au", action="store_true",
+                        help="Enable REAL AU-saliency keyframe scoring (needs py-feat). "
+                             "OFF by default = conf x sharpness. WARNING: only use if ALL features "
+                             "(existing + new) are AU-on — do not mix regimes. Much slower (~s/crop).")
+    parser.add_argument("--au_top_k", type=int, default=12,
+                        help="AU runs only on the top-K frames by conf x sharpness (bounds cost)")
     args = parser.parse_args()
 
     if args.num_shards < 1 or not (0 <= args.shard < args.num_shards):
         parser.error(f"--shard must be in [0, {args.num_shards - 1}] with --num_shards {args.num_shards}")
+
+    if args.use_au:
+        from src.preprocessing import visual
+        visual.configure_au(enabled=True, device=args.device, top_k=args.au_top_k)
+        print(f"  AU saliency : ENABLED (device={args.device}, top_k={args.au_top_k}) "
+              f"-- requires py-feat; slower")
+    else:
+        print(f"  AU saliency : OFF (conf x sharpness) -- default, matches existing features")
 
     cfg = Config.from_yaml(args.config)
 
