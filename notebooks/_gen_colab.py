@@ -67,7 +67,17 @@ def shard_notebook(shard: int, person: int) -> dict:
             f'DRIVE_SEG_ARCHIVE = DRIVE_ROOT + "/segments.zip"  # segments.zip (or .rar) — leader uploads once\n'
             f'DRIVE_OUTPUT_DIR  = DRIVE_ROOT                    # shard zips go here\n\n'
             f'REPO_URL    = "{REPO_URL}"\n'
-            f'REPO_BRANCH = "{BRANCH}"\n'
+            f'REPO_BRANCH = "{BRANCH}"\n\n'
+            f'# ── AU saliency (keyframe scoring) — PREPROCESSING LEAD decides ──────────\n'
+            f'#  USE_AU=False -> conf x sharpness (DEFAULT; matches the existing AU-off cache).\n'
+            f'#  USE_AU=True  -> real Action Unit saliency via py-feat.\n'
+            f'#    Only flip this for a FULL AU-on re-run of ALL clips into a SEPARATE store.\n'
+            f'#    NEVER mix AU-on and AU-off features in one training set (invalid).\n'
+            f'#  WARNING: py-feat needs an OLD numpy/torch stack that conflicts with Colab —\n'
+            f'#    AU-on is designed as a LOCAL .venv-feat job and may fail here. Cell 3 will\n'
+            f'#    HARD-STOP if USE_AU=True but py-feat cannot load (prevents silent AU-off).\n'
+            f'USE_AU   = False\n'
+            f'AU_TOP_K = 12   # AU runs only on the top-K frames by conf x sharpness (bounds cost)\n'
         ),
         md("## Cell 2 — Mount Drive"),
         code(
@@ -82,6 +92,17 @@ def shard_notebook(shard: int, person: int) -> dict:
         code(
             "!apt-get update -qq && apt-get install -y -qq unrar ffmpeg\n"
             "!pip install -q openai-whisper transformers timm insightface onnxruntime-gpu librosa soundfile torchaudio\n"
+            "if USE_AU:\n"
+            "    print('USE_AU=True -> installing py-feat (may conflict with Colab torch/numpy)...')\n"
+            "    get_ipython().system('pip install -q py-feat')\n"
+            "    try:\n"
+            "        from feat import Detector  # verify the REAL py-feat loads (not a squatter / broken dep)\n"
+            "        print('py-feat OK — AU-on available.')\n"
+            "    except Exception as e:\n"
+            "        raise RuntimeError(\n"
+            "            f'USE_AU=True but py-feat failed to load ({e}). AU-on would SILENTLY fall back '\n"
+            "            'to conf x sharpness, producing AU-OFF features labelled as AU-on. '\n"
+            "            'Run AU-on locally in .venv-feat instead, or set USE_AU=False.')\n"
             "print('Deps installed.')"
         ),
         md("## Cell 4 — Extract the segments archive (.zip or .rar)"),
@@ -146,7 +167,9 @@ def shard_notebook(shard: int, person: int) -> dict:
             "disconnects and it skips what you already did."
         ),
         code(
-            f"!python scripts/preprocess_all.py --device cuda --num_shards {NUM_SHARDS} --shard {shard} 2>&1"
+            f"au = f' --use_au --au_top_k {{AU_TOP_K}}' if USE_AU else ''\n"
+            f"print('AU saliency:', 'ON (py-feat)' if USE_AU else 'OFF (conf x sharpness)')\n"
+            f"!python scripts/preprocess_all.py --device cuda --num_shards {NUM_SHARDS} --shard {shard}{{au}} 2>&1"
         ),
         md("## Cell 9 — Verify + upload your shard zip to Drive"),
         code(

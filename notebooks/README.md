@@ -70,15 +70,17 @@ Benchmark the Phase-2 checkpoint on FakeAVCeleb (release gate: **AUC ≥ 0.70**)
 
 ---
 
-## AU saliency — these notebooks are AU-OFF (deliberate)
+## AU saliency — AU-OFF by default (lead's call)
 
-The Colab notebooks score keyframes by **conf × sharpness** (AU-OFF), matching the existing
-14k cached features. Do **not** turn AU on for MOSEI only — mixing AU-on and AU-off features
-in one training set is invalid.
+The Colab notebooks default to **conf × sharpness** (AU-OFF), matching the existing 14k cached
+features. Cell 1 of each person notebook has a `USE_AU = False` toggle — **only the preprocessing
+lead should flip it, and only for a FULL AU-on re-run of ALL clips** (never mix AU-on and AU-off
+in one training set — invalid).
 
-Real AU saliency (`pip install py-feat`) needs an **old numpy/torch stack** that conflicts with
-Colab's pre-installed environment (the reason the local `.venv-feat` exists). So the AU-on run is
-a **separate, local** job, not a Colab one:
+⚠️ **AU-on will likely FAIL on Colab.** py-feat needs an old numpy/torch stack that conflicts with
+Colab's pre-installed environment. If `USE_AU=True`, Cell 3 tries to install py-feat and **hard-stops
+if it can't load** — this is deliberate, to prevent silently producing AU-off features labelled as
+AU-on. So AU-on is realistically a **separate, LOCAL** job via `.venv-feat`, not Colab:
 
 ```powershell
 # in the isolated .venv-feat (already set up), re-preprocess EVERYTHING AU-on into a
