@@ -49,7 +49,7 @@ def shard_notebook(shard: int, person: int) -> dict:
             f"then upload `mosei_features_shard{shard}.zip` to the shared Drive folder.\n\n"
             "### One-time setup (leader does this once)\n"
             f"1. Create a shared Drive folder and share it with all 4 members.\n"
-            f"2. Upload `segments.rar` (the 6,277 MOSEI clips) into it.\n"
+            f"2. Upload `segments.zip` (the 6,277 MOSEI clips) into it.\n"
             f"3. Everyone's `DRIVE_ROOT` (Cell 1) must point to that same folder.\n\n"
             "### Each person\n"
             "1. Runtime → Change runtime type → **T4 GPU**\n"

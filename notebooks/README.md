@@ -25,7 +25,7 @@ One shared folder, same for everyone:
 
 ```
 MyDrive/DeepSentinel_data/
-├── segments.rar                    ← leader uploads once (6,277 MOSEI clips)
+├── segments.zip                    ← leader uploads once (6,277 MOSEI clips, 6.2 GB)
 ├── mosei_features_shard0.zip       ← Person 1 output
 ├── mosei_features_shard1.zip       ← Person 2 output
 ├── mosei_features_shard2.zip       ← Person 3 output
@@ -37,7 +37,7 @@ MyDrive/DeepSentinel_data/
 └── checkpoints/                    ← training outputs land here
 ```
 
-The leader creates the folder, uploads `segments.rar`, and **shares it (Editor) with all 4 members**.
+The leader creates the folder, uploads `segments.zip`, and **shares it (Editor) with all 4 members**.
 
 ---
 
@@ -46,7 +46,7 @@ The leader creates the folder, uploads `segments.rar`, and **shares it (Editor) 
 ### 1. Preprocess — 4 people in parallel (~10–15 min each)
 Each member opens **their** notebook (`colab_preprocess_personN.ipynb`), sets T4 GPU,
 and **Runtime → Run all**. It:
-- extracts `segments.rar`, clones the repo
+- extracts `segments.zip`, clones the repo
 - runs only its shard: `preprocess_all.py --num_shards 4 --shard N` (every 4th clip — no overlap)
 - resume-safe: if Colab disconnects, just re-run — it skips what's already done
 - uploads `mosei_features_shard{N}.zip` + a `shard{N}_status.json` to Drive
