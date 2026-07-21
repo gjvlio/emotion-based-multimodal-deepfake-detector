@@ -34,6 +34,12 @@ from src.utils.logging_utils import TBWriter, get_logger
 
 log = get_logger(__name__)
 
+# Sarcasm decision threshold. MUStARD (Castro et al., 2019) is class-balanced
+# (345 sarcastic / 345 non-sarcastic), so 0.5 is the Bayes-optimal cut for a
+# sigmoid head trained with BCE under balanced priors — matches the fake/real
+# threshold convention already used below (`>= 0.5`).
+SARCASM_THRESHOLD = 0.5
+
 
 class EarlyStopping:
     def __init__(self, patience: int = 5, min_delta: float = 1e-4):
@@ -121,12 +127,12 @@ class Trainer:
 
         for epoch in range(1, max_epochs + 1):
             train_loss, train_components = self._train_epoch_cached(optimizer, epoch, global_step)
-            val_loss, val_acc, val_components = self._val_epoch_cached(epoch)
+            val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
             scheduler.step(val_loss)
             current_lr = optimizer.param_groups[0]["lr"]
 
             self.tb.scalars("loss",     {"train": train_loss, "val": val_loss},     epoch)
-            self.tb.scalars("accuracy", {"val": val_acc},                           epoch)
+            self.tb.scalars("accuracy", {"val": val_acc, "sarcasm": sarc_acc},       epoch)
 
             print(
                 f"\n[P1 Epoch {epoch:3d}/{max_epochs}]  LR={current_lr:.2e}\n"
@@ -140,9 +146,10 @@ class Trainer:
                 f"emo_a={val_components['emo_a']:.4f}  "
                 f"emo_b={val_components['emo_b']:.4f}  "
                 f"sarc={val_components['sarc']:.4f}  "
-                f"acc={val_acc:.4f}"
+                f"acc={val_acc:.4f}  "
+                f"sarc_acc={sarc_acc:.4f} (thresh={SARCASM_THRESHOLD})"
             )
-            log.info(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
+            log.info(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
 
             self._save_checkpoint("best_phase1.pt", val_loss, epoch)
             if stopper.step(val_loss):
@@ -266,6 +273,7 @@ class Trainer:
     def _val_epoch_cached(self, epoch: int):
         self.model.eval()
         total_loss, correct, total = 0.0, 0, 0
+        sarc_correct, sarc_total = 0, 0
         comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0}
         n_batches = len(self.val_loader)
 
@@ -299,11 +307,19 @@ class Trainer:
                 correct += (preds == fl[valid_mask]).sum().item()
                 total   += valid_mask.sum().item()
 
+            # Only count MUStARD clips for sarcasm accuracy
+            sarc_mask = sl != -1
+            if sarc_mask.any():
+                sarc_preds    = (torch.sigmoid(out.sarcasm.squeeze(1)[sarc_mask]) >= SARCASM_THRESHOLD).long()
+                sarc_correct += (sarc_preds == sl[sarc_mask]).sum().item()
+                sarc_total   += sarc_mask.sum().item()
+
         for k in comp:
             comp[k] /= max(n_batches, 1)
         return (
             total_loss / max(n_batches, 1),
             correct / max(total, 1),
+            sarc_correct / max(sarc_total, 1),
             comp,
         )
 
@@ -340,16 +356,17 @@ class Trainer:
 
         for epoch in range(1, max_epochs + 1):
             train_loss = self._train_epoch_e2e(optimizer, epoch)
-            val_loss, val_acc, val_components = self._val_epoch_cached(epoch)
+            val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
             scheduler.step(val_loss)
             current_lr = optimizer.param_groups[0]["lr"]
 
             self.tb.scalars("loss_p2", {"train": train_loss, "val": val_loss}, epoch)
             print(
                 f"\n[P2 Epoch {epoch:3d}/{max_epochs}]  LR={current_lr:.2e}  "
-                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  val_acc={val_acc:.4f}"
+                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  val_acc={val_acc:.4f}  "
+                f"sarc_acc={sarc_acc:.4f}"
             )
-            log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
+            log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
             self._save_checkpoint("best_phase2.pt", val_loss, epoch)
             if stopper.step(val_loss):
                 print(f"\n  Early stopping triggered at epoch {epoch}.")
