@@ -279,6 +279,10 @@ def main():
                         help="Ignore feature cache and reprocess all clips")
     parser.add_argument("--no_hard",    action="store_true",
                         help="Disable hard method stratification (uniform random sample)")
+    parser.add_argument("--save_csv",   default=None,
+                        help="Save per-clip results (clip_id,fake_label,method,type,score,pred) to this CSV path "
+                             "— needed to compare against another framework's scores on the SAME clips "
+                             "(see scripts/compare_frameworks.py)")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -345,6 +349,15 @@ def main():
     if not results:
         print("  No results — check video paths and checkpoint.")
         return
+
+    if args.save_csv:
+        csv_path = Path(args.save_csv)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["clip_id", "fake_label", "method", "type", "score", "pred"])
+            writer.writeheader()
+            writer.writerows(results)
+        print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
 
     # ── Metrics ────────────────────────────────────────────────────────────────
     _section("Results")
