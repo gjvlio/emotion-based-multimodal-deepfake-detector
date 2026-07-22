@@ -35,9 +35,13 @@ _insightface_app = None
 try:
     import feat as _feat_pkg  # noqa: F401
     _FEAT_AVAILABLE = True
+    # py-feat 2.0 renamed the class (Detector -> Detectorv1) and detect_image() -> detect().
+    # The local .venv-feat pins 0.6.2 (still has `Detector`); Colab pulls latest (2.x). Detect it.
+    _PYFEAT_V2 = not hasattr(_feat_pkg, "Detector")
 except ImportError:
     _FEAT_AVAILABLE = False
-    log.warning("py-feat not installed — AU saliency unavailable. Keyframe scoring: conf × sharpness only. Install: pip install feat")
+    _PYFEAT_V2 = False
+    log.warning("py-feat not installed — AU saliency unavailable. Keyframe scoring: conf × sharpness only. Install: pip install py-feat")
 
 try:
     import insightface as _insightface_pkg  # noqa: F401
@@ -78,8 +82,11 @@ def configure_au(enabled: bool = False, device: str = "cpu", top_k: int = 12) ->
 def _load_feat_detector(device: str = "cpu"):
     global _feat_detector, _feat_device
     if _feat_detector is None or _feat_device != device:
-        from feat import Detector
-        log.info(f"Loading py-feat AU Detector on {device}")
+        if _PYFEAT_V2:
+            from feat import Detectorv1 as Detector   # py-feat 2.x (Detectorv1 = v1-compatible API)
+        else:
+            from feat import Detector                 # py-feat 0.6.x
+        log.info(f"Loading py-feat AU Detector on {device} (py-feat {'2.x' if _PYFEAT_V2 else '0.6.x'})")
         _feat_detector = Detector(au_model="xgb", device=device)
         _feat_device = device
     return _feat_detector
@@ -103,11 +110,22 @@ def _au_saliency(crop: np.ndarray, device: str = "cpu") -> float:
         with tempfile.TemporaryDirectory() as td:
             fp = os.path.join(td, "crop.png")
             cv2.imwrite(fp, crop)
-            result = det.detect_image([fp], face_detection_threshold=0.5)
-        if result is not None and not result.empty:
-            au_cols = [c for c in result.columns if c.startswith("AU")]
-            if au_cols:
-                s = float(np.nansum(result[au_cols].values[0]))
+            if _PYFEAT_V2:
+                # py-feat 2.x: detect_image() -> detect(inputs, data_type='image', ...)
+                result = det.detect([fp], data_type="image",
+                                    face_detection_threshold=0.5, progress_bar=False)
+            else:
+                result = det.detect_image([fp], face_detection_threshold=0.5)
+        if result is not None and len(result):
+            # Prefer the Fex.aus accessor (both versions); fall back to AU* columns.
+            au_df = getattr(result, "aus", None)
+            if au_df is not None and len(au_df):
+                vals = au_df.values
+            else:
+                au_cols = [c for c in result.columns if str(c).upper().startswith("AU")]
+                vals = result[au_cols].values if au_cols else None
+            if vals is not None and len(vals):
+                s = float(np.nansum(vals[0]))
                 return s if s > 0 else 1.0
     except Exception as e:
         log.debug(f"AU saliency error: {e}")
