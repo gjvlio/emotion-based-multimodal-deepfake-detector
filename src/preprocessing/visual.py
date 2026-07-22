@@ -87,63 +87,95 @@ def _load_feat_detector(device: str = "cpu"):
         else:
             from feat import Detector                 # py-feat 0.6.x
         log.info(f"Loading py-feat AU Detector on {device} (py-feat {'2.x' if _PYFEAT_V2 else '0.6.x'})")
-        _feat_detector = Detector(au_model="xgb", device=device)
+        # We use ONLY AU intensities. Try to disable the unused heads (emotion / head-pose /
+        # identity / gaze) so detect() skips their compute per crop — the main speedup.
+        # Falls back to the full detector if this py-feat version rejects the kwargs.
+        try:
+            _feat_detector = Detector(
+                au_model="xgb", device=device,
+                emotion_model=None, facepose_model=None,
+                identity_model=None, gaze_model=None,
+            )
+            log.info("py-feat: emotion/pose/identity/gaze heads DISABLED (AU-only, faster)")
+        except Exception as e:
+            log.warning(f"py-feat: could not disable extra heads ({e}); using full detector (slower)")
+            _feat_detector = Detector(au_model="xgb", device=device)
         _feat_device = device
     return _feat_detector
 
 
-def _au_saliency(crop: np.ndarray, device: str = "cpu") -> float:
+def _au_saliency_batch(crops: List[np.ndarray], device: str = "cpu") -> List[float]:
     """
-    Sum of FACS AU intensities for one face crop.
-    Higher = more facial muscle activity = more expression-relevant.
-    Returns 1.0 on failure so score degrades to conf × sharpness.
+    Sum of FACS AU intensities for a BATCH of face crops, in ONE py-feat call.
+    Returns one saliency per crop (higher = more muscle activity = more expression-
+    relevant); 1.0 on failure so the score degrades to conf × sharpness.
 
-    py-feat's detect_image() takes FILE PATHS, so the crop is written to a temp
-    PNG and passed by path (passing an array/PIL yields 0 detections → 1.0).
+    Batching amortizes py-feat's per-call pipeline overhead (vs one call per crop).
+    py-feat takes FILE PATHS, so each crop is written to a temp PNG and passed by path.
     """
-    if not _FEAT_AVAILABLE:
-        return 1.0
+    n = len(crops)
+    if not _FEAT_AVAILABLE or n == 0:
+        return [1.0] * n
     import os
     import tempfile
+    out = [1.0] * n
     try:
         det = _load_feat_detector(device)
         with tempfile.TemporaryDirectory() as td:
-            fp = os.path.join(td, "crop.png")
-            cv2.imwrite(fp, crop)
+            paths = []
+            for j, crop in enumerate(crops):
+                fp = os.path.join(td, f"c{j}.png")
+                cv2.imwrite(fp, crop)
+                paths.append(fp)
             if _PYFEAT_V2:
-                # py-feat 2.x: detect_image() -> detect(inputs, data_type='image', ...)
-                result = det.detect([fp], data_type="image",
+                result = det.detect(paths, data_type="image", batch_size=n,
                                     face_detection_threshold=0.5, progress_bar=False)
             else:
-                result = det.detect_image([fp], face_detection_threshold=0.5)
-        if result is not None and len(result):
-            # Prefer the Fex.aus accessor (both versions); fall back to AU* columns.
-            au_df = getattr(result, "aus", None)
-            if au_df is not None and len(au_df):
-                vals = au_df.values
-            else:
-                au_cols = [c for c in result.columns if str(c).upper().startswith("AU")]
-                vals = result[au_cols].values if au_cols else None
-            if vals is not None and len(vals):
-                s = float(np.nansum(vals[0]))
-                return s if s > 0 else 1.0
+                result = det.detect_image(paths, face_detection_threshold=0.5)
+        if result is None or not len(result):
+            return out
+        au_df = getattr(result, "aus", None)
+        mat = au_df.values if (au_df is not None and len(au_df)) else None
+        if mat is None:
+            au_cols = [c for c in result.columns if str(c).upper().startswith("AU")]
+            mat = result[au_cols].values if au_cols else None
+        if mat is None:
+            return out
+        # Map each result row back to its input crop by filename (c{j}.png) if available,
+        # else assume row order matches input order (one face per crop).
+        cols = list(getattr(result, "columns", []))
+        idx_col = next((c for c in ("input", "FileName", "frame") if c in cols), None)
+        if idx_col is not None:
+            for row, name in enumerate(str(p) for p in result[idx_col].tolist()):
+                base = os.path.basename(name)
+                if base.startswith("c") and base.endswith(".png"):
+                    try:
+                        j = int(base[1:-4])
+                    except ValueError:
+                        continue
+                    if 0 <= j < n and row < len(mat):
+                        s = float(np.nansum(mat[row]))
+                        out[j] = s if s > 0 else 1.0
+        else:
+            for j in range(min(len(mat), n)):
+                s = float(np.nansum(mat[j]))
+                out[j] = s if s > 0 else 1.0
     except Exception as e:
-        log.debug(f"AU saliency error: {e}")
-    return 1.0
+        log.debug(f"AU batch error: {e}")
+    return out
 
 
 def _rescore_with_au(results: List[Tuple[np.ndarray, float]]) -> List[Tuple[np.ndarray, float]]:
     """If AU is enabled, multiply the top-K crops (by conf × sharpness) by their AU
-    saliency. AU only runs on the K most promising frames so per-clip cost stays
-    bounded (K × ~1.4s GPU) instead of scaling with every detected frame."""
+    saliency. AU runs on only the K most promising frames, in ONE batched py-feat call,
+    so per-clip cost stays bounded instead of scaling with every detected frame."""
     if not _AU_ENABLED or not _FEAT_AVAILABLE or not results:
         return results
     order = sorted(range(len(results)), key=lambda i: results[i][1], reverse=True)
-    topk = set(order[:_AU_TOP_K])
-    rescored = []
-    for i, (crop, base) in enumerate(results):
-        rescored.append((crop, base * _au_saliency(crop, _AU_DEVICE)) if i in topk else (crop, base))
-    return rescored
+    topk = order[:_AU_TOP_K]
+    sal = _au_saliency_batch([results[i][0] for i in topk], _AU_DEVICE)
+    sal_map = {i: s for i, s in zip(topk, sal)}
+    return [(crop, base * sal_map.get(i, 1.0)) for i, (crop, base) in enumerate(results)]
 
 
 # ── Frame extraction ───────────────────────────────────────────────────────────
