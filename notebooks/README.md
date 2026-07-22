@@ -77,18 +77,23 @@ features. Cell 1 of each person notebook has a `USE_AU = False` toggle — **onl
 lead should flip it, and only for a FULL AU-on re-run of ALL clips** (never mix AU-on and AU-off
 in one training set — invalid).
 
-⚠️ **AU-on will likely FAIL on Colab.** py-feat needs an old numpy/torch stack that conflicts with
-Colab's pre-installed environment. If `USE_AU=True`, Cell 3 tries to install py-feat and **hard-stops
-if it can't load** — this is deliberate, to prevent silently producing AU-off features labelled as
-AU-on. So AU-on is realistically a **separate, LOCAL** job via `.venv-feat`, not Colab:
+⚠️ **AU-on may FAIL on Colab** (py-feat needs an old numpy/torch stack). Before committing days of
+GPU, run **`colab_au_probe.ipynb`** — it tests whether py-feat runs on a T4 (Path B modern / Path A
+pinned) **and** benchmarks AU-on `z_v` per clip → a real total. If it works there, AU-on can be
+sharded 4-way like AU-off; if not, it stays a **local `.venv-feat`** job.
+
+**AU-on is z_v-only + non-destructive.** AU changes only keyframe selection → only `z_v`. `z_at`
+(audio-text) is AU-independent and is **reused**, and everything writes to a **separate store** so
+the AU-off baseline is never overwritten. The `--use_au` flag now **requires** a separate `--out_dir`
+(it refuses to run into the default cache):
 
 ```powershell
-# in the isolated .venv-feat (already set up), re-preprocess EVERYTHING AU-on into a
-# separate feature store so the AU-off baseline is preserved for the ablation
-.\.venv-feat\Scripts\python.exe scripts/preprocess_all.py --device cuda --use_au --au_top_k 12
+# separate AU-on store; z_at copied from the AU-off cache, only z_v rebuilt AU-on
+.\.venv-feat\Scripts\python.exe scripts/preprocess_all.py --device cuda --use_au --au_top_k 12 `
+   --out_dir data/preprocessed_au_on --reuse_zat_from data/preprocessed
 ```
-This is the Option-C ablation path (AU-on vs AU-off). It is slow (~seconds/crop) and must cover
-**all** clips, not just MOSEI. Keep the AU-off features for the baseline comparison.
+This is the Option-C ablation (AU-on vs AU-off). Slow (~seconds/crop), must cover **all** clips (not
+just MOSEI), and the AU-off cache stays intact as the baseline arm.
 
 ## Notes
 - **Why sharded, not `--max_clips`:** the shard is a *stable, disjoint* partition (`clips[i::4]`),
