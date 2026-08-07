@@ -264,6 +264,7 @@ def main():
     parser.add_argument("--workers",              type=int,   default=0)
     parser.add_argument("--seed",                 type=int,   default=42)
     parser.add_argument("--device",               type=str,   default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--classifier_mode",      type=str,   default="baseline", choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
     args = parser.parse_args()
 
     _section("DeepSentinel Full Dataset Training")
@@ -312,7 +313,7 @@ def main():
     test_loader  = DataLoader(test_ds,  shuffle=False, **loader_kw)
 
     _section("Initializing DeepfakeDetector")
-    model = DeepfakeDetector()
+    model = DeepfakeDetector(classifier_mode=args.classifier_mode)
     total_params = sum(p.numel() for p in model.parameters())
     train_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Total parameters     : {total_params:,}")
@@ -333,6 +334,7 @@ def main():
         lambda_sarcasm = 0.3,
         pos_weight     = effective_pw,
         device         = args.device,
+        ckpt_suffix    = args.classifier_mode,
     )
 
     # ── Phase 1 ───────────────────────────────────────────────────────────────
@@ -434,9 +436,10 @@ def main():
         print("  No valid test clips.")
 
     _section("Full training complete")
-    print(f"  Checkpoint : {CKPT_DIR}/best_phase1.pt")
+    ckpt_name = f"best_phase1_{args.classifier_mode}.pt" if args.classifier_mode else "best_phase1.pt"
+    print(f"  Checkpoint : {CKPT_DIR}/{ckpt_name}")
     print(f"  Logs       : {LOG_DIR}/")
-    print(f"  Next step  : python scripts/evaluate_fakeavceleb.py --checkpoint {CKPT_DIR}/best_phase1.pt\n")
+    print(f"  Next step  : python scripts/evaluate_fakeavceleb.py --checkpoint {CKPT_DIR}/{ckpt_name}\n")
 
 
 if __name__ == "__main__":

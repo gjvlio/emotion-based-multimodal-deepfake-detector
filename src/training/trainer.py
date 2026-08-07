@@ -74,6 +74,7 @@ class Trainer:
         lambda_sarcasm: float      = 0.3,
         pos_weight:     float | None = None,
         device:         str        = "cuda" if torch.cuda.is_available() else "cpu",
+        ckpt_suffix:    str        = "",
     ):
         self.model   = model.to(device)
         self.device  = device
@@ -86,6 +87,7 @@ class Trainer:
         self.ckpt_dir     = Path(checkpoint_dir)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.tb           = TBWriter(log_dir)
+        self.ckpt_suffix  = ckpt_suffix
 
         print(f"\n{'='*60}")
         print(f"  DeepSentinel Trainer initialized")
@@ -151,14 +153,15 @@ class Trainer:
             )
             log.info(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
 
-            self._save_checkpoint("best_phase1.pt", val_loss, epoch)
+            filename = f"best_phase1_{self.ckpt_suffix}.pt" if self.ckpt_suffix else "best_phase1.pt"
+            self._save_checkpoint(filename, val_loss, epoch)
             if stopper.step(val_loss):
                 print(f"\n  Early stopping triggered at epoch {epoch} (patience={patience}).")
                 log.info(f"Early stopping at epoch {epoch}.")
                 break
 
         print(f"\n  Phase 1 complete. Best val_loss={stopper.best:.4f}")
-        print(f"  Checkpoint: {self.ckpt_dir}/best_phase1.pt\n")
+        print(f"  Checkpoint: {self.ckpt_dir}/{filename}\n")
 
     def _print_grad_report(self) -> float:
         """Print per-module gradient norms. Returns total grad norm."""
@@ -429,10 +432,17 @@ class Trainer:
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
     def load_best(self, phase: int = 1) -> None:
-        filename = f"best_phase{phase}.pt"
+        filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"
         ckpt = self.ckpt_dir / filename
         if not ckpt.exists():
-            raise FileNotFoundError(f"No checkpoint at {ckpt}")
+            # Fall back to standard filename if suffix model doesn't exist
+            fallback_filename = f"best_phase{phase}.pt"
+            fallback_ckpt = self.ckpt_dir / fallback_filename
+            if fallback_ckpt.exists():
+                filename = fallback_filename
+                ckpt = fallback_ckpt
+            else:
+                raise FileNotFoundError(f"No checkpoint at {ckpt}")
         data = torch.load(ckpt, weights_only=True)
         self.model.load_state_dict(data["model_state"])
         print(f"  [CKPT] Loaded {filename}  (epoch={data['epoch']}, val_loss={data['val_loss']:.4f})")

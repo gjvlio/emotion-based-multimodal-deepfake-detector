@@ -58,18 +58,34 @@ class DeepfakeDetector(nn.Module):
         cbp_dim:       int = 8192,
         dropout_heads: float = 0.3,
         dropout_cls:   float = 0.4,
+        classifier_mode: str = "baseline",
     ):
         super().__init__()
         self._wav2vec_name = wav2vec_model
         self._bert_name    = bert_model
         self._vit_name     = vit_model
+        self.classifier_mode = classifier_mode
 
         # Detection components (always present)
         self.emotion_head_a  = EmotionHeadA(self.Z_AT_DIM, n_emotions, dropout_heads)
         self.emotion_head_b  = EmotionHeadB(self.Z_V_DIM,  n_emotions, dropout_heads)
         self.sarcasm_head    = SarcasmHead(self.Z_AT_DIM, dropout=dropout_heads)
         self.bilinear_fusion = BilinearFusion(self.Z_AT_DIM, self.Z_V_DIM, cbp_dim)
-        fused_dim = cbp_dim + n_emotions + 1   # 8192 + 6 (delta) + 1 (P_sarcasm)
+
+        if classifier_mode == "mismatch_only":
+            fused_dim = n_emotions + 1
+        elif classifier_mode == "emotion_bilinear":
+            fused_dim = 36 + n_emotions + 1
+        elif classifier_mode == "bottleneck":
+            self.bilinear_proj = nn.Linear(cbp_dim, 128)
+            self.proj_ln = nn.LayerNorm(128)
+            fused_dim = 128 + n_emotions + 1
+        elif classifier_mode == "high_dropout":
+            self.high_dropout = nn.Dropout(0.85)
+            fused_dim = cbp_dim + n_emotions + 1
+        else:  # baseline
+            fused_dim = cbp_dim + n_emotions + 1
+
         self.classifier = ClassifierMLP(fused_dim, dropout=dropout_cls)
 
         # Backbones — loaded on demand
@@ -155,11 +171,25 @@ class DeepfakeDetector(nn.Module):
 
         fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192)
 
-        delta = torch.abs(
-            F.softmax(emo_a, dim=-1) - F.softmax(emo_b, dim=-1)
-        )  # (B, 6)
+        prob_a = F.softmax(emo_a, dim=-1)
+        prob_b = F.softmax(emo_b, dim=-1)
+        delta = torch.abs(prob_a - prob_b)  # (B, 6)
 
-        combined = torch.cat([fused, delta, sarc], dim=-1)  # (B, 8199)
+        if self.classifier_mode == "mismatch_only":
+            combined = torch.cat([delta, sarc], dim=-1)
+        elif self.classifier_mode == "emotion_bilinear":
+            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
+            fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
+            combined = torch.cat([fused_emo, delta, sarc], dim=-1)       # (B, 43)
+        elif self.classifier_mode == "bottleneck":
+            fused_proj = F.relu(self.proj_ln(self.bilinear_proj(fused)))
+            combined = torch.cat([fused_proj, delta, sarc], dim=-1)
+        elif self.classifier_mode == "high_dropout":
+            fused_drop = self.high_dropout(fused)
+            combined = torch.cat([fused_drop, delta, sarc], dim=-1)
+        else:  # baseline
+            combined = torch.cat([fused, delta, sarc], dim=-1)
+
         logit = self.classifier(combined)                    # (B, 1)
 
         return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b, sarcasm=sarc)

@@ -283,6 +283,8 @@ def main():
                         help="Save per-clip results (clip_id,fake_label,method,type,score,pred) to this CSV path "
                              "— needed to compare against another framework's scores on the SAME clips "
                              "(see scripts/compare_frameworks.py)")
+    parser.add_argument("--classifier_mode", type=str, default="baseline",
+                        choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -315,7 +317,7 @@ def main():
 
     # ── Load model ─────────────────────────────────────────────────────────────
     _section("Loading trained model")
-    model = DeepfakeDetector().to(args.device)
+    model = DeepfakeDetector(classifier_mode=args.classifier_mode).to(args.device)
     ckpt  = torch.load(ckpt_path, map_location=args.device, weights_only=True)
     model.load_state_dict(ckpt["model_state"])
     model.eval()
