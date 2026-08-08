@@ -151,6 +151,7 @@ class DeepfakeDetector(nn.Module):
         print("[DEBUG] self._vit.__class__.__module__ =", self._vit.__class__.__module__)
         print("[DEBUG] hasattr(self._vit, 'encoder') =", hasattr(self._vit, 'encoder'))
         print("[DEBUG] hasattr(self._vit, 'vit') =", hasattr(self._vit, 'vit'))
+        print("[DEBUG] Model structure of self._vit:\n", self._vit)
         if hasattr(self._vit, 'vit'):
             print("[DEBUG] type(self._vit.vit) =", type(self._vit.vit))
             print("[DEBUG] hasattr(self._vit.vit, 'encoder') =", hasattr(self._vit.vit, 'encoder'))
