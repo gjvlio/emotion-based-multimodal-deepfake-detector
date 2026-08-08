@@ -146,24 +146,21 @@ class DeepfakeDetector(nn.Module):
         for p in self._bert.pooler.parameters():
             p.requires_grad = True
 
-        # ViT: encoder.layer[-n_layers:]
-        print("\n[DEBUG] type(self._vit) =", type(self._vit))
-        print("[DEBUG] self._vit.__class__.__module__ =", self._vit.__class__.__module__)
-        print("[DEBUG] hasattr(self._vit, 'encoder') =", hasattr(self._vit, 'encoder'))
-        print("[DEBUG] hasattr(self._vit, 'vit') =", hasattr(self._vit, 'vit'))
-        print("[DEBUG] Model structure of self._vit:\n", self._vit)
-        if hasattr(self._vit, 'vit'):
-            print("[DEBUG] type(self._vit.vit) =", type(self._vit.vit))
-            print("[DEBUG] hasattr(self._vit.vit, 'encoder') =", hasattr(self._vit.vit, 'encoder'))
-            
+        # ViT unfreezing (supports both self._vit.encoder.layer and self._vit.layers architectures)
+        vit_layers = None
         vit_encoder = getattr(self._vit, "encoder", None)
         if vit_encoder is None and hasattr(self._vit, "vit"):
             vit_encoder = getattr(self._vit.vit, "encoder", None)
             
-        if vit_encoder is None:
-            raise AttributeError("Could not find ViT encoder module. Check transformers library version.")
+        if vit_encoder is not None and hasattr(vit_encoder, "layer"):
+            vit_layers = vit_encoder.layer
+        elif hasattr(self._vit, "layers"):
+            vit_layers = self._vit.layers
             
-        for layer in vit_encoder.layer[-n_layers:]:
+        if vit_layers is None:
+            raise AttributeError("Could not find ViT layers or encoder module. Check transformers library version.")
+            
+        for layer in vit_layers[-n_layers:]:
             for p in layer.parameters():
                 p.requires_grad = True
                 
