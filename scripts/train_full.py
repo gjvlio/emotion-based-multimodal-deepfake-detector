@@ -184,7 +184,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             cid = r["clip_id"]
             vp  = r["video_path"]
             return {
-                "audio_values":   self._audio_values(cid),
+                "audio_values":   self._audio_values(cid, vp),
                 "input_ids":      self._bert_inputs(cid)[0],
                 "attention_mask": self._bert_inputs(cid)[1],
                 "pixel_values":   self._keyframe_pixels(cid, vp),
@@ -197,10 +197,25 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
                 "speaker_id":     r["speaker_id"],
             }
 
-        def _audio_values(self, clip_id: str) -> torch.Tensor:
+        def _audio_values(self, clip_id: str, video_path: str) -> torch.Tensor:
             import torchaudio
             wav_path = self._prep / "audio" / f"{clip_id}.wav"
-            wav, sr  = torchaudio.load(str(wav_path))
+            
+            try:
+                if wav_path.exists():
+                    wav, sr  = torchaudio.load(str(wav_path))
+                else:
+                    if video_path and Path(video_path).exists():
+                        wav, sr = torchaudio.load(str(video_path))
+                    else:
+                        print(f"\n[WARNING] Missing audio source for clip '{clip_id}'. "
+                              f"Looked for wav: {wav_path} and video: {video_path}. "
+                              f"Returning zero tensor to prevent crash.")
+                        return torch.zeros(self.MAX_AUDIO)
+            except Exception as e:
+                print(f"\n[ERROR] Failed to load/decode audio for '{clip_id}' ({e}). Returning zero tensor.")
+                return torch.zeros(self.MAX_AUDIO)
+
             if wav.shape[0] > 1:
                 wav = wav.mean(0, keepdim=True)
             if sr != 16000:
@@ -213,6 +228,9 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
 
         def _bert_inputs(self, clip_id: str):
             txt_path = self._prep / "transcripts" / f"{clip_id}.txt"
+            if not txt_path.exists():
+                # Print a subtle warning so we can track missing transcripts
+                print(f"[DEBUG] Transcript text file missing for '{clip_id}' at: {txt_path}")
             text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
             enc  = self._bert_tok(
                 text, return_tensors="pt",
