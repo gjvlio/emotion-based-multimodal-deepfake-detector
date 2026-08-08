@@ -17,12 +17,31 @@ sys.path.insert(0, str(REPO_ROOT))
 DRIVE_BASE = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
 DRIVE_OUTPUT_DIR = DRIVE_BASE / "checkpoints"
 
+def scan_drive_zips():
+    """Print all zip files in Drive for debugging."""
+    print("\nScanning Google Drive (THESIS_MOTHERFILE) for zip archives...")
+    if not DRIVE_BASE.exists():
+        print("  Google Drive folder THESIS_MOTHERFILE not found!")
+        return
+    found = []
+    for root, _, files in os.walk(DRIVE_BASE):
+        for f in files:
+            if f.endswith(".zip"):
+                p = Path(root) / f
+                mb = p.stat().st_size / 1e6
+                print(f"  Found zip: {p.relative_to(DRIVE_BASE)} ({mb:.1f} MB)")
+                found.append(p)
+    if not found:
+        print("  No zip files found recursively in THESIS_MOTHERFILE.")
+
 def search_drive_file(zip_name: str) -> Path | None:
-    for folder in [DRIVE_BASE, DRIVE_BASE / "datasets", DRIVE_BASE / "preprocessed"]:
-        if folder.exists():
-            for f in folder.iterdir():
-                if f.name.lower() == zip_name.lower():
-                    return f
+    """Recursive search in Drive for zip_name."""
+    if not DRIVE_BASE.exists():
+        return None
+    for root, _, files in os.walk(DRIVE_BASE):
+        for f in files:
+            if f.lower() == zip_name.lower():
+                return Path(root) / f
     return None
 
 def extract_zip(zip_name: str, extract_to: Path, optional: bool = False) -> bool:
@@ -57,6 +76,9 @@ def main():
 
     DRIVE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Scan and print Drive files for visibility
+    scan_drive_zips()
+
     # Extract Preprocessed features cache
     print("\nExtracting Preprocessed Feature Cache...")
     # 1. Try consolidated zips
@@ -78,6 +100,14 @@ def main():
             mosei_found = True
     if not mosei_found:
         extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+
+    # Print local feature count for validation
+    z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
+    if z_at_dir.exists():
+        files = list(z_at_dir.glob("*.pt"))
+        print(f"\nLocal preprocessed feature count after extraction: {len(files)} files in z_at.")
+    else:
+        print("\nLocal preprocessed features directory does not exist yet.")
 
     # Validate and generate manifests
     print("\nValidating preprocessed features and generating dataset splits...")
