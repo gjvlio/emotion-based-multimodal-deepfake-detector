@@ -147,11 +147,24 @@ class DeepfakeDetector(nn.Module):
             p.requires_grad = True
 
         # ViT: encoder.layer[-n_layers:]
-        for layer in self._vit.encoder.layer[-n_layers:]:
+        vit_encoder = getattr(self._vit, "encoder", None)
+        if vit_encoder is None and hasattr(self._vit, "vit"):
+            vit_encoder = getattr(self._vit.vit, "encoder", None)
+            
+        if vit_encoder is None:
+            raise AttributeError("Could not find ViT encoder module. Check transformers library version.")
+            
+        for layer in vit_encoder.layer[-n_layers:]:
             for p in layer.parameters():
                 p.requires_grad = True
-        for p in self._vit.layernorm.parameters():
-            p.requires_grad = True
+                
+        vit_layernorm = getattr(self._vit, "layernorm", None)
+        if vit_layernorm is None and hasattr(self._vit, "vit"):
+            vit_layernorm = getattr(self._vit.vit, "layernorm", None)
+            
+        if vit_layernorm is not None:
+            for p in vit_layernorm.parameters():
+                p.requires_grad = True
 
     def enable_gradient_checkpointing(self) -> None:
         """Trade compute for memory — recompute activations on backward pass."""
