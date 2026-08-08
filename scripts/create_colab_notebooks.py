@@ -64,6 +64,10 @@ stage1_nb = {
             "execution_count": None,
             "outputs": [],
             "source": [
+                "# Change directory to safety in case of runtime restart\n",
+                "%cd /content\n",
+                "# Clean up any old repository folder\n",
+                "!rm -rf /content/thesis\n",
                 "# Clone the repository containing the training code and checkout the current branch\n",
                 "!git clone -b feat/training-turnover-prep https://github.com/gjvlio/emotion-based-multimodal-deepfake-detector.git /content/thesis\n",
                 "%cd /content/thesis\n",
@@ -165,6 +169,10 @@ stage2_nb = {
             "execution_count": None,
             "outputs": [],
             "source": [
+                "# Change directory to safety in case of runtime restart\n",
+                "%cd /content\n",
+                "# Clean up any old repository folder\n",
+                "!rm -rf /content/thesis\n",
                 "# Clone the repository containing the training code and checkout the current branch\n",
                 "!git clone -b feat/training-turnover-prep https://github.com/gjvlio/emotion-based-multimodal-deepfake-detector.git /content/thesis\n",
                 "%cd /content/thesis\n",
