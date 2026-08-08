@@ -187,7 +187,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
                 "audio_values":   self._audio_values(cid, vp),
                 "input_ids":      self._bert_inputs(cid)[0],
                 "attention_mask": self._bert_inputs(cid)[1],
-                "pixel_values":   self._keyframe_pixels(cid, vp),
+                "keyframe_pixels":self._keyframe_pixels(cid, vp),
                 "fake_label":     torch.tensor(r["fake_label"],    dtype=torch.long),
                 "audio_emotion":  torch.tensor(r["audio_emotion"], dtype=torch.long),
                 "visual_emotion": torch.tensor(r["visual_emotion"],dtype=torch.long),
@@ -373,6 +373,13 @@ def main():
         print(f"  Freeze layers     : top-{args.phase2_freeze_layers} only (0=all unfrozen)")
         print(f"  Grad checkpointing: {'OFF (--no_grad_ckpt)' if args.no_grad_ckpt else 'ON (saves VRAM)'}")
         print(f"  Keyframe cache    : {KEYFRAME_CACHE_DIR}")
+
+        # Filter out MOSEI records from Phase 2 training if raw video files are not available
+        mosei_raw_dir = REPO_ROOT / "data/raw/CMU-MOSEI"
+        if not mosei_raw_dir.exists():
+            print(f"\n[INFO] Raw CMU-MOSEI video directory not found at: {mosei_raw_dir}")
+            print("       Excluding MOSEI clips from Phase 2 backbone fine-tuning.")
+            p2_train_recs = [r for r in p2_train_recs if r["source_pipeline"] != "mosei"]
 
         p2_ds = Phase2FullDataset(p2_train_recs, PREPROCESSED_DIR, KEYFRAME_CACHE_DIR)
         p2_loader = DataLoader(p2_ds, shuffle=True,
