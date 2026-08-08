@@ -80,26 +80,32 @@ def main():
     scan_drive_zips()
 
     # Extract Preprocessed features cache
-    print("\nExtracting Preprocessed Feature Cache...")
-    # 1. Try consolidated zips
-    consolidated_found = False
-    for zip_candidate in ["preprocessed.zip", "Copy of preprocessed_all.zip", "preprocessed_all.zip"]:
-        if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed", optional=True):
-            consolidated_found = True
-            break
+    z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
+    features_exist = z_at_dir.exists() and any(z_at_dir.glob("*.pt"))
     
-    # 2. Try individual segment zips (fallback/additional)
-    print("\nChecking for segmented/shard feature archives...")
-    extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
-    extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
-    
-    # MOSEI features
-    mosei_found = False
-    for i in range(4):
-        if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
-            mosei_found = True
-    if not mosei_found:
-        extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    if features_exist:
+        print("\n[SKIP] Preprocessed features are already extracted locally. Skipping zip extraction.")
+    else:
+        print("\nExtracting Preprocessed Feature Cache...")
+        # 1. Try consolidated zips
+        consolidated_found = False
+        for zip_candidate in ["preprocessed.zip", "Copy of preprocessed_all.zip", "preprocessed_all.zip"]:
+            if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed", optional=True):
+                consolidated_found = True
+                break
+        
+        # 2. Try individual segment zips (fallback/additional)
+        print("\nChecking for segmented/shard feature archives...")
+        extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+        extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
+        
+        # MOSEI features
+        mosei_found = False
+        for i in range(4):
+            if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
+                mosei_found = True
+        if not mosei_found:
+            extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
 
     # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
     print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
