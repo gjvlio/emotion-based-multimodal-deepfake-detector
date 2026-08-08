@@ -25,16 +25,24 @@ def search_drive_file(zip_name: str) -> Path | None:
                     return f
     return None
 
-def extract_zip(zip_name: str, extract_to: Path) -> bool:
+def extract_zip(zip_name: str, extract_to: Path, optional: bool = False) -> bool:
     zip_path = search_drive_file(zip_name)
     if not zip_path:
-        print(f"  [MISSING - REQUIRED] {zip_name}")
+        tag = "OPTIONAL" if optional else "MISSING - REQUIRED"
+        print(f"  [{tag}] {zip_name}")
         return False
     size_mb = zip_path.stat().st_size / 1e6
     print(f"  Extracting {zip_name} ({size_mb:.1f} MB) from {zip_path.parent.name}/{zip_path.name} ...")
-    extract_to.mkdir(parents=True, exist_ok=True)
+    
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(extract_to)
+        namelist = zf.namelist()
+        if not namelist:
+            return False
+        # Check if the zip already contains root directories like 'data/' or 'data/preprocessed/'
+        has_data_prefix = any(name.startswith("data/") for name in namelist)
+        dest = REPO_ROOT if has_data_prefix else extract_to
+        dest.mkdir(parents=True, exist_ok=True)
+        zf.extractall(dest)
     print("  Done.")
     return True
 
@@ -51,14 +59,25 @@ def main():
 
     # Extract Preprocessed features cache
     print("\nExtracting Preprocessed Feature Cache...")
-    preprocessed_ok = False
+    # 1. Try consolidated zips
+    consolidated_found = False
     for zip_candidate in ["preprocessed.zip", "Copy of preprocessed_all.zip", "preprocessed_all.zip"]:
-        if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed"):
-            preprocessed_ok = True
+        if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed", optional=True):
+            consolidated_found = True
             break
-    if not preprocessed_ok:
-        print("ERROR: Could not find preprocessed feature zip in Drive.")
-        return
+    
+    # 2. Try individual segment zips (fallback/additional)
+    print("\nChecking for segmented/shard feature archives...")
+    extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    
+    # MOSEI features
+    mosei_found = False
+    for i in range(4):
+        if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
+            mosei_found = True
+    if not mosei_found:
+        extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
 
     # Validate and generate manifests
     print("\nValidating preprocessed features and generating dataset splits...")

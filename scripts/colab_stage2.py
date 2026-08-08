@@ -27,16 +27,24 @@ def search_drive_file(zip_name: str) -> Path | None:
                     return f
     return None
 
-def extract_zip(zip_name: str, extract_to: Path) -> bool:
+def extract_zip(zip_name: str, extract_to: Path, optional: bool = False) -> bool:
     zip_path = search_drive_file(zip_name)
     if not zip_path:
-        print(f"  [MISSING - REQUIRED] {zip_name}")
+        tag = "OPTIONAL" if optional else "MISSING - REQUIRED"
+        print(f"  [{tag}] {zip_name}")
         return False
     size_mb = zip_path.stat().st_size / 1e6
     print(f"  Extracting {zip_name} ({size_mb:.1f} MB) from {zip_path.parent.name}/{zip_path.name} ...")
-    extract_to.mkdir(parents=True, exist_ok=True)
+    
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(extract_to)
+        namelist = zf.namelist()
+        if not namelist:
+            return False
+        # Check if the zip already contains root directories like 'data/' or 'data/preprocessed/'
+        has_data_prefix = any(name.startswith("data/") for name in namelist)
+        dest = REPO_ROOT if has_data_prefix else extract_to
+        dest.mkdir(parents=True, exist_ok=True)
+        zf.extractall(dest)
     print("  Done.")
     return True
 
@@ -73,14 +81,25 @@ def main():
 
     # 1. Extract Preprocessed features cache
     print("\nExtracting Preprocessed Feature Cache...")
-    preprocessed_ok = False
+    # Try consolidated zips
+    consolidated_found = False
     for zip_candidate in ["preprocessed.zip", "Copy of preprocessed_all.zip", "preprocessed_all.zip"]:
-        if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed"):
-            preprocessed_ok = True
+        if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed", optional=True):
+            consolidated_found = True
             break
-    if not preprocessed_ok:
-        print("ERROR: Could not find preprocessed feature zip in Drive.")
-        return
+    
+    # Try individual segment zips (fallback/additional)
+    print("\nChecking for segmented/shard feature archives...")
+    extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    
+    # MOSEI features
+    mosei_found = False
+    for i in range(4):
+        if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
+            mosei_found = True
+    if not mosei_found:
+        extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
 
     # 2. Extract Raw Video/Audio Clips
     print("\nExtracting Raw Datasets (Phase 2)...")
@@ -120,7 +139,6 @@ def main():
     print("\n" + "=" * 60)
     print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 40 EPOCHS")
     print("=" * 60)
-    # Using 40 epochs for Phase 2 as intended
     cmd_p2 = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode emotion_bilinear --phase2_epochs 40 --phase2_batch 4 --phase2_freeze_layers 10"
     os.system(cmd_p2)
 
