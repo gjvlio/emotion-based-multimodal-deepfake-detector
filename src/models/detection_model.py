@@ -147,6 +147,14 @@ class DeepfakeDetector(nn.Module):
             p.requires_grad = True
 
         # ViT: encoder.layer[-n_layers:]
+        print("\n[DEBUG] type(self._vit) =", type(self._vit))
+        print("[DEBUG] self._vit.__class__.__module__ =", self._vit.__class__.__module__)
+        print("[DEBUG] hasattr(self._vit, 'encoder') =", hasattr(self._vit, 'encoder'))
+        print("[DEBUG] hasattr(self._vit, 'vit') =", hasattr(self._vit, 'vit'))
+        if hasattr(self._vit, 'vit'):
+            print("[DEBUG] type(self._vit.vit) =", type(self._vit.vit))
+            print("[DEBUG] hasattr(self._vit.vit, 'encoder') =", hasattr(self._vit.vit, 'encoder'))
+            
         vit_encoder = getattr(self._vit, "encoder", None)
         if vit_encoder is None and hasattr(self._vit, "vit"):
             vit_encoder = getattr(self._vit.vit, "encoder", None)
