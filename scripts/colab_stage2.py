@@ -136,7 +136,22 @@ def main():
     extract_zip("tracks_1_2_3_4.zip", REPO_ROOT / "data")
     extract_zip("meld_raw.zip", REPO_ROOT / "data")
     extract_zip("mustard.zip", REPO_ROOT / "data")
-    extract_zip("Fakeavceleb.zip", REPO_ROOT / "data")
+    
+    # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
+    print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
+    csv_path = search_drive_file("meta_data.csv")
+    if not csv_path:
+        csv_path = search_drive_file("metadata.csv")  # Try fallback name
+    
+    if csv_path:
+        dest_dir = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(csv_path, dest_dir / "meta_data.csv")
+        print(f"  Successfully copied FakeAVCeleb metadata file to: {dest_dir / 'meta_data.csv'}")
+    else:
+        # Check if the zip file is present instead
+        print("  meta_data.csv not found directly. Checking for fakeavceleb.zip...")
+        extract_zip("fakeavceleb.zip", REPO_ROOT / "data", optional=True)
 
     # 3. Remap Windows paths to Colab path structure
     print("\nRemapping dataset video paths...")

@@ -87,7 +87,12 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
                 continue
 
             video_path = FAV_ROOT / cat / race / gender / source / filename
-            if not video_path.exists():
+            clip_id = f"fav_{source}_{Path(filename).stem}"
+            z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
+            z_v_p = REPO_ROOT / "data/preprocessed/features/z_v" / f"{clip_id}.pt"
+            
+            features_cached = z_at_p.exists() and z_v_p.exists()
+            if not features_cached and not video_path.exists():
                 missing += 1
                 continue
 
