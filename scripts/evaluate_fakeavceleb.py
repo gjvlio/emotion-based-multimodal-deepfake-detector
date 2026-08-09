@@ -166,19 +166,80 @@ def run_inference(
 
     pbar = tqdm(clips, desc="Evaluating", unit="clip", dynamic_ncols=True)
     for c in pbar:
-        # Feature extraction (cached after first run)
-        feats = pipeline.process(c["clip_id"], c["video_path"], force=no_cache)
-        if feats is None:
-            log.warning(f"Feature extraction failed: {c['clip_id']} — skipping")
-            continue
+        # Check if we should run end-to-end using un-frozen backbones
+        if model._backbones_loaded:
+            import torchaudio
+            from PIL import Image
+            from transformers import Wav2Vec2FeatureExtractor, BertTokenizer, ViTImageProcessor
+            from src.preprocessing.visual import extract_frames
+            from src.preprocessing.filters import frames_to_pil
+            
+            # 1. Audio
+            wav_path = pipeline._wav_path(c["clip_id"])
+            try:
+                if wav_path.exists():
+                    wav, sr = torchaudio.load(str(wav_path))
+                else:
+                    wav, sr = torchaudio.load(c["video_path"])
+                if wav.shape[0] > 1:
+                    wav = wav.mean(0, keepdim=True)
+                if sr != 16000:
+                    wav = torchaudio.functional.resample(wav, sr, 16000)
+                
+                wav2vec_proc = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
+                audio_enc = wav2vec_proc(
+                    wav.squeeze(0).numpy(), sampling_rate=16000, return_tensors="pt",
+                    padding="max_length", max_length=80000, truncation=True
+                )
+                audio_values = audio_enc.input_values.to(device)
+            except Exception:
+                audio_values = torch.zeros(1, 80000).to(device)
+                
+            # 2. Text
+            txt_path = pipeline._txt_path(c["clip_id"])
+            try:
+                text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
+                bert_tok = BertTokenizer.from_pretrained("bert-base-uncased")
+                bert_enc = bert_tok(
+                    text, return_tensors="pt",
+                    padding="max_length", max_length=128, truncation=True
+                )
+                input_ids = bert_enc.input_ids.to(device)
+                attention_mask = bert_enc.attention_mask.to(device)
+            except Exception:
+                input_ids = torch.zeros(1, 128, dtype=torch.long).to(device)
+                attention_mask = torch.zeros(1, 128, dtype=torch.long).to(device)
+                
+            # 3. Visual
+            try:
+                frames = extract_frames(c["video_path"], target_fps=25.0)
+                pils = frames_to_pil(frames[:8])
+                while len(pils) < 8:
+                    pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
+                vit_proc = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224")
+                vit_enc = vit_proc(pils, return_tensors="pt")
+                keyframe_pixels = vit_enc.pixel_values.to(device)
+            except Exception:
+                keyframe_pixels = torch.zeros(8, 3, 224, 224).to(device)
+                
+            with torch.no_grad():
+                out = model(audio_values, input_ids, attention_mask, keyframe_pixels.unsqueeze(0))
+                score = torch.sigmoid(out.logit).item()
+                pred = 1 if score >= 0.5 else 0
+        else:
+            # Phase 1: load precomputed feature vectors from cache
+            feats = pipeline.process(c["clip_id"], c["video_path"], force=no_cache)
+            if feats is None:
+                log.warning(f"Feature extraction failed: {c['clip_id']} — skipping")
+                continue
 
-        z_at = feats.z_at.unsqueeze(0).to(device)   # (1, 1536)
-        z_v  = feats.z_v.unsqueeze(0).to(device)    # (1, 768)
+            z_at = feats.z_at.unsqueeze(0).to(device)   # (1, 1536)
+            z_v  = feats.z_v.unsqueeze(0).to(device)    # (1, 768)
 
-        with torch.no_grad():
-            out   = model.forward_from_features(z_at, z_v)
-            score = torch.sigmoid(out.logit).item()     # P(fake) ∈ [0, 1]
-            pred  = 1 if score >= 0.5 else 0
+            with torch.no_grad():
+                out   = model.forward_from_features(z_at, z_v)
+                score = torch.sigmoid(out.logit).item()     # P(fake) ∈ [0, 1]
+                pred  = 1 if score >= 0.5 else 0
 
         results.append({
             "clip_id":    c["clip_id"],
@@ -300,13 +361,13 @@ def main():
         print(f"ERROR: FakeAVCeleb metadata not found: {META_CSV}")
         return
 
-    _section("FakeAVCeleb v1.2 — Cross-Dataset Benchmark")
+    _section("FakeAVCeleb v1.2 - Cross-Dataset Benchmark")
     hard = not args.no_hard
     print(f"  Checkpoint   : {ckpt_path}")
     print(f"  Device       : {args.device}")
     print(f"  Sample       : {args.n_real} real + {args.n_fake} fake = {args.n_real + args.n_fake} clips")
     print(f"  Fake ratio   : {args.n_fake / (args.n_real + args.n_fake):.0%}  (harder for detector)")
-    print(f"  Hard mode    : {'ON — compound fakes over-sampled (hardest for Δ signal)' if hard else 'OFF — uniform random'}")
+    print(f"  Hard mode    : {'ON - compound fakes over-sampled (hardest for Delta signal)' if hard else 'OFF - uniform random'}")
     print(f"  Seed         : {args.seed}")
     print(f"  Cache        : {'disabled' if args.no_cache else 'enabled (fast on re-run)'}")
     print(f"  NOTE         : FakeAVCeleb is TEST-ONLY — model was never trained on it.")
@@ -324,7 +385,15 @@ def main():
     _section("Loading trained model")
     model = DeepfakeDetector(classifier_mode=args.classifier_mode).to(args.device)
     ckpt  = torch.load(ckpt_path, map_location=args.device, weights_only=True)
-    model.load_state_dict(ckpt["model_state"])
+    
+    # Phase 2 checkpoints contain un-frozen backbones. Detect and load them dynamically.
+    has_backbones = any(k.startswith("vit.") or k.startswith("wav2vec.") or k.startswith("bert.") for k in ckpt["model_state"].keys())
+    if has_backbones:
+        print("  Detected backbone weights in checkpoint. Initializing backbones for evaluation...")
+        model.load_backbones()
+        model.to(args.device)
+        
+    model.load_state_dict(ckpt["model_state"], strict=False)
     model.eval()
     print(f"  Loaded epoch {ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss', '?')}")
 
@@ -349,12 +418,12 @@ def main():
     print(f"  Need extraction: {to_process} clips (~{to_process * 9 // 60}min on GPU)")
 
     # ── Run inference ──────────────────────────────────────────────────────────
-    _section("Running inference (MP4 → features → P(fake))")
+    _section("Running inference (MP4 -> features -> P(fake))")
     results = run_inference(clips, pipeline, model, args.device, args.no_cache)
     print(f"\n  Evaluated : {len(results)} clips  ({len(clips) - len(results)} failed/skipped)")
 
     if not results:
-        print("  No results — check video paths and checkpoint.")
+        print("  No results - check video paths and checkpoint.")
         return
 
     if args.save_csv:
@@ -378,7 +447,7 @@ def main():
     print(f"  TP/FP/FN/TN      : {m['tp']}/{m['fp']}/{m['fn']}/{m['tn']}")
 
     if m["auc"] is not None:
-        ci_str = (f"  [95% CI: {m['auc_lo']:.4f}–{m['auc_hi']:.4f}]"
+        ci_str = (f"  [95% CI: {m['auc_lo']:.4f} to {m['auc_hi']:.4f}]"
                   if m["auc_lo"] is not None else "")
         print(f"  AUC-ROC          : {m['auc']:.4f}{ci_str}")
         # Elpeltagy et al. (2023) — multimodal (whole videos) AUROC: 97.21%
