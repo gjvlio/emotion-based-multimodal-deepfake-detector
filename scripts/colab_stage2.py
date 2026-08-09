@@ -87,6 +87,27 @@ def remap_csv_paths(csv_path: Path, path_cols: list[str]):
     df.to_csv(csv_path, index=False)
     print(f"  {csv_path.name:<35} {changed} paths remapped")
 
+def compress_existing_cache():
+    kf_dir = REPO_ROOT / "data/preprocessed/keyframes"
+    if not kf_dir.exists():
+        return
+    pt_files = list(kf_dir.glob("*.pt"))
+    if not pt_files:
+        return
+    print(f"\n[INFO] Detected {len(pt_files)} old PyTorch (.pt) cache files.")
+    print("       Deleting them to free up disk space since we are now using highly-compressed JPEG (.jpg) caching.")
+    deleted = 0
+    freed_mb = 0
+    for f in pt_files:
+        try:
+            size = f.stat().st_size
+            f.unlink()
+            deleted += 1
+            freed_mb += size / (1024 * 1024)
+        except Exception:
+            pass
+    print(f"  Successfully deleted {deleted} old cache files. Freed {freed_mb/1024:.1f} GB of local disk space!")
+
 def main():
     print("\n" + "=" * 60)
     print("  DEEP-SENTINEL COLAB: STAGE 2 TRAINING (BACKBONE FINE-TUNING)")
@@ -136,15 +157,9 @@ def main():
     else:
         print("\nLocal preprocessed features directory does not exist yet.")
 
-    # 2. Extract Raw Video/Audio Clips
-    raw_exist = (REPO_ROOT / "data/synthetic/track1_fakes").exists() and (REPO_ROOT / "data/raw/MELD").exists()
-    if raw_exist:
-        print("\n[SKIP] Raw datasets are already extracted locally. Skipping datasets zip extraction.")
-    else:
-        print("\nExtracting Raw Datasets (Phase 2)...")
-        extract_zip("tracks_1_2_3_4.zip", REPO_ROOT / "data")
-        extract_zip("meld_raw.zip", REPO_ROOT / "data")
-        extract_zip("mustard.zip", REPO_ROOT / "data")
+    # 2. Extract Raw Video/Audio Clips (Bypassed to save 22.5 GB of local disk space)
+    print("\n[INFO] Bypassing raw dataset zip extraction to save 22.5 GB of local disk space.")
+    print("       The training script will extract raw video files on-the-fly from Google Drive.")
     
     # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
     print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
@@ -162,7 +177,10 @@ def main():
         print("  meta_data.csv not found directly. Checking for fakeavceleb.zip...")
         extract_zip("fakeavceleb.zip", REPO_ROOT / "data", optional=True)
 
-    # 3. Remap Windows paths to Colab path structure
+    # 3. Compress any existing float32 keyframe caches to float16 to reclaim disk space
+    compress_existing_cache()
+
+    # 4. Remap Windows paths to Colab path structure
     print("\nRemapping dataset video paths...")
     remap_csv_paths(REPO_ROOT / "data/synthetic/track1_fakes/metadata.csv", ["output_path", "input_path"])
     remap_csv_paths(REPO_ROOT / "data/synthetic/track2_fakes/metadata.csv", ["output_path", "input_path"])
@@ -170,13 +188,13 @@ def main():
     remap_csv_paths(REPO_ROOT / "data/processed/meld_manifests/meld_real.csv", ["video_path"])
     remap_csv_paths(REPO_ROOT / "data/processed/mosei_manifests/mosei_real.csv", ["video_path"])
 
-    # 4. Generate splits and validation
+    # 5. Generate splits and validation
     print("\nValidating manifests and generating dataset splits...")
     os.chdir(str(REPO_ROOT))
     os.system("python scripts/validate_training_prep.py")
     os.system("python scripts/create_dataset_splits.py")
 
-    # 5. Load Stage 1 checkpoint from Drive
+    # 6. Load Stage 1 checkpoint from Drive
     drive_p1_ckpt = DRIVE_OUTPUT_DIR / "best_phase1_emotion_bilinear.pt"
     local_p1_ckpt = REPO_ROOT / "checkpoints/full/best_phase1_emotion_bilinear.pt"
     local_p1_ckpt.parent.mkdir(parents=True, exist_ok=True)
@@ -189,14 +207,14 @@ def main():
         print("Please run scripts/colab_stage1.py first to create the baseline weights.")
         return
 
-    # 6. Run Stage 2 Training (40 epochs)
+    # 7. Run Stage 2 Training (40 epochs)
     print("\n" + "=" * 60)
     print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 40 EPOCHS")
     print("=" * 60)
     cmd_p2 = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode emotion_bilinear --phase2_epochs 40 --phase2_batch 4 --phase2_freeze_layers 10"
     os.system(cmd_p2)
 
-    # 7. Backup Phase 2 checkpoint to Drive
+    # 8. Backup Phase 2 checkpoint to Drive
     p2_ckpt = REPO_ROOT / "checkpoints/full/best_phase2_emotion_bilinear.pt"
     if p2_ckpt.exists():
         shutil.copy2(p2_ckpt, DRIVE_OUTPUT_DIR / "best_phase2_emotion_bilinear.pt")
@@ -207,7 +225,7 @@ def main():
         shutil.copytree(logs, DRIVE_OUTPUT_DIR / "logs_phase2_emotion_bilinear", dirs_exist_ok=True)
         print("[BACKUP] Saved training logs to Google Drive.")
 
-    # 8. Run FakeAVCeleb evaluation on the fine-tuned model
+    # 9. Run FakeAVCeleb evaluation on the fine-tuned model
     print("\n" + "=" * 60)
     print("  RUNNING CROSS-DATASET BENCHMARK (FAKEAVCELEB)")
     print("=" * 60)

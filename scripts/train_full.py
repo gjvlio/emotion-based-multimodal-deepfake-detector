@@ -90,6 +90,87 @@ def _load_manifest_records(csv_path: Path) -> list[dict]:
     return records
 
 
+class ZipExtractor:
+    def __init__(self):
+        self.zip_handles = {}
+        self.drive_dir = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
+        # List of expected ZIP archives
+        zip_names = ["tracks_1_2_3_4.zip", "meld_raw.zip", "mustard.zip"]
+        for name in zip_names:
+            path = self._find_file(self.drive_dir, name)
+            if path:
+                try:
+                    import zipfile
+                    self.zip_handles[name] = zipfile.ZipFile(path, 'r')
+                    print(f"[ZipExtractor] Connected on-demand reader for: {path.name}")
+                except Exception as e:
+                    print(f"[ZipExtractor] Failed to open {name}: {e}")
+
+    def _find_file(self, start_dir: Path, name: str) -> Path | None:
+        if not start_dir.exists():
+            return None
+        # Check standard checkpoints/datasets directories first to make it fast
+        for p in [start_dir / "datasets" / name, start_dir / name]:
+            if p.exists():
+                return p
+        # Fallback to recursive search if not found directly
+        for p in start_dir.rglob(name):
+            return p
+        return None
+
+    def extract_if_needed(self, local_path_str: str) -> str:
+        local_path = Path(local_path_str)
+        if local_path.exists():
+            return local_path_str
+
+        # If we have no zip handles, we can't extract
+        if not self.zip_handles:
+            return local_path_str
+
+        # Get path relative to the REPO_ROOT (thesis folder)
+        try:
+            rel_path = local_path.relative_to(REPO_ROOT)
+            rel_path_str = str(rel_path).replace("\\", "/")
+        except Exception:
+            rel_path_str = str(local_path).replace("\\", "/")
+
+        # Try to locate the file in the open zip archives
+        for zip_name, zh in self.zip_handles.items():
+            # Internal paths might not include 'data/' prefix depending on how it was zipped
+            internal_paths = [rel_path_str, rel_path_str.replace("data/", "")]
+            for ip in internal_paths:
+                try:
+                    zh.getinfo(ip)
+                except KeyError:
+                    continue
+
+                # Found it! Extract to local temp directory
+                try:
+                    temp_dir = REPO_ROOT / "data/temp_extraction"
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+                    extracted = zh.extract(ip, temp_dir)
+                    return extracted
+                except Exception as e:
+                    print(f"[ZipExtractor] Error extracting {ip} from {zip_name}: {e}")
+
+        return local_path_str
+
+    def cleanup_temp_file(self, path_str: str):
+        if "temp_extraction" in path_str:
+            try:
+                p = Path(path_str)
+                if p.exists() and p.is_file():
+                    p.unlink()
+                # Clean up parent dirs if empty
+                for parent in p.parents:
+                    if parent.name == "temp_extraction":
+                        break
+                    if parent.exists() and not any(parent.iterdir()):
+                        parent.rmdir()
+            except Exception:
+                pass
+
+
 def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
     # Guarantee split manifests exist
     if not TRAIN_MANIFEST_CSV.exists() or not VAL_MANIFEST_CSV.exists() or not TEST_MANIFEST_CSV.exists():
@@ -175,6 +256,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             self._wav2vec_proc = Wav2Vec2FeatureExtractor.from_pretrained(self.WAV2VEC_MODEL)
             self._bert_tok     = BertTokenizer.from_pretrained(self.BERT_MODEL)
             self._vit_proc     = ViTImageProcessor.from_pretrained(self.VIT_MODEL)
+            self._zip_extractor = ZipExtractor()
 
         def __len__(self):
             return len(self._recs)
@@ -201,17 +283,39 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             import torchaudio
             wav_path = self._prep / "audio" / f"{clip_id}.wav"
             
+            # If the wav already exists, load it directly
+            if wav_path.exists():
+                try:
+                    wav, sr = torchaudio.load(str(wav_path))
+                    if wav.shape[0] > 1:
+                        wav = wav.mean(0, keepdim=True)
+                    if sr != 16000:
+                        wav = torchaudio.functional.resample(wav, sr, 16000)
+                    enc = self._wav2vec_proc(
+                        wav.squeeze(0).numpy(), sampling_rate=16000, return_tensors="pt",
+                        padding="max_length", max_length=self.MAX_AUDIO, truncation=True,
+                    )
+                    return enc.input_values.squeeze(0)
+                except Exception:
+                    pass
+
+            # Otherwise, extract from zip on Google Drive if needed
+            working_path = self._zip_extractor.extract_if_needed(video_path)
+            
             try:
-                if wav_path.exists():
-                    wav, sr  = torchaudio.load(str(wav_path))
+                if Path(working_path).exists():
+                    wav, sr = torchaudio.load(str(working_path))
+                    # Save mono resampled audio wav file to cache so we don't need the video next time
+                    if wav.shape[0] > 1:
+                        wav = wav.mean(0, keepdim=True)
+                    if sr != 16000:
+                        wav = torchaudio.functional.resample(wav, sr, 16000)
+                        sr = 16000
+                    wav_path.parent.mkdir(parents=True, exist_ok=True)
+                    torchaudio.save(str(wav_path), wav, sr)
                 else:
-                    if video_path and Path(video_path).exists():
-                        wav, sr = torchaudio.load(str(video_path))
-                    else:
-                        print(f"\n[WARNING] Missing audio source for clip '{clip_id}'. "
-                              f"Looked for wav: {wav_path} and video: {video_path}. "
-                              f"Returning zero tensor to prevent crash.")
-                        return torch.zeros(self.MAX_AUDIO)
+                    print(f"\n[WARNING] Missing audio source for clip '{clip_id}'. Returning zero tensor.")
+                    return torch.zeros(self.MAX_AUDIO)
             except Exception as e:
                 print(f"\n[ERROR] Failed to load/decode audio for '{clip_id}' ({e}). Returning zero tensor.")
                 return torch.zeros(self.MAX_AUDIO)
@@ -229,7 +333,6 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
         def _bert_inputs(self, clip_id: str):
             txt_path = self._prep / "transcripts" / f"{clip_id}.txt"
             if not txt_path.exists():
-                # Print a subtle warning so we can track missing transcripts
                 print(f"[DEBUG] Transcript text file missing for '{clip_id}' at: {txt_path}")
             text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
             enc  = self._bert_tok(
@@ -239,24 +342,80 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             return enc.input_ids.squeeze(0), enc.attention_mask.squeeze(0)
 
         def _keyframe_pixels(self, clip_id: str, video_path: str) -> torch.Tensor:
-            kf_path = self._kf_dir / f"{clip_id}.pt"
+            from PIL import Image
+            kf_path = self._kf_dir / f"{clip_id}.jpg"
+            
+            # If the cached JPEG grid already exists, load and slice it
             if kf_path.exists():
-                return torch.load(kf_path, weights_only=True)
+                try:
+                    vp_path = Path(video_path)
+                    if vp_path.exists() and vp_path.is_file():
+                        vp_path.unlink()
+                except Exception:
+                    pass
+                
+                try:
+                    grid_img = Image.open(kf_path)
+                    pils = []
+                    for idx in range(self.N_KEYFRAMES):
+                        crop_box = (self.FRAME_SIZE * idx, 0, self.FRAME_SIZE * (idx + 1), self.FRAME_SIZE)
+                        pils.append(grid_img.crop(crop_box))
+                    enc = self._vit_proc(pils, return_tensors="pt")
+                    return enc.pixel_values
+                except Exception as e:
+                    print(f"[WARNING] Failed to load cached JPEG for {clip_id} ({e}). Re-extracting...")
+            
+            # Extract from zip if needed
+            working_path = self._zip_extractor.extract_if_needed(video_path)
+            
             from src.preprocessing.visual import extract_frames
             from src.preprocessing.filters import frames_to_pil
-            frames = extract_frames(video_path, target_fps=25.0)
+            
+            try:
+                frames = extract_frames(working_path, target_fps=25.0)
+            except Exception as e:
+                print(f"[ERROR] Video frame extraction failed for {clip_id}: {e}")
+                frames = []
+
             if not frames:
-                px = torch.zeros(self.N_KEYFRAMES, 3, self.FRAME_SIZE, self.FRAME_SIZE)
-                torch.save(px, kf_path)
-                return px
+                # Save a black placeholder grid image
+                black_grid = Image.new('RGB', (self.FRAME_SIZE * self.N_KEYFRAMES, self.FRAME_SIZE), (0, 0, 0))
+                black_grid.save(kf_path, 'JPEG', quality=90)
+                self._zip_extractor.cleanup_temp_file(working_path)
+                try:
+                    vp_path = Path(video_path)
+                    if vp_path.exists() and vp_path.is_file():
+                        vp_path.unlink()
+                except Exception:
+                    pass
+                pils = [Image.new('RGB', (self.FRAME_SIZE, self.FRAME_SIZE), (0, 0, 0)) for _ in range(self.N_KEYFRAMES)]
+                enc = self._vit_proc(pils, return_tensors="pt")
+                return enc.pixel_values
+
             pils = frames_to_pil(frames[:self.N_KEYFRAMES])
-            enc  = self._vit_proc(pils, return_tensors="pt")
-            px   = enc.pixel_values
-            if px.shape[0] < self.N_KEYFRAMES:
-                pad = px[-1:].repeat(self.N_KEYFRAMES - px.shape[0], 1, 1, 1)
-                px  = torch.cat([px, pad], dim=0)
-            torch.save(px, kf_path)
-            return px
+            # Pad if fewer frames
+            while len(pils) < self.N_KEYFRAMES:
+                pils.append(pils[-1].copy() if pils else Image.new('RGB', (self.FRAME_SIZE, self.FRAME_SIZE)))
+            
+            # Concatenate horizontally
+            grid_img = Image.new('RGB', (self.FRAME_SIZE * self.N_KEYFRAMES, self.FRAME_SIZE))
+            for idx, img in enumerate(pils):
+                grid_img.paste(img, (self.FRAME_SIZE * idx, 0))
+            grid_img.save(kf_path, 'JPEG', quality=90)
+            
+            # Cleanup temporary extraction files
+            self._zip_extractor.cleanup_temp_file(working_path)
+            
+            # Also clean up any unzipped video_path if unzipped by colab
+            try:
+                vp_path = Path(video_path)
+                if vp_path.exists() and vp_path.is_file():
+                    vp_path.unlink()
+            except Exception:
+                pass
+                
+            enc = self._vit_proc(pils, return_tensors="pt")
+            return enc.pixel_values
 
     train_ds = FullDataset(train_recs)
     val_ds   = FullDataset(val_recs)
