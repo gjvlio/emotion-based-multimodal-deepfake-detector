@@ -174,17 +174,18 @@ def run_inference(
             from src.preprocessing.visual import extract_frames
             from src.preprocessing.filters import frames_to_pil
             
-            # 1. Audio
+            # 1. Audio (Self-Caching Resampled WAV)
             wav_path = pipeline._wav_path(c["clip_id"])
             try:
-                if wav_path.exists():
-                    wav, sr = torchaudio.load(str(wav_path))
-                else:
+                if not wav_path.exists():
                     wav, sr = torchaudio.load(c["video_path"])
-                if wav.shape[0] > 1:
-                    wav = wav.mean(0, keepdim=True)
-                if sr != 16000:
-                    wav = torchaudio.functional.resample(wav, sr, 16000)
+                    if wav.shape[0] > 1:
+                        wav = wav.mean(0, keepdim=True)
+                    if sr != 16000:
+                        wav = torchaudio.functional.resample(wav, sr, 16000)
+                    torchaudio.save(str(wav_path), wav, 16000)
+                else:
+                    wav, sr = torchaudio.load(str(wav_path))
                 
                 wav2vec_proc = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
                 audio_enc = wav2vec_proc(
@@ -210,12 +211,49 @@ def run_inference(
                 input_ids = torch.zeros(1, 128, dtype=torch.long).to(device)
                 attention_mask = torch.zeros(1, 128, dtype=torch.long).to(device)
                 
-            # 3. Visual
+            # 3. Visual (Self-Caching Aligned JPEGs)
+            kf_dir = pipeline.cache_dir / "keyframes"
+            kf_dir.mkdir(parents=True, exist_ok=True)
+            kf_path = kf_dir / f"{c['clip_id']}.jpg"
             try:
-                frames = extract_frames(c["video_path"], target_fps=25.0)
-                pils = frames_to_pil(frames[:8])
-                while len(pils) < 8:
-                    pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
+                if kf_path.exists():
+                    grid_img = Image.open(kf_path)
+                    pils = []
+                    for idx in range(8):
+                        crop_box = (224 * idx, 0, 224 * (idx + 1), 224)
+                        pils.append(grid_img.crop(crop_box))
+                else:
+                    from src.preprocessing.visual import optical_flow_gate, detect_and_align_faces
+                    from src.preprocessing.filters import sharpness_score, select_keyframes
+                    
+                    frames = extract_frames(c["video_path"], target_fps=25.0)
+                    if not frames:
+                        raise ValueError("No frames extracted")
+                        
+                    gated_frames = optical_flow_gate(frames, motion_threshold=0.3)
+                    face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.7)
+                    
+                    if not face_results:
+                        face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.0)
+                    if not face_results:
+                        face_results = detect_and_align_faces(frames, detector="retinaface", confidence_threshold=0.0)
+                    if not face_results:
+                        face_results = [(f, sharpness_score(f)) for f in frames]
+                        
+                    crops = [r[0] for r in face_results]
+                    scores = [r[1] for r in face_results]
+                    keyframes = select_keyframes(crops, scores, k=8)
+                    pils = frames_to_pil(keyframes, size=224)
+                    
+                    while len(pils) < 8:
+                        pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
+                        
+                    # Save horizontal concatenated JPEG strip to cache
+                    grid_img = Image.new('RGB', (224 * 8, 224))
+                    for idx, img in enumerate(pils):
+                        grid_img.paste(img, (224 * idx, 0))
+                    grid_img.save(kf_path, 'JPEG', quality=90)
+                
                 vit_proc = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224")
                 vit_enc = vit_proc(pils, return_tensors="pt")
                 keyframe_pixels = vit_enc.pixel_values.to(device)
