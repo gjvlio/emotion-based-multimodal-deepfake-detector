@@ -116,10 +116,28 @@ class ZipExtractor:
                 
                 try:
                     import zipfile
-                    self.zip_handles[name] = zipfile.ZipFile(local_path, 'r')
+                    zf = zipfile.ZipFile(local_path, 'r')
+                    # Verify integrity of local copy (checks CRC-32 and file headers)
+                    bad_file = zf.testzip()
+                    if bad_file:
+                        raise ValueError(f"Local file copy is corrupted (bad entry: {bad_file})")
+                    
+                    self.zip_handles[name] = zf
                     print(f"[ZipExtractor] Connected on-demand reader for: {local_path.name}")
                 except Exception as e:
-                    print(f"[ZipExtractor] Failed to open {name}: {e}")
+                    print(f"[ZipExtractor] Local copy check failed for {name}: {e}. Falling back to Google Drive streaming...")
+                    # Delete corrupted local copy to clean the space
+                    if local_path.exists() and local_path != drive_path:
+                        try:
+                            local_path.unlink()
+                        except Exception:
+                            pass
+                    try:
+                        import zipfile
+                        self.zip_handles[name] = zipfile.ZipFile(drive_path, 'r')
+                        print(f"[ZipExtractor] Connected on-demand reader directly to Drive: {drive_path.name}")
+                    except Exception as ex:
+                        print(f"[ZipExtractor] Failed to open {name} directly from Drive: {ex}")
 
     def _find_file(self, start_dir: Path, name: str) -> Path | None:
         if not start_dir.exists():
