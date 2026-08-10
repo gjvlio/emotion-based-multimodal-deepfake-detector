@@ -94,15 +94,30 @@ class ZipExtractor:
     def __init__(self):
         self.zip_handles = {}
         self.drive_dir = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
+        self.local_zip_dir = REPO_ROOT / "data/zips"
+        self.local_zip_dir.mkdir(parents=True, exist_ok=True)
+        
         # List of expected ZIP archives
-        zip_names = ["tracks_1_2_3_4.zip", "meld_raw.zip", "mustard.zip"]
+        zip_names = ["tracks_1_2_3_4.zip", "meld_raw.zip", "mustard.zip", "cmumosei.zip"]
         for name in zip_names:
-            path = self._find_file(self.drive_dir, name)
-            if path:
+            drive_path = self._find_file(self.drive_dir, name)
+            if drive_path:
+                local_path = self.local_zip_dir / name
+                # Copy to local Colab SSD for reliable reading and to prevent network drops
+                if not local_path.exists():
+                    try:
+                        print(f"[ZipExtractor] Copying {name} to local Colab SSD for reliable high-speed training...")
+                        import shutil
+                        shutil.copy2(drive_path, local_path)
+                        print(f"[ZipExtractor] Copied {name} successfully.")
+                    except Exception as e:
+                        print(f"[ZipExtractor] Failed to copy {name} locally: {e}. Falling back to Drive streaming...")
+                        local_path = drive_path
+                
                 try:
                     import zipfile
-                    self.zip_handles[name] = zipfile.ZipFile(path, 'r')
-                    print(f"[ZipExtractor] Connected on-demand reader for: {path.name}")
+                    self.zip_handles[name] = zipfile.ZipFile(local_path, 'r')
+                    print(f"[ZipExtractor] Connected on-demand reader for: {local_path.name}")
                 except Exception as e:
                     print(f"[ZipExtractor] Failed to open {name}: {e}")
 
@@ -137,21 +152,40 @@ class ZipExtractor:
         # Try to locate the file in the open zip archives
         for zip_name, zh in self.zip_handles.items():
             # Internal paths might not include 'data/' prefix depending on how it was zipped
-            internal_paths = [rel_path_str, rel_path_str.replace("data/", "")]
+            internal_paths = [
+                rel_path_str,
+                rel_path_str.replace("data/", ""),
+                rel_path_str.replace("data/raw/", "")
+            ]
+            ip_found = None
             for ip in internal_paths:
                 try:
                     zh.getinfo(ip)
+                    ip_found = ip
+                    break
                 except KeyError:
                     continue
 
+            # Fallback search if direct match fails
+            if ip_found is None:
+                try:
+                    target_suffix = "/" + local_path.name
+                    for name in zh.namelist():
+                        if name.endswith(target_suffix) or name == local_path.name:
+                            ip_found = name
+                            break
+                except Exception:
+                    pass
+
+            if ip_found:
                 # Found it! Extract to local temp directory
                 try:
                     temp_dir = REPO_ROOT / "data/temp_extraction"
                     temp_dir.mkdir(parents=True, exist_ok=True)
-                    extracted = zh.extract(ip, temp_dir)
+                    extracted = zh.extract(ip_found, temp_dir)
                     return extracted
                 except Exception as e:
-                    print(f"[ZipExtractor] Error extracting {ip} from {zip_name}: {e}")
+                    print(f"[ZipExtractor] Error extracting {ip_found} from {zip_name}: {e}")
 
         return local_path_str
 
@@ -333,7 +367,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
         def _bert_inputs(self, clip_id: str):
             txt_path = self._prep / "transcripts" / f"{clip_id}.txt"
             if not txt_path.exists():
-                print(f"[DEBUG] Transcript text file missing for '{clip_id}' at: {txt_path}")
+                log.debug(f"Transcript text file missing for '{clip_id}' at: {txt_path}")
             text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
             enc  = self._bert_tok(
                 text, return_tensors="pt",
@@ -548,12 +582,25 @@ def main():
         print(f"  Grad checkpointing: {'OFF (--no_grad_ckpt)' if args.no_grad_ckpt else 'ON (saves VRAM)'}")
         print(f"  Keyframe cache    : {KEYFRAME_CACHE_DIR}")
 
-        # Filter out MOSEI records from Phase 2 training if raw video files are not available
+        # Filter out MOSEI records from Phase 2 training if NEITHER raw video files NOR cmumosei.zip are available
         mosei_raw_dir = REPO_ROOT / "data/raw/CMU-MOSEI"
-        if not mosei_raw_dir.exists():
-            print(f"\n[INFO] Raw CMU-MOSEI video directory not found at: {mosei_raw_dir}")
+        drive_mosei_zip = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/cmumosei.zip")
+        drive_mosei_zip_ds = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/datasets/cmumosei.zip")
+        local_mosei_zip = REPO_ROOT / "data/zips/cmumosei.zip"
+        
+        has_mosei_source = (
+            mosei_raw_dir.exists() or 
+            drive_mosei_zip.exists() or 
+            drive_mosei_zip_ds.exists() or
+            local_mosei_zip.exists()
+        )
+        
+        if not has_mosei_source:
+            print(f"\n[INFO] Raw CMU-MOSEI video source or cmumosei.zip archive not found.")
             print("       Excluding MOSEI clips from Phase 2 backbone fine-tuning.")
             p2_train_recs = [r for r in p2_train_recs if r["source_pipeline"] != "mosei"]
+        else:
+            print(f"\n[INFO] Found CMU-MOSEI source archive/directory. Including MOSEI clips in Phase 2!")
 
         p2_ds = Phase2FullDataset(p2_train_recs, PREPROCESSED_DIR, KEYFRAME_CACHE_DIR)
         p2_loader = DataLoader(p2_ds, shuffle=True,
