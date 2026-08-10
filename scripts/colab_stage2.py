@@ -122,6 +122,17 @@ def main():
     # Scan and print Drive files for visibility
     scan_drive_zips()
 
+    # Clean up old unzipped raw folders to free up disk space for local ZIP copies
+    print("\nChecking for old unzipped raw video directories to clean up...")
+    for d in ["CMU-MOSEI", "MELD", "MUStARD"]:
+        raw_dir = REPO_ROOT / "data/raw" / d
+        if raw_dir.exists():
+            try:
+                print(f"  [CLEANUP] Deleting old unzipped folder: {d} to reclaim disk space...")
+                shutil.rmtree(raw_dir)
+            except Exception as e:
+                print(f"  [CLEANUP WARNING] Failed to delete {d}: {e}")
+
     # 1. Extract Preprocessed features cache
     z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
     features_exist = z_at_dir.exists() and any(z_at_dir.glob("*.pt"))
