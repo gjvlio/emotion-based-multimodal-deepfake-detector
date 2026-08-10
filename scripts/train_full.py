@@ -93,51 +93,18 @@ def _load_manifest_records(csv_path: Path) -> list[dict]:
 class ZipExtractor:
     def __init__(self):
         self.zip_handles = {}
+        self.drive_paths = {}
         self.drive_dir = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
         self.local_zip_dir = REPO_ROOT / "data/zips"
         self.local_zip_dir.mkdir(parents=True, exist_ok=True)
         
-        # List of expected ZIP archives
+        # List of expected ZIP archives - just locate Drive paths on startup
         zip_names = ["tracks_1_2_3_4.zip", "meld_raw.zip", "mustard.zip", "cmumosei.zip"]
         for name in zip_names:
             drive_path = self._find_file(self.drive_dir, name)
             if drive_path:
-                local_path = self.local_zip_dir / name
-                # Copy to local Colab SSD for reliable reading and to prevent network drops
-                if not local_path.exists():
-                    try:
-                        print(f"[ZipExtractor] Copying {name} to local Colab SSD for reliable high-speed training...")
-                        import shutil
-                        shutil.copy2(drive_path, local_path)
-                        print(f"[ZipExtractor] Copied {name} successfully.")
-                    except Exception as e:
-                        print(f"[ZipExtractor] Failed to copy {name} locally: {e}. Falling back to Drive streaming...")
-                        local_path = drive_path
-                
-                try:
-                    import zipfile
-                    zf = zipfile.ZipFile(local_path, 'r')
-                    # Verify integrity of local copy (checks CRC-32 and file headers)
-                    bad_file = zf.testzip()
-                    if bad_file:
-                        raise ValueError(f"Local file copy is corrupted (bad entry: {bad_file})")
-                    
-                    self.zip_handles[name] = zf
-                    print(f"[ZipExtractor] Connected on-demand reader for: {local_path.name}")
-                except Exception as e:
-                    print(f"[ZipExtractor] Local copy check failed for {name}: {e}. Falling back to Google Drive streaming...")
-                    # Delete corrupted local copy to clean the space
-                    if local_path.exists() and local_path != drive_path:
-                        try:
-                            local_path.unlink()
-                        except Exception:
-                            pass
-                    try:
-                        import zipfile
-                        self.zip_handles[name] = zipfile.ZipFile(drive_path, 'r')
-                        print(f"[ZipExtractor] Connected on-demand reader directly to Drive: {drive_path.name}")
-                    except Exception as ex:
-                        print(f"[ZipExtractor] Failed to open {name} directly from Drive: {ex}")
+                self.drive_paths[name] = drive_path
+                print(f"[ZipExtractor] Registered Drive source for: {name}")
 
     def _find_file(self, start_dir: Path, name: str) -> Path | None:
         if not start_dir.exists():
@@ -151,13 +118,69 @@ class ZipExtractor:
             return p
         return None
 
+    def _get_target_zip_name(self, rel_path_str: str) -> str | None:
+        p = rel_path_str.lower()
+        if "mosei" in p:
+            return "cmumosei.zip"
+        elif "meld" in p:
+            return "meld_raw.zip"
+        elif "mustard" in p:
+            return "mustard.zip"
+        elif "track" in p or "synthetic" in p:
+            return "tracks_1_2_3_4.zip"
+        return None
+
+    def _lazy_load_zip(self, name: str):
+        if name in self.zip_handles:
+            return self.zip_handles[name]
+            
+        drive_path = self.drive_paths.get(name)
+        if not drive_path:
+            return None
+            
+        local_path = self.local_zip_dir / name
+        if not local_path.exists():
+            try:
+                print(f"[ZipExtractor] On-demand copy: copying {name} to local Colab SSD...")
+                import shutil
+                shutil.copy2(drive_path, local_path)
+                print(f"[ZipExtractor] Copied {name} successfully.")
+            except Exception as e:
+                print(f"[ZipExtractor] Failed to copy {name} locally: {e}. Streaming directly from Drive...")
+                local_path = drive_path
+                
+        try:
+            import zipfile
+            zf = zipfile.ZipFile(local_path, 'r')
+            # Verify integrity of local copy (checks CRC-32 and file headers)
+            bad_file = zf.testzip()
+            if bad_file:
+                raise ValueError(f"Local file copy is corrupted (bad entry: {bad_file})")
+            
+            self.zip_handles[name] = zf
+            print(f"[ZipExtractor] Connected on-demand reader for: {local_path.name}")
+            return zf
+        except Exception as e:
+            print(f"[ZipExtractor] Local copy check failed for {name}: {e}. Falling back to Google Drive streaming...")
+            # Delete corrupted local copy to clean the space
+            if local_path.exists() and local_path != drive_path:
+                try:
+                    local_path.unlink()
+                except Exception:
+                    pass
+            try:
+                import zipfile
+                zf = zipfile.ZipFile(drive_path, 'r')
+                self.zip_handles[name] = zf
+                print(f"[ZipExtractor] Connected on-demand reader directly to Drive: {drive_path.name}")
+                return zf
+            except Exception as ex:
+                print(f"[ZipExtractor] Failed to open {name} directly from Drive: {ex}")
+                return None
+
     def extract_if_needed(self, local_path_str: str) -> str:
         local_path = Path(local_path_str)
         if local_path.exists():
-            return local_path_str
-
-        # If we have no zip handles, we can't extract
-        if not self.zip_handles:
             return local_path_str
 
         # Get path relative to the REPO_ROOT (thesis folder)
@@ -167,43 +190,51 @@ class ZipExtractor:
         except Exception:
             rel_path_str = str(local_path).replace("\\", "/")
 
-        # Try to locate the file in the open zip archives
-        for zip_name, zh in self.zip_handles.items():
-            # Internal paths might not include 'data/' prefix depending on how it was zipped
-            internal_paths = [
-                rel_path_str,
-                rel_path_str.replace("data/", ""),
-                rel_path_str.replace("data/raw/", "")
-            ]
-            ip_found = None
-            for ip in internal_paths:
-                try:
-                    zh.getinfo(ip)
-                    ip_found = ip
-                    break
-                except KeyError:
-                    continue
+        # Deduce which ZIP is needed
+        zip_name = self._get_target_zip_name(rel_path_str)
+        if not zip_name or zip_name not in self.drive_paths:
+            return local_path_str
+            
+        # Lazy-load only this specific ZIP!
+        zh = self._lazy_load_zip(zip_name)
+        if not zh:
+            return local_path_str
 
-            # Fallback search if direct match fails
-            if ip_found is None:
-                try:
-                    target_suffix = "/" + local_path.name
-                    for name in zh.namelist():
-                        if name.endswith(target_suffix) or name == local_path.name:
-                            ip_found = name
-                            break
-                except Exception:
-                    pass
+        # Internal paths might not include 'data/' prefix depending on how it was zipped
+        internal_paths = [
+            rel_path_str,
+            rel_path_str.replace("data/", ""),
+            rel_path_str.replace("data/raw/", "")
+        ]
+        ip_found = None
+        for ip in internal_paths:
+            try:
+                zh.getinfo(ip)
+                ip_found = ip
+                break
+            except KeyError:
+                continue
 
-            if ip_found:
-                # Found it! Extract to local temp directory
-                try:
-                    temp_dir = REPO_ROOT / "data/temp_extraction"
-                    temp_dir.mkdir(parents=True, exist_ok=True)
-                    extracted = zh.extract(ip_found, temp_dir)
-                    return extracted
-                except Exception as e:
-                    print(f"[ZipExtractor] Error extracting {ip_found} from {zip_name}: {e}")
+        # Fallback search if direct match fails
+        if ip_found is None:
+            try:
+                target_suffix = "/" + local_path.name
+                for name in zh.namelist():
+                    if name.endswith(target_suffix) or name == local_path.name:
+                        ip_found = name
+                        break
+            except Exception:
+                pass
+
+        if ip_found:
+            # Found it! Extract to local temp directory
+            try:
+                temp_dir = REPO_ROOT / "data/temp_extraction"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                extracted = zh.extract(ip_found, temp_dir)
+                return extracted
+            except Exception as e:
+                print(f"[ZipExtractor] Error extracting {ip_found} from {zip_name}: {e}")
 
         return local_path_str
 
