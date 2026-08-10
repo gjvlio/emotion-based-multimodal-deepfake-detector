@@ -148,18 +148,19 @@ def main():
                 consolidated_found = True
                 break
         
-        # Try individual segment zips (fallback/additional)
-        print("\nChecking for segmented/shard feature archives...")
-        extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
-        extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
-        
-        # MOSEI features
-        mosei_found = False
-        for i in range(4):
-            if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
-                mosei_found = True
-        if not mosei_found:
-            extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+        # Try individual segment zips (fallback/additional) only if consolidated zip was not found
+        if not consolidated_found:
+            print("\nChecking for segmented/shard feature archives...")
+            extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+            extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
+            
+            # MOSEI features
+            mosei_found = False
+            for i in range(4):
+                if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
+                    mosei_found = True
+            if not mosei_found:
+                extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
 
     # Print local feature count for validation
     if z_at_dir.exists():
