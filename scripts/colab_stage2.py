@@ -223,7 +223,7 @@ def main():
     print("\n" + "=" * 60)
     print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 10 EPOCHS")
     print("=" * 60)
-    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 10 --classifier_mode emotion_bilinear --phase2_epochs 10 --phase2_batch 8 --phase2_freeze_layers 10 --skip_phase1 --workers 2"
+    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 10 --classifier_mode emotion_bilinear --phase2_epochs 10 --phase2_batch 8 --phase2_freeze_layers 10 --skip_phase1 --workers 0"
     os.system(cmd_p2)
 
     # 8. Backup Phase 2 checkpoint to Drive
