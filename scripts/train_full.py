@@ -433,6 +433,7 @@ def main():
     parser.add_argument("--pos_weight",           type=float, default=None)
     parser.add_argument("--no_sarcasm",           action="store_true")
     parser.add_argument("--no_phase2",            action="store_true")
+    parser.add_argument("--skip_phase1",          action="store_true")
     parser.add_argument("--phase2_epochs",        type=int,   default=5)
     parser.add_argument("--phase2_batch",         type=int,   default=4)
     parser.add_argument("--phase2_lr",            type=float, default=1e-5)
@@ -515,13 +516,27 @@ def main():
     )
 
     # ── Phase 1 ───────────────────────────────────────────────────────────────
-    _section("Phase 1 — Heads + Classifier (frozen backbones)")
-    trainer.train_phase1(
-        lr           = args.lr,
-        weight_decay = 1e-4,
-        max_epochs   = args.epochs,
-        patience     = args.patience,
-    )
+    if args.skip_phase1:
+        _section("Phase 1 — Skipping Phase 1 (Heads + Classifier) training")
+        try:
+            trainer.load_best(phase=1)
+            print("  Successfully loaded Phase 1 checkpoint from local checkpoints directory.")
+        except Exception as e:
+            print(f"  [WARNING] Failed to load Phase 1 checkpoint ({e}). Running Phase 1 training instead...")
+            trainer.train_phase1(
+                lr           = args.lr,
+                weight_decay = 1e-4,
+                max_epochs   = args.epochs,
+                patience     = args.patience,
+            )
+    else:
+        _section("Phase 1 — Heads + Classifier (frozen backbones)")
+        trainer.train_phase1(
+            lr           = args.lr,
+            weight_decay = 1e-4,
+            max_epochs   = args.epochs,
+            patience     = args.patience,
+        )
 
     # ── Phase 2 ───────────────────────────────────────────────────────────────
     best_phase = 1

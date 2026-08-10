@@ -207,11 +207,11 @@ def main():
         print("Please run scripts/colab_stage1.py first to create the baseline weights.")
         return
 
-    # 7. Run Stage 2 Training (40 epochs)
+    # 7. Run Stage 2 Training (10 epochs)
     print("\n" + "=" * 60)
-    print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 40 EPOCHS")
+    print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 10 EPOCHS")
     print("=" * 60)
-    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode emotion_bilinear --phase2_epochs 40 --phase2_batch 4 --phase2_freeze_layers 10"
+    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 10 --classifier_mode emotion_bilinear --phase2_epochs 10 --phase2_batch 4 --phase2_freeze_layers 2 --skip_phase1 --workers 2"
     os.system(cmd_p2)
 
     # 8. Backup Phase 2 checkpoint to Drive
