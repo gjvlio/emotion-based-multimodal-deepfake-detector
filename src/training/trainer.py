@@ -88,6 +88,7 @@ class Trainer:
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.tb           = TBWriter(log_dir)
         self.ckpt_suffix  = ckpt_suffix
+        self.best_val_loss = float("inf")
 
         print(f"\n{'='*60}")
         print(f"  DeepSentinel Trainer initialized")
@@ -119,6 +120,7 @@ class Trainer:
         print(f"  LR={lr}  weight_decay={weight_decay}  max_epochs={max_epochs}")
         print(f"{'='*60}\n")
 
+        self.best_val_loss = float("inf")
         optimizer = AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=lr, weight_decay=weight_decay,
@@ -353,6 +355,7 @@ class Trainer:
             self.model.unfreeze_backbones()
         if grad_ckpt:
             self.model.enable_gradient_checkpointing()
+        self.best_val_loss = float("inf")
         optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = ReduceLROnPlateau(optimizer, patience=2, factor=0.5)
         stopper   = EarlyStopping(patience=patience)
@@ -427,11 +430,12 @@ class Trainer:
         import math
         if math.isnan(current_loss):
             return
+
+        if current_loss >= self.best_val_loss:
+            return
+
+        self.best_val_loss = current_loss
         ckpt = self.ckpt_dir / filename
-        if ckpt.exists():
-            saved = torch.load(ckpt, weights_only=True).get("val_loss", float("inf"))
-            if current_loss >= saved:
-                return
         torch.save(
             {"val_loss": current_loss, "epoch": epoch,
              "model_state": self.model.state_dict()},
@@ -440,21 +444,16 @@ class Trainer:
         print(f"  [CKPT] Saved {filename}  (val_loss={current_loss:.4f}, epoch={epoch})")
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
-        # Copy to Drive ONLY IF current_loss is better than existing Drive checkpoint's val_loss
+        # Directly overwrite Drive latest folder with new best checkpoint from active run
         drive_backup = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest")
         drive_backup.mkdir(parents=True, exist_ok=True)
         drive_ckpt = drive_backup / filename
         try:
-            if drive_ckpt.exists():
-                drive_saved_loss = torch.load(drive_ckpt, weights_only=True).get("val_loss", float("inf"))
-                if current_loss >= drive_saved_loss:
-                    print(f"  [DRIVE BACKUP] Current val_loss ({current_loss:.4f}) >= Drive checkpoint ({drive_saved_loss:.4f}). Keeping best Drive model.")
-                    return
             import shutil
             shutil.copy2(ckpt, drive_ckpt)
-            print(f"  [DRIVE BACKUP] Successfully copied new overall best checkpoint ({filename}, val_loss={current_loss:.4f}) to Google Drive latest folder.")
+            print(f"  [DRIVE OVERWRITE] Overwrote {filename} on Google Drive (latest) with new best model (val_loss={current_loss:.4f}).")
         except Exception as e:
-            print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
+            print(f"  [DRIVE OVERWRITE WARNING] Failed to copy checkpoint to Drive: {e}")
 
     def load_best(self, phase: int = 1) -> None:
         filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"
@@ -472,20 +471,12 @@ class Trainer:
 
         if drive_source is not None:
             try:
-                should_copy = not local_ckpt.exists()
-                if not should_copy:
-                    local_loss = torch.load(local_ckpt, weights_only=True).get("val_loss", float("inf"))
-                    drive_loss = torch.load(drive_source, weights_only=True).get("val_loss", float("inf"))
-                    if drive_loss < local_loss:
-                        should_copy = True
-                        
-                if should_copy:
-                    import shutil
-                    self.ckpt_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(drive_source, local_ckpt)
-                    print(f"  [DRIVE SYNC] Synced best {filename} from Drive ({drive_source.parent.name}) -> local SSD.")
+                import shutil
+                self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(drive_source, local_ckpt)
+                print(f"  [DRIVE OVERWRITE] Overwrote local checkpoint from Drive ({drive_source.parent.name}) -> {local_ckpt}")
             except Exception as e:
-                print(f"  [DRIVE SYNC WARNING] Failed to copy from Drive: {e}")
+                print(f"  [DRIVE OVERWRITE WARNING] Failed to copy from Drive: {e}")
 
         ckpt = local_ckpt
         if not ckpt.exists():

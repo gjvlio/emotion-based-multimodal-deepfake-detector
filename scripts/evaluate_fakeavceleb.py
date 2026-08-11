@@ -485,19 +485,12 @@ def main():
     drive_source = drive_latest if drive_latest.exists() else (drive_base if drive_base.exists() else None)
     if drive_source is not None:
         try:
-            should_copy = not ckpt_path.exists()
-            if not should_copy:
-                local_loss = torch.load(ckpt_path, weights_only=True).get("val_loss", float("inf"))
-                drive_loss = torch.load(drive_source, weights_only=True).get("val_loss", float("inf"))
-                if drive_loss < local_loss:
-                    should_copy = True
-            if should_copy:
-                import shutil
-                ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(drive_source, ckpt_path)
-                print(f"  [DRIVE SYNC] Synced checkpoint for evaluation from Drive ({drive_source.parent.name}) -> {ckpt_path}")
+            import shutil
+            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(drive_source, ckpt_path)
+            print(f"  [DRIVE OVERWRITE] Overwrote local evaluation checkpoint from Drive ({drive_source.parent.name}) -> {ckpt_path}")
         except Exception as e:
-            print(f"  [DRIVE SYNC WARNING] Failed to copy checkpoint from Drive: {e}")
+            print(f"  [DRIVE OVERWRITE WARNING] Failed to copy checkpoint from Drive: {e}")
 
     if not ckpt_path.exists():
         print(f"ERROR: checkpoint not found: {ckpt_path}")
