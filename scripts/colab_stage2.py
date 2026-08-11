@@ -46,7 +46,15 @@ def search_drive_file(zip_name: str) -> Path | None:
                 return Path(root) / f
     return None
 
-def extract_zip(zip_name: str, extract_to: Path, optional: bool = False) -> bool:
+def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_dir: Optional[Path] = None) -> bool:
+    if check_dir is not None and check_dir.exists():
+        try:
+            if any(check_dir.iterdir()):
+                print(f"  [ALREADY EXTRACTED] Skipping {zip_name} — target {check_dir.name} already exists.")
+                return True
+        except Exception:
+            pass
+
     zip_path = search_drive_file(zip_name)
     if not zip_path:
         tag = "OPTIONAL" if optional else "MISSING - REQUIRED"
@@ -169,16 +177,16 @@ def main():
     else:
         print("\nLocal preprocessed features directory does not exist yet.")
 
-    # 2. Extract Raw Video/Audio Clips (Fully extract to Colab SSD to prevent Drive hangs)
-    print("\n[COLAB PRO] Extracting dataset ZIPs directly to local SSD...")
-    extract_zip("tracks_1_2_3_4.zip", REPO_ROOT / "data", optional=True)
-    extract_zip("meld_raw.zip", REPO_ROOT / "data", optional=True)
-    extract_zip("mustard.zip", REPO_ROOT / "data", optional=True)
-    extract_zip("cmumosei.zip", REPO_ROOT / "data", optional=True)
+    # 2. Extract Raw Video/Audio Clips (Skip if already extracted to local SSD)
+    print("\n[COLAB PRO] Checking raw dataset directories on local SSD...")
+    extract_zip("tracks_1_2_3_4.zip", REPO_ROOT / "data", optional=True, check_dir=REPO_ROOT / "data/synthetic/track1_fakes")
+    extract_zip("meld_raw.zip", REPO_ROOT / "data", optional=True, check_dir=REPO_ROOT / "data/raw/MELD")
+    extract_zip("mustard.zip", REPO_ROOT / "data", optional=True, check_dir=REPO_ROOT / "data/raw/MUStARD")
+    extract_zip("cmumosei.zip", REPO_ROOT / "data", optional=True, check_dir=REPO_ROOT / "data/raw/CMU-MOSEI")
     
     # Extract FakeAVCeleb for cross-dataset evaluation
-    print("\nExtracting FakeAVCeleb test dataset...")
-    extract_zip("fakeavceleb.zip", REPO_ROOT / "data", optional=True)
+    print("\nChecking FakeAVCeleb test dataset...")
+    extract_zip("fakeavceleb.zip", REPO_ROOT / "data", optional=True, check_dir=REPO_ROOT / "data/raw/FakeAVCeleb_v1.2")
 
     # 3. Compress any existing float32 keyframe caches to float16 to reclaim disk space
     compress_existing_cache()
