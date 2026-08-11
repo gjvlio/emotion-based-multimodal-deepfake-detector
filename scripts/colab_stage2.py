@@ -48,27 +48,44 @@ def search_drive_file(zip_name: str) -> Path | None:
     return None
 
 def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_dir: Optional[Path] = None) -> bool:
-    if check_dir is not None and check_dir.exists():
-        try:
-            if any(check_dir.iterdir()):
-                print(f"  [ALREADY EXTRACTED] Skipping {zip_name} — target {check_dir.name} already exists.")
-                return True
-        except Exception:
-            pass
-
     zip_path = search_drive_file(zip_name)
     if not zip_path:
         tag = "OPTIONAL" if optional else "MISSING - REQUIRED"
         print(f"  [{tag}] {zip_name}")
         return False
+        
     size_mb = zip_path.stat().st_size / 1e6
+
+    # Smart automatic sample-file extraction check
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            namelist = zf.namelist()
+            if namelist:
+                has_data_prefix = any(name.startswith("data/") for name in namelist)
+                dest = REPO_ROOT if has_data_prefix else extract_to
+                sample_files = [n for n in namelist if not n.endswith('/') and not n.startswith('__MACOSX')]
+                if sample_files:
+                    sample_check = dest / sample_files[min(5, len(sample_files)-1)]
+                    if sample_check.exists():
+                        print(f"  [ALREADY EXTRACTED] Skipping {zip_name} ({size_mb:.1f} MB) — already extracted on local SSD.")
+                        return True
+    except Exception:
+        pass
+
+    if check_dir is not None and check_dir.exists():
+        try:
+            if any(check_dir.iterdir()):
+                print(f"  [ALREADY EXTRACTED] Skipping {zip_name} ({size_mb:.1f} MB) — directory {check_dir.name} already exists.")
+                return True
+        except Exception:
+            pass
+
     print(f"  Extracting {zip_name} ({size_mb:.1f} MB) from {zip_path.parent.name}/{zip_path.name} ...")
     
     with zipfile.ZipFile(zip_path) as zf:
         namelist = zf.namelist()
         if not namelist:
             return False
-        # Check if the zip already contains root directories like 'data/' or 'data/preprocessed/'
         has_data_prefix = any(name.startswith("data/") for name in namelist)
         dest = REPO_ROOT if has_data_prefix else extract_to
         dest.mkdir(parents=True, exist_ok=True)
