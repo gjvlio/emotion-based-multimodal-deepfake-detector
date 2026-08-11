@@ -440,13 +440,19 @@ class Trainer:
         print(f"  [CKPT] Saved {filename}  (val_loss={current_loss:.4f}, epoch={epoch})")
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
-        # Copy immediately to Drive backup directory if mounted
+        # Copy to Drive ONLY IF current_loss is better than existing Drive checkpoint's val_loss
         drive_backup = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints")
         if drive_backup.exists():
+            drive_ckpt = drive_backup / filename
             try:
+                if drive_ckpt.exists():
+                    drive_saved_loss = torch.load(drive_ckpt, weights_only=True).get("val_loss", float("inf"))
+                    if current_loss >= drive_saved_loss:
+                        print(f"  [DRIVE BACKUP] Current val_loss ({current_loss:.4f}) >= Drive checkpoint ({drive_saved_loss:.4f}). Keeping best Drive model.")
+                        return
                 import shutil
-                shutil.copy2(ckpt, drive_backup / filename)
-                print(f"  [DRIVE BACKUP] Successfully copied {filename} to Google Drive checkpoints directory.")
+                shutil.copy2(ckpt, drive_ckpt)
+                print(f"  [DRIVE BACKUP] Successfully copied new overall best checkpoint ({filename}, val_loss={current_loss:.4f}) to Google Drive.")
             except Exception as e:
                 print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
 
