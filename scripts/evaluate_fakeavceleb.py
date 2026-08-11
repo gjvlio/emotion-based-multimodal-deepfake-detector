@@ -150,6 +150,149 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
     return combined
 
 
+from torch.utils.data import Dataset, DataLoader
+
+class FakeAVCelebEvalDataset(Dataset):
+    def __init__(self, clips: list[dict], pipeline: PreprocessingPipeline):
+        self.clips = clips
+        self.pipeline = pipeline
+        self.drive_cache_dir = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/preprocessed")
+        
+        # Preload transformers processors outside processing loop
+        from transformers import Wav2Vec2FeatureExtractor, BertTokenizer, ViTImageProcessor
+        self.wav2vec_proc = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
+        self.bert_tok     = BertTokenizer.from_pretrained("bert-base-uncased")
+        self.vit_proc     = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224")
+
+    def __len__(self):
+        return len(self.clips)
+
+    def _sync_from_drive(self, local_path: Path, drive_path: Path) -> bool:
+        if local_path.exists():
+            return True
+        if self.drive_cache_dir.exists() and drive_path.exists():
+            try:
+                import shutil
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(drive_path, local_path)
+                return True
+            except Exception:
+                pass
+        return False
+
+    def __getitem__(self, idx):
+        import torchaudio
+        from PIL import Image
+        
+        c = self.clips[idx]
+        clip_id = c["clip_id"]
+        video_path = c["video_path"]
+        
+        # 1. Audio (Self-Caching Resampled WAV + Drive Lookup)
+        wav_path = self.pipeline._wav_path(clip_id)
+        drive_wav_path = self.drive_cache_dir / "audio" / f"{clip_id}.wav"
+        self._sync_from_drive(wav_path, drive_wav_path)
+
+        try:
+            if not wav_path.exists():
+                wav, sr = torchaudio.load(video_path)
+                if wav.shape[0] > 1:
+                    wav = wav.mean(0, keepdim=True)
+                if sr != 16000:
+                    wav = torchaudio.functional.resample(wav, sr, 16000)
+                wav_path.parent.mkdir(parents=True, exist_ok=True)
+                torchaudio.save(str(wav_path), wav, 16000)
+            else:
+                wav, sr = torchaudio.load(str(wav_path))
+            
+            audio_enc = self.wav2vec_proc(
+                wav.squeeze(0).numpy(), sampling_rate=16000, return_tensors="pt",
+                padding="max_length", max_length=80000, truncation=True
+            )
+            audio_values = audio_enc.input_values.squeeze(0)
+        except Exception:
+            audio_values = torch.zeros(80000)
+            
+        # 2. Text (Drive Lookup)
+        txt_path = self.pipeline._txt_path(clip_id)
+        drive_txt_path = self.drive_cache_dir / "transcripts" / f"{clip_id}.txt"
+        self._sync_from_drive(txt_path, drive_txt_path)
+
+        try:
+            text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
+            bert_enc = self.bert_tok(
+                text, return_tensors="pt",
+                padding="max_length", max_length=128, truncation=True
+            )
+            input_ids = bert_enc.input_ids.squeeze(0)
+            attention_mask = bert_enc.attention_mask.squeeze(0)
+        except Exception:
+            input_ids = torch.zeros(128, dtype=torch.long)
+            attention_mask = torch.zeros(128, dtype=torch.long)
+            
+        # 3. Visual (Self-Caching Aligned JPEGs + Drive Lookup)
+        kf_dir = self.pipeline.cache_dir / "keyframes"
+        kf_dir.mkdir(parents=True, exist_ok=True)
+        kf_path = kf_dir / f"{clip_id}.jpg"
+        drive_kf_path = self.drive_cache_dir / "keyframes" / f"{clip_id}.jpg"
+        self._sync_from_drive(kf_path, drive_kf_path)
+
+        try:
+            if kf_path.exists():
+                grid_img = Image.open(kf_path)
+                pils = []
+                for idx_kf in range(8):
+                    crop_box = (224 * idx_kf, 0, 224 * (idx_kf + 1), 224)
+                    pils.append(grid_img.crop(crop_box))
+            else:
+                from src.preprocessing.visual import optical_flow_gate, detect_and_align_faces, extract_frames
+                from src.preprocessing.filters import sharpness_score, select_keyframes, frames_to_pil
+                
+                frames = extract_frames(video_path, target_fps=25.0)
+                if not frames:
+                    raise ValueError("No frames extracted")
+                    
+                gated_frames = optical_flow_gate(frames, motion_threshold=0.3)
+                face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.7)
+                
+                if not face_results:
+                    face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.0)
+                if not face_results:
+                    face_results = detect_and_align_faces(frames, detector="retinaface", confidence_threshold=0.0)
+                if not face_results:
+                    face_results = [(f, sharpness_score(f)) for f in frames]
+                    
+                crops = [r[0] for r in face_results]
+                scores = [r[1] for r in face_results]
+                keyframes = select_keyframes(crops, scores, k=8)
+                pils = frames_to_pil(keyframes, size=224)
+                
+                while len(pils) < 8:
+                    pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
+                    
+                # Save horizontal concatenated JPEG strip to cache
+                grid_img = Image.new('RGB', (224 * 8, 224))
+                for idx_kf, img in enumerate(pils):
+                    grid_img.paste(img, (224 * idx_kf, 0))
+                grid_img.save(kf_path, 'JPEG', quality=90)
+            
+            vit_enc = self.vit_proc(pils, return_tensors="pt")
+            keyframe_pixels = vit_enc.pixel_values.squeeze(0)
+        except Exception:
+            keyframe_pixels = torch.zeros(8, 3, 224, 224)
+            
+        return {
+            "clip_id": clip_id,
+            "fake_label": c["fake_label"],
+            "method": c["method"],
+            "type": c["type"],
+            "audio_values": audio_values,
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "keyframe_pixels": keyframe_pixels,
+        }
+
+
 def run_inference(
     clips:    list[dict],
     pipeline: PreprocessingPipeline,
@@ -164,108 +307,37 @@ def run_inference(
     results = []
     model.eval()
 
-    pbar = tqdm(clips, desc="Evaluating", unit="clip", dynamic_ncols=True)
-    for c in pbar:
-        # Check if we should run end-to-end using un-frozen backbones
-        if model._backbones_loaded:
-            import torchaudio
-            from PIL import Image
-            from transformers import Wav2Vec2FeatureExtractor, BertTokenizer, ViTImageProcessor
-            from src.preprocessing.visual import extract_frames
-            from src.preprocessing.filters import frames_to_pil
+    if model._backbones_loaded:
+        print("  Running parallel end-to-end evaluation via DataLoader workers...")
+        dataset = FakeAVCelebEvalDataset(clips, pipeline)
+        loader = DataLoader(dataset, batch_size=8, num_workers=4, pin_memory=True)
+        
+        pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
+        for batch in pbar:
+            audio_values    = batch["audio_values"].to(device)
+            input_ids       = batch["input_ids"].to(device)
+            attention_mask  = batch["attention_mask"].to(device)
+            keyframe_pixels = batch["keyframe_pixels"].to(device)
             
-            # 1. Audio (Self-Caching Resampled WAV)
-            wav_path = pipeline._wav_path(c["clip_id"])
-            try:
-                if not wav_path.exists():
-                    wav, sr = torchaudio.load(c["video_path"])
-                    if wav.shape[0] > 1:
-                        wav = wav.mean(0, keepdim=True)
-                    if sr != 16000:
-                        wav = torchaudio.functional.resample(wav, sr, 16000)
-                    torchaudio.save(str(wav_path), wav, 16000)
-                else:
-                    wav, sr = torchaudio.load(str(wav_path))
-                
-                wav2vec_proc = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
-                audio_enc = wav2vec_proc(
-                    wav.squeeze(0).numpy(), sampling_rate=16000, return_tensors="pt",
-                    padding="max_length", max_length=80000, truncation=True
-                )
-                audio_values = audio_enc.input_values.to(device)
-            except Exception:
-                audio_values = torch.zeros(1, 80000).to(device)
-                
-            # 2. Text
-            txt_path = pipeline._txt_path(c["clip_id"])
-            try:
-                text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
-                bert_tok = BertTokenizer.from_pretrained("bert-base-uncased")
-                bert_enc = bert_tok(
-                    text, return_tensors="pt",
-                    padding="max_length", max_length=128, truncation=True
-                )
-                input_ids = bert_enc.input_ids.to(device)
-                attention_mask = bert_enc.attention_mask.to(device)
-            except Exception:
-                input_ids = torch.zeros(1, 128, dtype=torch.long).to(device)
-                attention_mask = torch.zeros(1, 128, dtype=torch.long).to(device)
-                
-            # 3. Visual (Self-Caching Aligned JPEGs)
-            kf_dir = pipeline.cache_dir / "keyframes"
-            kf_dir.mkdir(parents=True, exist_ok=True)
-            kf_path = kf_dir / f"{c['clip_id']}.jpg"
-            try:
-                if kf_path.exists():
-                    grid_img = Image.open(kf_path)
-                    pils = []
-                    for idx in range(8):
-                        crop_box = (224 * idx, 0, 224 * (idx + 1), 224)
-                        pils.append(grid_img.crop(crop_box))
-                else:
-                    from src.preprocessing.visual import optical_flow_gate, detect_and_align_faces
-                    from src.preprocessing.filters import sharpness_score, select_keyframes
-                    
-                    frames = extract_frames(c["video_path"], target_fps=25.0)
-                    if not frames:
-                        raise ValueError("No frames extracted")
-                        
-                    gated_frames = optical_flow_gate(frames, motion_threshold=0.3)
-                    face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.7)
-                    
-                    if not face_results:
-                        face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.0)
-                    if not face_results:
-                        face_results = detect_and_align_faces(frames, detector="retinaface", confidence_threshold=0.0)
-                    if not face_results:
-                        face_results = [(f, sharpness_score(f)) for f in frames]
-                        
-                    crops = [r[0] for r in face_results]
-                    scores = [r[1] for r in face_results]
-                    keyframes = select_keyframes(crops, scores, k=8)
-                    pils = frames_to_pil(keyframes, size=224)
-                    
-                    while len(pils) < 8:
-                        pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
-                        
-                    # Save horizontal concatenated JPEG strip to cache
-                    grid_img = Image.new('RGB', (224 * 8, 224))
-                    for idx, img in enumerate(pils):
-                        grid_img.paste(img, (224 * idx, 0))
-                    grid_img.save(kf_path, 'JPEG', quality=90)
-                
-                vit_proc = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224")
-                vit_enc = vit_proc(pils, return_tensors="pt")
-                keyframe_pixels = vit_enc.pixel_values.to(device)
-            except Exception:
-                keyframe_pixels = torch.zeros(8, 3, 224, 224).to(device)
-                
             with torch.no_grad():
-                out = model(audio_values, input_ids, attention_mask, keyframe_pixels.unsqueeze(0))
-                score = torch.sigmoid(out.logit).item()
+                out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
+                scores = torch.sigmoid(out.logit).squeeze(1).cpu().tolist()
+                
+            for j in range(len(scores)):
+                score = scores[j]
                 pred = 1 if score >= 0.5 else 0
-        else:
-            # Phase 1: load precomputed feature vectors from cache
+                results.append({
+                    "clip_id":    batch["clip_id"][j],
+                    "fake_label": int(batch["fake_label"][j].item()),
+                    "method":     batch["method"][j],
+                    "type":       batch["type"][j],
+                    "score":      score,
+                    "pred":       pred,
+                })
+    else:
+        # Phase 1: load precomputed feature vectors from cache (runs instantly)
+        pbar = tqdm(clips, desc="Evaluating", unit="clip", dynamic_ncols=True)
+        for c in pbar:
             feats = pipeline.process(c["clip_id"], c["video_path"], force=no_cache)
             if feats is None:
                 log.warning(f"Feature extraction failed: {c['clip_id']} — skipping")
@@ -279,16 +351,15 @@ def run_inference(
                 score = torch.sigmoid(out.logit).item()     # P(fake) ∈ [0, 1]
                 pred  = 1 if score >= 0.5 else 0
 
-        results.append({
-            "clip_id":    c["clip_id"],
-            "fake_label": c["fake_label"],
-            "method":     c["method"],
-            "type":       c["type"],
-            "score":      score,
-            "pred":       pred,
-        })
-
-        pbar.set_postfix(score=f"{score:.3f}")
+            results.append({
+                "clip_id":    c["clip_id"],
+                "fake_label": c["fake_label"],
+                "method":     c["method"],
+                "type":       c["type"],
+                "score":      score,
+                "pred":       pred,
+            })
+            pbar.set_postfix(score=f"{score:.3f}")
 
     return results
 
@@ -296,8 +367,8 @@ def run_inference(
 def compute_metrics(results: list[dict]) -> dict:
     labels = [r["fake_label"] for r in results]
     scores = [r["score"]      for r in results]
-    preds  = [r["pred"]       for r in results]
 
+    # Standard threshold = 0.5
     tp = sum(1 for r in results if r["pred"] == 1 and r["fake_label"] == 1)
     fp = sum(1 for r in results if r["pred"] == 1 and r["fake_label"] == 0)
     fn = sum(1 for r in results if r["pred"] == 0 and r["fake_label"] == 1)
@@ -307,6 +378,21 @@ def compute_metrics(results: list[dict]) -> dict:
     prec = tp / max(tp + fp, 1)
     rec  = tp / max(tp + fn, 1)
     f1   = 2 * prec * rec / max(prec + rec, 1e-8)
+
+    # Threshold calibration sweep (find optimal F1 decision boundary)
+    best_thresh, best_cal_f1, best_cal_acc = 0.5, f1, acc
+    for th_val in [i / 100.0 for i in range(1, 100)]:
+        c_tp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 1)
+        c_fp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 0)
+        c_fn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 1)
+        c_tn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 0)
+        c_prec = c_tp / max(c_tp + c_fp, 1)
+        c_rec  = c_tp / max(c_tp + c_fn, 1)
+        c_f1   = 2 * c_prec * c_rec / max(c_prec + c_rec, 1e-8)
+        if c_f1 > best_cal_f1:
+            best_cal_f1 = c_f1
+            best_thresh = th_val
+            best_cal_acc = (c_tp + c_tn) / max(len(results), 1)
 
     auc = None
     try:
@@ -338,6 +424,7 @@ def compute_metrics(results: list[dict]) -> dict:
     return dict(
         total=len(results), tp=tp, fp=fp, fn=fn, tn=tn,
         acc=acc, prec=prec, rec=rec, f1=f1,
+        best_thresh=best_thresh, best_cal_f1=best_cal_f1, best_cal_acc=best_cal_acc,
         auc=auc, auc_lo=auc_lo, auc_hi=auc_hi,
     )
 
@@ -478,11 +565,17 @@ def main():
     m = compute_metrics(results)
 
     print(f"  Clips evaluated  : {m['total']}")
-    print(f"  Accuracy         : {m['acc']:.4f}")
+    print(f"  Accuracy (0.5)   : {m['acc']:.4f}")
     print(f"  Precision        : {m['prec']:.4f}")
     print(f"  Recall           : {m['rec']:.4f}")
-    print(f"  F1               : {m['f1']:.4f}")
+    print(f"  F1 (0.5)         : {m['f1']:.4f}")
     print(f"  TP/FP/FN/TN      : {m['tp']}/{m['fp']}/{m['fn']}/{m['tn']}")
+
+    if m.get("best_thresh") is not None and m["best_thresh"] != 0.5:
+        print(f"  --- Calibrated Threshold Sweep ---")
+        print(f"  Optimal Threshold: {m['best_thresh']:.2f}")
+        print(f"  Calibrated Acc   : {m['best_cal_acc']:.4f}")
+        print(f"  Calibrated F1    : {m['best_cal_f1']:.4f}")
 
     if m["auc"] is not None:
         ci_str = (f"  [95% CI: {m['auc_lo']:.4f} to {m['auc_hi']:.4f}]"

@@ -440,6 +440,16 @@ class Trainer:
         print(f"  [CKPT] Saved {filename}  (val_loss={current_loss:.4f}, epoch={epoch})")
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
+        # Copy immediately to Drive backup directory if mounted
+        drive_backup = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints")
+        if drive_backup.exists():
+            try:
+                import shutil
+                shutil.copy2(ckpt, drive_backup / filename)
+                print(f"  [DRIVE BACKUP] Successfully copied {filename} to Google Drive checkpoints directory.")
+            except Exception as e:
+                print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
+
     def load_best(self, phase: int = 1) -> None:
         filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"
         ckpt = self.ckpt_dir / filename

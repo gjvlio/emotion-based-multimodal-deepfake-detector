@@ -366,15 +366,28 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             return len(self._recs)
 
         def __getitem__(self, i):
+            import random
             r = self._recs[i]
             cid = r["clip_id"]
             vp  = r["video_path"]
+            fake_label = r["fake_label"]
+            audio_cid = cid
+            audio_vp  = vp
+
+            # Audio-Visual Swap Augmentation (30% probability for real clips)
+            if fake_label == 0 and random.random() < 0.3:
+                other_idx = random.randint(0, len(self._recs) - 1)
+                other_r = self._recs[other_idx]
+                audio_cid = other_r["clip_id"]
+                audio_vp  = other_r["video_path"]
+                fake_label = 1.0  # Synthetic mismatch fake
+
             return {
-                "audio_values":   self._audio_values(cid, vp),
-                "input_ids":      self._bert_inputs(cid)[0],
-                "attention_mask": self._bert_inputs(cid)[1],
+                "audio_values":   self._audio_values(audio_cid, audio_vp),
+                "input_ids":      self._bert_inputs(audio_cid)[0],
+                "attention_mask": self._bert_inputs(audio_cid)[1],
                 "keyframe_pixels":self._keyframe_pixels(cid, vp),
-                "fake_label":     torch.tensor(r["fake_label"],    dtype=torch.long),
+                "fake_label":     torch.tensor(fake_label,         dtype=torch.long),
                 "audio_emotion":  torch.tensor(r["audio_emotion"], dtype=torch.long),
                 "visual_emotion": torch.tensor(r["visual_emotion"],dtype=torch.long),
                 "sarcasm_label":  torch.tensor(r["sarcasm_label"], dtype=torch.long),

@@ -88,6 +88,15 @@ class DeepfakeDetector(nn.Module):
 
         self.classifier = ClassifierMLP(fused_dim, dropout=dropout_cls)
 
+        # Cross-Modal Attention between audio/text and visual keyframes
+        self.cross_attn_at = nn.MultiheadAttention(embed_dim=768, num_heads=8, batch_first=True)
+        self.cross_attn_v  = nn.MultiheadAttention(embed_dim=768, num_heads=8, batch_first=True)
+        self.norm_at       = nn.LayerNorm(768)
+        self.norm_v        = nn.LayerNorm(768)
+
+        # Temporal GRU Aggregator over visual keyframe sequence
+        self.vit_gru       = nn.GRU(input_size=768, hidden_size=768, num_layers=2, batch_first=True)
+
         # Backbones — loaded on demand
         self._wav2vec: Optional[nn.Module] = None
         self._bert:    Optional[nn.Module] = None
@@ -221,10 +230,13 @@ class DeepfakeDetector(nn.Module):
         z_v:  torch.Tensor,
     ) -> DetectorOutput:
         """
-        Phase 1 forward pass — takes precomputed Z_at (B,1536) and Z_v (B,768).
+        Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768).
         Does NOT require backbones to be loaded.
         """
-        return self._detect(z_at, z_v)
+        w2v_emb = z_at[:, :768]
+        bert_emb = z_at[:, 768:]
+        z_v_seq = z_v.unsqueeze(1).repeat(1, 8, 1)  # Expand to sequence of length 8
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq)
 
     # ── Phase 2 path (end-to-end) ─────────────────────────────────────────────
 
@@ -237,7 +249,7 @@ class DeepfakeDetector(nn.Module):
     ) -> DetectorOutput:
         """
         Phase 2 end-to-end forward pass.
-        Runs Wav2Vec2 + BERT for audio-text, ViT for visual.
+        Runs Wav2Vec2 + BERT for audio-text, ViT for visual, followed by Cross-Attention and GRU.
         Call load_backbones() once before using this path.
         """
         if not self._backbones_loaded:
@@ -255,14 +267,41 @@ class DeepfakeDetector(nn.Module):
         bert_out = self._bert(input_ids=input_ids, attention_mask=attention_mask)
         bert_emb = bert_out.last_hidden_state[:, 0, :]            # (B, 768) CLS token
 
-        z_at = torch.cat([w2v_emb, bert_emb], dim=-1)            # (B, 1536)
-
         # Visual branch — ViT on K keyframes per clip
         B, K, C, H, W = keyframe_pixels.shape
         frames = keyframe_pixels.view(B * K, C, H, W)
         vit_out = self._vit(pixel_values=frames).last_hidden_state[:, 0, :]  # (B*K, 768)
-        z_v = vit_out.view(B, K, 768).mean(dim=1)                # (B, 768)
+        z_v_seq = vit_out.view(B, K, 768)                        # (B, K, 768)
 
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq)
+
+    def _forward_impl(
+        self,
+        w2v_emb: torch.Tensor,
+        bert_emb: torch.Tensor,
+        z_v_seq: torch.Tensor,
+    ) -> DetectorOutput:
+        # 1. Multi-Head Cross-Modal Attention
+        audio_text_seq = torch.stack([w2v_emb, bert_emb], dim=1)  # (B, 2, 768)
+
+        # Visual queries audio/text
+        z_v_attn, _ = self.cross_attn_v(query=z_v_seq, key=audio_text_seq, value=audio_text_seq)
+        z_v_seq = self.norm_v(z_v_seq + z_v_attn)
+
+        # Audio/text queries visual
+        at_attn, _ = self.cross_attn_at(query=audio_text_seq, key=z_v_seq, value=z_v_seq)
+        audio_text_seq = self.norm_at(audio_text_seq + at_attn)
+
+        # Split back to acoustic and linguistic
+        w2v_emb = audio_text_seq[:, 0, :]
+        bert_emb = audio_text_seq[:, 1, :]
+        z_at = torch.cat([w2v_emb, bert_emb], dim=-1)            # (B, 1536)
+
+        # 2. Temporal GRU Aggregation on Visual Sequence
+        gru_out, _ = self.vit_gru(z_v_seq)                       # (B, K, 768)
+        z_v = gru_out[:, -1, :]                                  # Take last hidden state (B, 768)
+
+        # 3. Detect
         return self._detect(z_at, z_v)
 
     # ── Convenience ───────────────────────────────────────────────────────────
