@@ -458,7 +458,36 @@ class Trainer:
 
     def load_best(self, phase: int = 1) -> None:
         filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"
-        ckpt = self.ckpt_dir / filename
+        local_ckpt = self.ckpt_dir / filename
+        
+        # Check Google Drive for latest / best checkpoint
+        drive_latest = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / filename
+        drive_base   = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / filename
+
+        drive_source = None
+        if drive_latest.exists():
+            drive_source = drive_latest
+        elif drive_base.exists():
+            drive_source = drive_base
+
+        if drive_source is not None:
+            try:
+                should_copy = not local_ckpt.exists()
+                if not should_copy:
+                    local_loss = torch.load(local_ckpt, weights_only=True).get("val_loss", float("inf"))
+                    drive_loss = torch.load(drive_source, weights_only=True).get("val_loss", float("inf"))
+                    if drive_loss < local_loss:
+                        should_copy = True
+                        
+                if should_copy:
+                    import shutil
+                    self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(drive_source, local_ckpt)
+                    print(f"  [DRIVE SYNC] Synced best {filename} from Drive ({drive_source.parent.name}) -> local SSD.")
+            except Exception as e:
+                print(f"  [DRIVE SYNC WARNING] Failed to copy from Drive: {e}")
+
+        ckpt = local_ckpt
         if not ckpt.exists():
             # Fall back to standard filename if suffix model doesn't exist
             fallback_filename = f"best_phase{phase}.pt"
