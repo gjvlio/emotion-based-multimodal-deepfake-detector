@@ -169,25 +169,16 @@ def main():
     else:
         print("\nLocal preprocessed features directory does not exist yet.")
 
-    # 2. Extract Raw Video/Audio Clips (Bypassed to save 22.5 GB of local disk space)
-    print("\n[INFO] Bypassing raw dataset zip extraction to save 22.5 GB of local disk space.")
-    print("       The training script will extract raw video files on-the-fly from Google Drive.")
+    # 2. Extract Raw Video/Audio Clips (Fully extract to Colab SSD to prevent Drive hangs)
+    print("\n[COLAB PRO] Extracting dataset ZIPs directly to local SSD...")
+    extract_zip("tracks_1_2_3_4.zip", REPO_ROOT / "data", optional=True)
+    extract_zip("meld_raw.zip", REPO_ROOT / "data", optional=True)
+    extract_zip("mustard.zip", REPO_ROOT / "data", optional=True)
+    extract_zip("cmumosei.zip", REPO_ROOT / "data", optional=True)
     
-    # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
-    print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
-    csv_path = search_drive_file("meta_data.csv")
-    if not csv_path:
-        csv_path = search_drive_file("metadata.csv")  # Try fallback name
-    
-    if csv_path:
-        dest_dir = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(csv_path, dest_dir / "meta_data.csv")
-        print(f"  Successfully copied FakeAVCeleb metadata file to: {dest_dir / 'meta_data.csv'}")
-    else:
-        # Check if the zip file is present instead
-        print("  meta_data.csv not found directly. Checking for fakeavceleb.zip...")
-        extract_zip("fakeavceleb.zip", REPO_ROOT / "data", optional=True)
+    # Extract FakeAVCeleb for cross-dataset evaluation
+    print("\nExtracting FakeAVCeleb test dataset...")
+    extract_zip("fakeavceleb.zip", REPO_ROOT / "data", optional=True)
 
     # 3. Compress any existing float32 keyframe caches to float16 to reclaim disk space
     compress_existing_cache()
@@ -223,7 +214,7 @@ def main():
     print("\n" + "=" * 60)
     print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 10 EPOCHS")
     print("=" * 60)
-    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 10 --classifier_mode emotion_bilinear --phase2_epochs 10 --phase2_batch 8 --phase2_freeze_layers 10 --skip_phase1 --workers 0"
+    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 10 --classifier_mode emotion_bilinear --phase2_epochs 40 --phase2_batch 16 --phase2_freeze_layers 10 --skip_phase1 --workers 4 --patience 8"
     os.system(cmd_p2)
 
     # 8. Backup Phase 2 checkpoint to Drive
