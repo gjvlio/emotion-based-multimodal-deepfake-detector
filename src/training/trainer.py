@@ -372,14 +372,14 @@ class Trainer:
             log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
             filename = f"best_phase2_{self.ckpt_suffix}.pt" if self.ckpt_suffix else "best_phase2.pt"
             self._save_checkpoint(filename, val_loss, epoch)
-            # Backup the preprocessed JPEG/WAV cache to Google Drive after Epoch 1 (since it is now fully compiled!)
-            if epoch == 1:
-                try:
-                    import subprocess
-                    print("\n[BACKUP] Epoch 1 complete. Zipping and saving keyframes/audio cache to Drive...")
-                    subprocess.run(["python", "scripts/zip_preprocessed.py"], check=False)
-                except Exception as e:
-                    print(f"  [BACKUP WARNING] Failed to run zip_preprocessed.py: {e}")
+            # Backup the preprocessed JPEG/WAV cache to Google Drive after Epoch 1 (disabled to skip redundant compression)
+            # if epoch == 1:
+            #     try:
+            #         import subprocess
+            #         print("\n[BACKUP] Epoch 1 complete. Zipping and saving keyframes/audio cache to Drive...")
+            #         subprocess.run(["python", "scripts/zip_preprocessed.py"], check=False)
+            #     except Exception as e:
+            #         print(f"  [BACKUP WARNING] Failed to run zip_preprocessed.py: {e}")
             if stopper.step(val_loss):
                 print(f"\n  Early stopping triggered at epoch {epoch}.")
                 log.info(f"Early stopping at epoch {epoch}.")
