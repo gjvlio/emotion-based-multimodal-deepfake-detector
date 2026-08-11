@@ -9,6 +9,7 @@ import shutil
 import sys
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 # Setup paths
 REPO_ROOT = Path(__file__).resolve().parents[1]
