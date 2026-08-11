@@ -140,11 +140,32 @@ class ZipExtractor:
             
         local_path = self.local_zip_dir / name
         if not local_path.exists():
+            import os
+            import time
+            lock_dir = local_path.with_suffix(".lock")
             try:
-                print(f"[ZipExtractor] On-demand copy: copying {name} to local Colab SSD...")
-                import shutil
-                shutil.copy2(drive_path, local_path)
-                print(f"[ZipExtractor] Copied {name} successfully.")
+                os.mkdir(lock_dir)
+                # Lock acquired! Perform the copy
+                try:
+                    if not local_path.exists():
+                        print(f"[ZipExtractor] Process {os.getpid()} copying {name} to local Colab SSD...")
+                        import shutil
+                        temp_path = local_path.with_suffix(f".tmp_{os.getpid()}")
+                        shutil.copy2(drive_path, temp_path)
+                        os.replace(temp_path, local_path)
+                        print(f"[ZipExtractor] Copied {name} successfully.")
+                finally:
+                    # Release lock
+                    if lock_dir.exists():
+                        os.rmdir(lock_dir)
+            except FileExistsError:
+                # Lock is held by another process. Wait until copy is done.
+                print(f"[ZipExtractor] Process {os.getpid()} waiting for another process to finish copying {name}...")
+                t0 = time.time()
+                while lock_dir.exists() or not local_path.exists():
+                    time.sleep(2)
+                    if time.time() - t0 > 1800:  # 30 minutes timeout
+                        break
             except Exception as e:
                 print(f"[ZipExtractor] Failed to copy {name} locally: {e}. Streaming directly from Drive...")
                 local_path = drive_path

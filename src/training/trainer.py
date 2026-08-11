@@ -370,7 +370,8 @@ class Trainer:
                 f"sarc_acc={sarc_acc:.4f}"
             )
             log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
-            self._save_checkpoint("best_phase2.pt", val_loss, epoch)
+            filename = f"best_phase2_{self.ckpt_suffix}.pt" if self.ckpt_suffix else "best_phase2.pt"
+            self._save_checkpoint(filename, val_loss, epoch)
             # Backup the preprocessed JPEG/WAV cache to Google Drive after Epoch 1 (since it is now fully compiled!)
             if epoch == 1:
                 try:
