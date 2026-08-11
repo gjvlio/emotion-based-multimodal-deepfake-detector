@@ -304,7 +304,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
     fake_test  = sum(1 for r in test_recs if r["fake_label"] == 1)
 
     src_counts = Counter(r["source_pipeline"] for r in train_recs)
-    auto_pw = (real_train / max(fake_train, 1))
+    auto_pw = 1.0  # Unweighted BCE to avoid suppressing fake predictions
 
     stats = {
         "total": len(all_recs),
