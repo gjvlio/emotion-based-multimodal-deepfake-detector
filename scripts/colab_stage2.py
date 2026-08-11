@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 DRIVE_BASE = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
-DRIVE_OUTPUT_DIR = DRIVE_BASE / "checkpoints"
+DRIVE_OUTPUT_DIR = DRIVE_BASE / "checkpoints/latest"
 LOCAL_REPO_ROOT = "D:/Documents/Programming/Thesis_G10"
 COLAB_REPO_ROOT = "/content/thesis"
 
@@ -214,14 +214,18 @@ def main():
     os.system("python scripts/validate_training_prep.py")
     os.system("python scripts/create_dataset_splits.py")
 
-    # 6. Load Stage 1 checkpoint from Drive
+    # 6. Load Stage 1 checkpoint from Drive (check latest folder first, then base folder)
     drive_p1_ckpt = DRIVE_OUTPUT_DIR / "best_phase1_emotion_bilinear.pt"
+    fallback_p1_ckpt = DRIVE_BASE / "checkpoints" / "best_phase1_emotion_bilinear.pt"
     local_p1_ckpt = REPO_ROOT / "checkpoints/full/best_phase1_emotion_bilinear.pt"
     local_p1_ckpt.parent.mkdir(parents=True, exist_ok=True)
 
     if drive_p1_ckpt.exists():
         shutil.copy2(drive_p1_ckpt, local_p1_ckpt)
-        print(f"\nLoaded Stage 1 weights from Drive -> {local_p1_ckpt}")
+        print(f"\nLoaded Stage 1 weights from Drive (latest) -> {local_p1_ckpt}")
+    elif fallback_p1_ckpt.exists():
+        shutil.copy2(fallback_p1_ckpt, local_p1_ckpt)
+        print(f"\nLoaded Stage 1 weights from Drive (base fallback) -> {local_p1_ckpt}")
     else:
         print(f"ERROR: Phase 1 checkpoint not found in Drive: {drive_p1_ckpt}")
         print("Please run scripts/colab_stage1.py first to create the baseline weights.")

@@ -441,20 +441,20 @@ class Trainer:
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
         # Copy to Drive ONLY IF current_loss is better than existing Drive checkpoint's val_loss
-        drive_backup = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints")
-        if drive_backup.exists():
-            drive_ckpt = drive_backup / filename
-            try:
-                if drive_ckpt.exists():
-                    drive_saved_loss = torch.load(drive_ckpt, weights_only=True).get("val_loss", float("inf"))
-                    if current_loss >= drive_saved_loss:
-                        print(f"  [DRIVE BACKUP] Current val_loss ({current_loss:.4f}) >= Drive checkpoint ({drive_saved_loss:.4f}). Keeping best Drive model.")
-                        return
-                import shutil
-                shutil.copy2(ckpt, drive_ckpt)
-                print(f"  [DRIVE BACKUP] Successfully copied new overall best checkpoint ({filename}, val_loss={current_loss:.4f}) to Google Drive.")
-            except Exception as e:
-                print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
+        drive_backup = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest")
+        drive_backup.mkdir(parents=True, exist_ok=True)
+        drive_ckpt = drive_backup / filename
+        try:
+            if drive_ckpt.exists():
+                drive_saved_loss = torch.load(drive_ckpt, weights_only=True).get("val_loss", float("inf"))
+                if current_loss >= drive_saved_loss:
+                    print(f"  [DRIVE BACKUP] Current val_loss ({current_loss:.4f}) >= Drive checkpoint ({drive_saved_loss:.4f}). Keeping best Drive model.")
+                    return
+            import shutil
+            shutil.copy2(ckpt, drive_ckpt)
+            print(f"  [DRIVE BACKUP] Successfully copied new overall best checkpoint ({filename}, val_loss={current_loss:.4f}) to Google Drive latest folder.")
+        except Exception as e:
+            print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
 
     def load_best(self, phase: int = 1) -> None:
         filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"
@@ -469,6 +469,6 @@ class Trainer:
             else:
                 raise FileNotFoundError(f"No checkpoint at {ckpt}")
         data = torch.load(ckpt, weights_only=True)
-        self.model.load_state_dict(data["model_state"])
+        self.model.load_state_dict(data["model_state"], strict=False)
         print(f"  [CKPT] Loaded {filename}  (epoch={data['epoch']}, val_loss={data['val_loss']:.4f})")
         log.info(f"Loaded checkpoint {filename} (epoch={data['epoch']}, val_loss={data['val_loss']:.4f})")
