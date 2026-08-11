@@ -214,54 +214,55 @@ def main():
     os.system("python scripts/validate_training_prep.py")
     os.system("python scripts/create_dataset_splits.py")
 
-    # 6. Load Stage 1 checkpoint from Drive (check latest folder first, then base folder)
-    drive_p1_ckpt = DRIVE_OUTPUT_DIR / "best_phase1_emotion_bilinear.pt"
-    fallback_p1_ckpt = DRIVE_BASE / "checkpoints" / "best_phase1_emotion_bilinear.pt"
-    local_p1_ckpt = REPO_ROOT / "checkpoints/full/best_phase1_emotion_bilinear.pt"
+    # 6. Load Stage 1 checkpoint from Drive (check latest/bottleneck_mode first)
+    drive_mode_dir = DRIVE_BASE / "checkpoints/latest/bottleneck_mode"
+    drive_mode_dir.mkdir(parents=True, exist_ok=True)
+    
+    drive_p1_ckpt = drive_mode_dir / "best_phase1_bottleneck.pt"
+    local_p1_ckpt = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase1_bottleneck.pt"
     local_p1_ckpt.parent.mkdir(parents=True, exist_ok=True)
 
     if drive_p1_ckpt.exists():
         shutil.copy2(drive_p1_ckpt, local_p1_ckpt)
-        print(f"\nLoaded Stage 1 weights from Drive (latest) -> {local_p1_ckpt}")
-    elif fallback_p1_ckpt.exists():
-        shutil.copy2(fallback_p1_ckpt, local_p1_ckpt)
-        print(f"\nLoaded Stage 1 weights from Drive (base fallback) -> {local_p1_ckpt}")
+        print(f"\nLoaded Stage 1 bottleneck weights from Drive -> {local_p1_ckpt}")
     else:
-        print(f"ERROR: Phase 1 checkpoint not found in Drive: {drive_p1_ckpt}")
-        print("Please run scripts/colab_stage1.py first to create the baseline weights.")
+        print(f"ERROR: Phase 1 bottleneck checkpoint not found in Drive: {drive_p1_ckpt}")
+        print("Please run scripts/colab_stage1.py first to create the bottleneck baseline weights.")
         return
 
     # 7. Run Stage 2 Training (40 epochs)
     print("\n" + "=" * 60)
-    print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES) - 40 EPOCHS")
+    print("  RUNNING PHASE 2 TRAINING (BOTTLENECK_MODE FINE-TUNING) - 40 EPOCHS")
     print("=" * 60)
-    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode emotion_bilinear --phase2_epochs 40 --phase2_batch 16 --phase2_freeze_layers 10 --skip_phase1 --workers 4 --patience 8"
+    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode bottleneck --phase2_epochs 40 --phase2_batch 16 --phase2_freeze_layers 10 --skip_phase1 --workers 4 --patience 8"
     os.system(cmd_p2)
 
-    # 8. Backup Phase 2 checkpoint to Drive
-    p2_ckpt = REPO_ROOT / "checkpoints/full/best_phase2_emotion_bilinear.pt"
+    # 8. Backup Phase 2 checkpoint to Drive under bottleneck_mode folder
+    p2_ckpt = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase2_bottleneck.pt"
+    if not p2_ckpt.exists():
+        p2_ckpt = REPO_ROOT / "checkpoints/full/best_phase2_bottleneck.pt"
     if p2_ckpt.exists():
-        shutil.copy2(p2_ckpt, DRIVE_OUTPUT_DIR / "best_phase2_emotion_bilinear.pt")
-        print(f"\n[BACKUP] Saved Phase 2 checkpoint to Google Drive: {DRIVE_OUTPUT_DIR / 'best_phase2_emotion_bilinear.pt'}")
+        shutil.copy2(p2_ckpt, drive_mode_dir / "best_phase2_bottleneck.pt")
+        print(f"\n[BACKUP] Saved Phase 2 bottleneck checkpoint to Google Drive: {drive_mode_dir / 'best_phase2_bottleneck.pt'}")
 
     logs = REPO_ROOT / "logs/full"
     if logs.exists():
-        shutil.copytree(logs, DRIVE_OUTPUT_DIR / "logs_phase2_emotion_bilinear", dirs_exist_ok=True)
+        shutil.copytree(logs, drive_mode_dir / "logs_phase2_bottleneck", dirs_exist_ok=True)
         print("[BACKUP] Saved training logs to Google Drive.")
 
-    # 9. Run FakeAVCeleb evaluation on the fine-tuned model
+    # 9. Run FakeAVCeleb evaluation on the bottleneck fine-tuned model
     print("\n" + "=" * 60)
-    print("  RUNNING CROSS-DATASET BENCHMARK (FAKEAVCELEB)")
+    print("  RUNNING CROSS-DATASET BENCHMARK (FAKEAVCELEB - BOTTLENECK MODE)")
     print("=" * 60)
-    cmd_eval = "python scripts/evaluate_fakeavceleb.py --checkpoint checkpoints/full/best_phase2_emotion_bilinear.pt --classifier_mode emotion_bilinear --save_csv benchmark_results.csv"
+    cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {p2_ckpt} --classifier_mode bottleneck --save_csv benchmark_results_bottleneck.csv"
     os.system(cmd_eval)
 
     # Backup benchmark CSV to Drive
-    if Path("benchmark_results.csv").exists():
-        shutil.copy2("benchmark_results.csv", DRIVE_OUTPUT_DIR / "benchmark_results.csv")
-        print(f"\n[BACKUP] Saved benchmark results CSV to Google Drive: {DRIVE_OUTPUT_DIR / 'benchmark_results.csv'}")
+    if Path("benchmark_results_bottleneck.csv").exists():
+        shutil.copy2("benchmark_results_bottleneck.csv", drive_mode_dir / "benchmark_results_bottleneck.csv")
+        print(f"\n[BACKUP] Saved bottleneck benchmark results CSV to Google Drive: {drive_mode_dir / 'benchmark_results_bottleneck.csv'}")
 
-    print("\nStage 2 fine-tuning and evaluation complete! Final results are saved in Google Drive.")
+    print("\nStage 2 bottleneck fine-tuning and evaluation complete! Final results are saved in Google Drive under bottleneck_mode/.")
 
 if __name__ == "__main__":
     main()

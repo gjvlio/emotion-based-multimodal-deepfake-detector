@@ -166,23 +166,27 @@ def main():
 
     # Run Stage 1 Training (40 epochs)
     print("\n" + "=" * 60)
-    print("  RUNNING PHASE 1 TRAINING (EMOTION_BILINEAR) - 40 EPOCHS")
+    print("  RUNNING PHASE 1 TRAINING (BOTTLENECK_MODE) - 40 EPOCHS")
     print("=" * 60)
-    cmd = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode emotion_bilinear --no_phase2"
+    cmd = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode bottleneck --no_phase2"
     os.system(cmd)
 
-    # Copy checkpoints and logs to Drive
-    ckpt = REPO_ROOT / "checkpoints/full/best_phase1_emotion_bilinear.pt"
+    # Copy checkpoints and logs to Drive under bottleneck_mode folder
+    drive_mode_dir = DRIVE_BASE / "checkpoints/latest/bottleneck_mode"
+    drive_mode_dir.mkdir(parents=True, exist_ok=True)
+    ckpt = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase1_bottleneck.pt"
+    if not ckpt.exists():
+        ckpt = REPO_ROOT / "checkpoints/full/best_phase1_bottleneck.pt"
     if ckpt.exists():
-        shutil.copy2(ckpt, DRIVE_OUTPUT_DIR / "best_phase1_emotion_bilinear.pt")
-        print(f"\n[BACKUP] Saved Phase 1 checkpoint to Google Drive: {DRIVE_OUTPUT_DIR / 'best_phase1_emotion_bilinear.pt'}")
+        shutil.copy2(ckpt, drive_mode_dir / "best_phase1_bottleneck.pt")
+        print(f"\n[BACKUP] Saved Phase 1 bottleneck checkpoint to Google Drive: {drive_mode_dir / 'best_phase1_bottleneck.pt'}")
 
     logs = REPO_ROOT / "logs/full"
     if logs.exists():
-        shutil.copytree(logs, DRIVE_OUTPUT_DIR / "logs_phase1_emotion_bilinear", dirs_exist_ok=True)
+        shutil.copytree(logs, drive_mode_dir / "logs_phase1_bottleneck", dirs_exist_ok=True)
         print("[BACKUP] Saved training logs to Google Drive.")
 
-    print("\nStage 1 complete! Model is ready for Stage 2.")
+    print("\nStage 1 bottleneck mode complete! Model is ready for Stage 2.")
 
 if __name__ == "__main__":
     main()
