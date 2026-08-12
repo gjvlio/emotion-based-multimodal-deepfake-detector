@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.utils.config import Config
+from src.preprocessing.pipeline import PreprocessingPipeline
 from scripts.colab_stage1 import search_drive_file, extract_zip
 from scripts.evaluate_fakeavceleb import load_clips
 
@@ -66,9 +67,9 @@ def main():
                 fav_meta.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(alt_meta.parent), str(fav_meta.parent))
 
-    # 2. Sample up to 10,000 clips (500 Real + 9,500 Fake)
+    # 2. Sample up to 10,000 clips (500 Real + 9,500 Fake), ignore missing video check during sampling phase
     print("\nSampling 10,000 FakeAVCeleb clips for incremental caching...")
-    clips = load_clips(n_real=500, n_fake=9500, seed=42, hard=True)
+    clips = load_clips(n_real=500, n_fake=9500, seed=42, hard=True, ignore_missing=True)
     print(f"  Total sampled target clips: {len(clips):,}")
 
     # 3. Initialize preprocessing pipeline

@@ -61,7 +61,7 @@ _MED_FRAC  = 0.40   # 40% wav2lip
 _EASY_FRAC = 0.20   # 20% single-modality
 
 
-def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> list[dict]:
+def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool = True, ignore_missing: bool = False) -> list[dict]:
     """
     Stratified random sample from meta_data.csv.
     hard=True: over-samples compound fakes (hardest for audio-visual mismatch detector).
@@ -90,12 +90,17 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
             method   = row.get("method", "real").strip()
             clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem}"
 
-            video_path = FAV_ROOT / cat / row.get("race","").strip() / row.get("gender","").strip() / source / filename
+            rel_v_path = row.get("video_path", "").strip()
+            if rel_v_path:
+                video_path = REPO_ROOT / rel_v_path
+            else:
+                video_path = FAV_ROOT / cat / row.get("race","").strip() / row.get("gender","").strip() / source / filename
+
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
             z_v_p = REPO_ROOT / "data/preprocessed/features/z_v" / f"{clip_id}.pt"
             
             features_cached = z_at_p.exists() and z_v_p.exists()
-            if not features_cached and not video_path.exists():
+            if not ignore_missing and not features_cached and not video_path.exists():
                 missing += 1
                 continue
 
@@ -123,28 +128,28 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
     for pool in [real_pool, *fake_by_tier.values()]:
         rng.shuffle(pool)
 
-    sampled_real = real_pool[:n_real]
+    sampled_real = real_pool[:min(n_real, len(real_pool))]
     if len(sampled_real) < n_real:
-        log.warning(f"Requested {n_real} real clips but only {len(sampled_real)} available")
+        log.info(f"Sampled all {len(sampled_real):,} available real clips from FakeAVCeleb.")
 
+    n_fake_target = n_fake
     if hard:
-        n_h = min(int(n_fake * _HARD_FRAC), len(fake_by_tier["hard"]))
-        n_m = min(int(n_fake * _MED_FRAC),  len(fake_by_tier["med"]))
-        n_e = min(n_fake - n_h - n_m,       len(fake_by_tier["easy"]))
+        n_h = min(int(n_fake_target * _HARD_FRAC), len(fake_by_tier["hard"]))
+        n_m = min(int(n_fake_target * _MED_FRAC),  len(fake_by_tier["med"]))
+        n_e = min(n_fake_target - n_h - n_m,       len(fake_by_tier["easy"]))
         sampled_fake = (fake_by_tier["hard"][:n_h]
                         + fake_by_tier["med"][:n_m]
                         + fake_by_tier["easy"][:n_e])
-        # fill shortfall from any tier
-        if len(sampled_fake) < n_fake:
+        if len(sampled_fake) < n_fake_target:
             used = set(c["clip_id"] for c in sampled_fake)
             all_fake = [c for tier in fake_by_tier.values() for c in tier if c["clip_id"] not in used]
             rng.shuffle(all_fake)
-            sampled_fake += all_fake[:n_fake - len(sampled_fake)]
+            sampled_fake += all_fake[:n_fake_target - len(sampled_fake)]
         print(f"  Hard sampling  : {n_h} compound + {n_m} wav2lip + {n_e} single-mod")
     else:
         all_fake = [c for tier in fake_by_tier.values() for c in tier]
         rng.shuffle(all_fake)
-        sampled_fake = all_fake[:n_fake]
+        sampled_fake = all_fake[:n_fake_target]
 
     if len(sampled_fake) < n_fake:
         log.warning(f"Requested {n_fake} fake clips but only {len(sampled_fake)} available")
