@@ -74,20 +74,22 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
     fake_by_tier: dict[str, list[dict]] = {"hard": [], "med": [], "easy": []}
     missing = 0
 
-    with open(META_CSV, newline="", encoding="utf-8", errors="replace") as f:
+    cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
+    csv_file_to_use = META_CSV if META_CSV.exists() else cached_manifest
+
+    if not csv_file_to_use.exists():
+        log.error(f"Neither meta_data.csv nor fakeavceleb_cached_manifest.csv found.")
+        return []
+
+    with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
             cat      = row.get("type",   "").strip()
-            race     = row.get("race",   "").strip()
-            gender   = row.get("gender", "").strip()
-            source   = row.get("source", "").strip()
+            source   = row.get("source", row.get("speaker_id", "")).strip()
             filename = row.get("path",   "").strip()
             method   = row.get("method", "real").strip()
+            clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem}"
 
-            if not all([cat, race, gender, source, filename]):
-                continue
-
-            video_path = FAV_ROOT / cat / race / gender / source / filename
-            clip_id = f"fav_{source}_{Path(filename).stem}"
+            video_path = FAV_ROOT / cat / row.get("race","").strip() / row.get("gender","").strip() / source / filename
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
             z_v_p = REPO_ROOT / "data/preprocessed/features/z_v" / f"{clip_id}.pt"
             
@@ -97,12 +99,13 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
                 continue
 
             entry = {
-                "clip_id":    f"fav_{source}_{Path(filename).stem}",
+                "clip_id":    clip_id,
                 "video_path": str(video_path),
                 "fake_label": 0 if cat == REAL_TYPE else 1,
                 "method":     method,
                 "type":       cat,
                 "speaker_id": source,
+                "cached":     features_cached,
             }
             if cat == REAL_TYPE:
                 real_pool.append(entry)
@@ -308,9 +311,8 @@ def run_inference(
     model.eval()
 
     if model._backbones_loaded:
-        print("  Running parallel end-to-end evaluation via DataLoader workers...")
-        dataset = FakeAVCelebEvalDataset(clips, pipeline)
-        loader = DataLoader(dataset, batch_size=8, num_workers=4, pin_memory=True)
+        n_workers = 0 if os.name == "nt" else 4
+        loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, pin_memory=(device != "cpu"))
         
         pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
         for batch in pbar:
@@ -522,8 +524,9 @@ def main():
     if not ckpt_path.exists():
         print(f"ERROR: checkpoint not found: {ckpt_path}")
         return
-    if not META_CSV.exists():
-        print(f"ERROR: FakeAVCeleb metadata not found: {META_CSV}")
+    cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
+    if not META_CSV.exists() and not cached_manifest.exists():
+        print(f"ERROR: Neither FakeAVCeleb metadata ({META_CSV}) nor cached manifest ({cached_manifest}) found.")
         return
 
     _section("FakeAVCeleb v1.2 - Cross-Dataset Benchmark")
