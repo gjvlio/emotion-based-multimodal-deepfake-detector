@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -310,8 +311,10 @@ def run_inference(
     results = []
     model.eval()
 
-    if model._backbones_loaded:
+    all_cached = all(c.get("cached", False) for c in clips) and not no_cache
+    if model._backbones_loaded and not all_cached:
         n_workers = 0 if os.name == "nt" else 4
+        dataset = FakeAVCelebEvalDataset(clips, pipeline)
         loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, pin_memory=(device != "cpu"))
         
         pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
@@ -337,16 +340,22 @@ def run_inference(
                     "pred":       pred,
                 })
     else:
-        # Phase 1: load precomputed feature vectors from cache (runs instantly)
-        pbar = tqdm(clips, desc="Evaluating", unit="clip", dynamic_ncols=True)
+        # Load precomputed feature vectors from cache (runs in ~1 second)
+        pbar = tqdm(clips, desc="Evaluating (from cached features)", unit="clip", dynamic_ncols=True)
         for c in pbar:
-            feats = pipeline.process(c["clip_id"], c["video_path"], force=no_cache)
-            if feats is None:
-                log.warning(f"Feature extraction failed: {c['clip_id']} — skipping")
-                continue
-
-            z_at = feats.z_at.unsqueeze(0).to(device)   # (1, 1536)
-            z_v  = feats.z_v.unsqueeze(0).to(device)    # (1, 768)
+            z_at_path = REPO_ROOT / "data/preprocessed/features/z_at" / f"{c['clip_id']}.pt"
+            z_v_path  = REPO_ROOT / "data/preprocessed/features/z_v"  / f"{c['clip_id']}.pt"
+            
+            if z_at_path.exists() and z_v_path.exists():
+                z_at = torch.load(z_at_path, map_location=device, weights_only=True).unsqueeze(0)
+                z_v  = torch.load(z_v_path,  map_location=device, weights_only=True).unsqueeze(0)
+            else:
+                feats = pipeline.process(c["clip_id"], c["video_path"], force=no_cache)
+                if feats is None:
+                    log.warning(f"Feature extraction failed: {c['clip_id']} — skipping")
+                    continue
+                z_at = feats.z_at.unsqueeze(0).to(device)
+                z_v  = feats.z_v.unsqueeze(0).to(device)
 
             with torch.no_grad():
                 out   = model.forward_from_features(z_at, z_v)
