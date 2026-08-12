@@ -139,24 +139,42 @@ def main():
     else:
         print("\nExtracting Preprocessed Feature Cache...")
         # 1. Try consolidated zips
-        consolidated_found = False
-        for zip_candidate in ["preprocessed.zip", "Copy of preprocessed_all.zip", "preprocessed_all.zip"]:
-            if extract_zip(zip_candidate, REPO_ROOT / "data/preprocessed", optional=True):
-                consolidated_found = True
-                break
-        
-        # 2. Try individual segment zips (fallback/additional)
-        print("\nChecking for segmented/shard feature archives...")
-        extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
-        extract_zip("metadata.zip", REPO_ROOT / "data/preprocessed", optional=True)
-        
-        # MOSEI features
-        mosei_found = False
-        for i in range(4):
-            if extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True):
-                mosei_found = True
-        if not mosei_found:
-            extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+        # 1. Attach preprocessed features directly from Drive without zip extraction
+        print("\n[DRIVE FETCH] Attaching preprocessed features directly from Google Drive...")
+        drive_prep_features = DRIVE_BASE / "preprocessed/features"
+        local_prep_features = REPO_ROOT / "data/preprocessed/features"
+
+        if drive_prep_features.exists():
+            drive_at_count = len(list((drive_prep_features / "z_at").glob("*.pt"))) if (drive_prep_features / "z_at").exists() else 0
+            local_at_count = len(list((local_prep_features / "z_at").glob("*.pt"))) if (local_prep_features / "z_at").exists() else 0
+
+            if local_at_count == 0 and drive_at_count > 0:
+                local_prep_features.parent.mkdir(parents=True, exist_ok=True)
+                if local_prep_features.exists():
+                    shutil.rmtree(local_prep_features, ignore_errors=True)
+                try:
+                    os.symlink(str(drive_prep_features), str(local_prep_features))
+                    print(f"  [DRIVE ATTACHED] Instantly symlinked {drive_at_count:,} feature files from Drive (0-second extraction time).")
+                except Exception:
+                    (local_prep_features / "z_at").mkdir(parents=True, exist_ok=True)
+                    (local_prep_features / "z_v").mkdir(parents=True, exist_ok=True)
+                    synced = 0
+                    for pt in (drive_prep_features / "z_at").glob("*.pt"):
+                        local_at = local_prep_features / "z_at" / pt.name
+                        local_v  = local_prep_features / "z_v" / pt.name
+                        drive_v  = drive_prep_features / "z_v" / pt.name
+                        if not local_at.exists():
+                            shutil.copy2(pt, local_at)
+                            synced += 1
+                        if drive_v.exists() and not local_v.exists():
+                            shutil.copy2(drive_v, local_v)
+                    print(f"  [DRIVE FETCHED] Direct-fetched {synced:,} feature pairs from Google Drive.")
+
+        # Print local feature count for validation
+        z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
+        if z_at_dir.exists():
+            files = list(z_at_dir.glob("*.pt"))
+            print(f"\nLocal preprocessed feature count after Drive attach: {len(files):,} files in z_at.")
 
     # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
     print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")

@@ -305,7 +305,7 @@ def main():
     print("\n" + "=" * 60)
     print("  RUNNING CROSS-DATASET BENCHMARK (FAKEAVCELEB - BOTTLENECK MODE)")
     print("=" * 60)
-    cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {p2_ckpt} --classifier_mode bottleneck --save_csv benchmark_results_bottleneck.csv"
+    cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {p2_ckpt} --classifier_mode bottleneck --n_real 500 --n_fake 9500 --save_csv benchmark_results_bottleneck.csv"
     os.system(cmd_eval)
 
     # Backup benchmark CSV to Drive
