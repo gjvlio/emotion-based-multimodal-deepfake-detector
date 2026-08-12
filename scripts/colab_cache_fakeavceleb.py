@@ -47,27 +47,31 @@ def main():
     LOCAL_Z_AT_DIR.mkdir(parents=True, exist_ok=True)
     LOCAL_Z_V_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Locate manifest or extract fakeavceleb.zip if raw videos missing
-    fav_meta = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv"
-    cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
-    if cached_manifest.exists():
-        print("\n  [MANIFEST OK] Using committed FakeAVCeleb manifest (21,566 clips index ready).")
-    elif not fav_meta.exists():
-        print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
-        csv_path = search_drive_file("meta_data.csv")
-        if csv_path:
-            fav_meta.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(csv_path, fav_meta)
-            print(f"  Successfully copied FakeAVCeleb metadata file to: {fav_meta}")
-        else:
-            print("  meta_data.csv not found directly. Extracting fakeavceleb.zip...")
-            extract_zip("fakeavceleb.zip", REPO_ROOT / "data/raw", optional=True)
-            alt_meta = REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv"
-            if alt_meta.exists() and not fav_meta.exists():
-                fav_meta.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(alt_meta.parent), str(fav_meta.parent))
+    # 1. Auto-extract existing feature archives & raw video zip from Drive
+    print("\n[AUTO-CHECK] Extracting existing preprocessed feature tensors from Google Drive...")
+    extract_zip("preprocessed.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
 
-    # 2. Sample up to 10,000 clips (500 Real + 9,500 Fake), ignore missing video check during sampling phase
+    nested_prep = REPO_ROOT / "data/preprocessed/preprocessed"
+    if nested_prep.exists() and nested_prep.is_dir():
+        for item in nested_prep.iterdir():
+            target = REPO_ROOT / "data/preprocessed" / item.name
+            if not target.exists():
+                shutil.move(str(item), str(target))
+
+    fav_root = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2"
+    if not fav_root.exists() or not any(fav_root.glob("**/*.mp4")):
+        print("\n[AUTO-CHECK] Extracting FakeAVCeleb raw MP4 videos from Google Drive...")
+        extract_zip("fakeavceleb.zip", REPO_ROOT / "data/raw", optional=True)
+        extract_zip("FakeAVCeleb_v1.2.zip", REPO_ROOT / "data/raw", optional=True)
+        alt_fav = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/FakeAVCeleb_v1.2"
+        if alt_fav.exists():
+            for item in alt_fav.iterdir():
+                target = fav_root / item.name
+                if not target.exists():
+                    shutil.move(str(item), str(target))
+
+    # 2. Sample up to 10,000 clips (500 Real + 9,500 Fake)
     print("\nSampling 10,000 FakeAVCeleb clips for incremental caching...")
     clips = load_clips(n_real=500, n_fake=9500, seed=42, hard=True, ignore_missing=True)
     print(f"  Total sampled target clips: {len(clips):,}")
