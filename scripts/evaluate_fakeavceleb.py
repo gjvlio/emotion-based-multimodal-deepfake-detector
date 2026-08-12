@@ -497,46 +497,69 @@ def per_method_breakdown(results: list[dict]) -> None:
 
 
 def ensure_preprocessed_features():
-    """Checks if preprocessed feature tensors exist locally; if not, extracts preprocessed.zip from Drive."""
+    """Checks local and Google Drive preprocessed feature tensors (z_at and z_v) and syncs if needed."""
     z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
-    if z_at_dir.exists() and any(z_at_dir.glob("*.pt")):
-        return
+    z_v_dir  = REPO_ROOT / "data/preprocessed/features/z_v"
+    z_at_dir.mkdir(parents=True, exist_ok=True)
+    z_v_dir.mkdir(parents=True, exist_ok=True)
 
     drive_base = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
-    if not drive_base.exists():
-        return
+    drive_z_at = drive_base / "preprocessed/features/z_at"
+    drive_z_v  = drive_base / "preprocessed/features/z_v"
 
-    print("\n[AUTO-CHECK] Local preprocessed features missing. Searching Google Drive for preprocessed.zip...")
-    zip_path = None
-    for root, _, files in os.walk(drive_base):
-        for f in files:
-            if "preprocessed" in f.lower() and f.endswith(".zip"):
-                zip_path = Path(root) / f
-                break
-        if zip_path:
-            break
-
-    if zip_path:
-        size_mb = zip_path.stat().st_size / 1e6
-        print(f"  [AUTO-EXTRACT] Extracting {zip_path.name} ({size_mb:.1f} MB) to local SSD...")
+    if drive_z_at.exists() and drive_z_v.exists():
         import shutil
-        import zipfile
-        with zipfile.ZipFile(zip_path) as zf:
-            namelist = zf.namelist()
-            has_data_prefix = any(name.startswith("data/") for name in namelist)
-            has_prep_prefix = any(name.startswith("preprocessed/") for name in namelist)
-            
-            dest = REPO_ROOT if has_data_prefix else (REPO_ROOT / "data" if has_prep_prefix else REPO_ROOT / "data/preprocessed")
-            dest.mkdir(parents=True, exist_ok=True)
-            zf.extractall(dest)
+        synced = 0
+        for pt in drive_z_at.glob("*.pt"):
+            local_at = z_at_dir / pt.name
+            local_v  = z_v_dir / pt.name
+            drive_v  = drive_z_v / pt.name
+            if not local_at.exists():
+                shutil.copy2(pt, local_at)
+                synced += 1
+            if drive_v.exists() and not local_v.exists():
+                shutil.copy2(drive_v, local_v)
+        if synced > 0:
+            print(f"  [DRIVE AUTO-SYNC] Synced {synced:,} cached feature pairs from Google Drive to local SSD.")
 
-        nested = REPO_ROOT / "data/preprocessed/preprocessed"
-        if nested.exists() and nested.is_dir():
-            for item in nested.iterdir():
-                target = REPO_ROOT / "data/preprocessed" / item.name
-                if not target.exists():
-                    shutil.move(str(item), str(target))
-        print("  [AUTO-EXTRACT] Done! Preprocessed feature cache extracted.\n")
+    local_at_files = set(p.stem for p in z_at_dir.glob("*.pt"))
+    local_v_files  = set(p.stem for p in z_v_dir.glob("*.pt"))
+    valid_pairs    = local_at_files.intersection(local_v_files)
+
+    print(f"\n[CACHE CHECK] Preprocessed Features Cache: {len(valid_pairs):,} valid pairs ready on disk.")
+
+    if not valid_pairs and drive_base.exists():
+        print("  [AUTO-CHECK] Local features missing. Searching Google Drive for preprocessed.zip...")
+        zip_path = None
+        for root, _, files in os.walk(drive_base):
+            for f in files:
+                if "preprocessed" in f.lower() and f.endswith(".zip"):
+                    zip_path = Path(root) / f
+                    break
+            if zip_path:
+                break
+
+        if zip_path:
+            size_mb = zip_path.stat().st_size / 1e6
+            print(f"  [AUTO-EXTRACT] Extracting {zip_path.name} ({size_mb:.1f} MB) to local SSD...")
+            import shutil
+            import zipfile
+            with zipfile.ZipFile(zip_path) as zf:
+                namelist = zf.namelist()
+                has_data_prefix = any(name.startswith("data/") for name in namelist)
+                has_prep_prefix = any(name.startswith("preprocessed/") for name in namelist)
+                
+                dest = REPO_ROOT if has_data_prefix else (REPO_ROOT / "data" if has_prep_prefix else REPO_ROOT / "data/preprocessed")
+                dest.mkdir(parents=True, exist_ok=True)
+                zf.extractall(dest)
+
+            nested = REPO_ROOT / "data/preprocessed/preprocessed"
+            if nested.exists() and nested.is_dir():
+                for item in nested.iterdir():
+                    target = REPO_ROOT / "data/preprocessed" / item.name
+                    if not target.exists():
+                        shutil.move(str(item), str(target))
+            print("  [AUTO-EXTRACT] Done! Preprocessed feature cache extracted.\n")
 
 
 def main():
