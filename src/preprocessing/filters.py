@@ -19,18 +19,27 @@ _CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 _cascade: cv2.CascadeClassifier | None = None
 
 
-def _get_cascade() -> cv2.CascadeClassifier:
+def _get_cascade():
     global _cascade
     if _cascade is None:
-        _cascade = cv2.CascadeClassifier(_CASCADE_PATH)
+        try:
+            _cascade = cv2.CascadeClassifier(_CASCADE_PATH)
+        except Exception:
+            _cascade = None
     return _cascade
 
 
 def coarse_has_face(frame: np.ndarray) -> bool:
     """True if Haar cascade finds at least one face in the BGR frame."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = _get_cascade().detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
-    return len(faces) > 0
+    cas = _get_cascade()
+    if cas is None or getattr(cas, "empty", lambda: True)():
+        return True
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = cas.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+        return len(faces) > 0
+    except Exception:
+        return True
 
 
 def sharpness_score(frame: np.ndarray) -> float:

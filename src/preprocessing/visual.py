@@ -291,18 +291,30 @@ def _insightface_detect(
 
 
 def _haar_fallback(frames: List[np.ndarray]) -> List[Tuple[np.ndarray, float]]:
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
+    try:
+        cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+    except Exception:
+        cascade = None
+
     results = []
     for frame in frames:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = cascade.detectMultiScale(gray, 1.1, 4)
-        if len(faces) == 0:
-            continue
-        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-        crop    = frame[y:y+h, x:x+w]
-        base    = sharpness_score(crop)
+        if cascade is not None and not getattr(cascade, "empty", lambda: True)():
+            try:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = cascade.detectMultiScale(gray, 1.1, 4)
+                if len(faces) > 0:
+                    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                    crop = frame[y:y+h, x:x+w]
+                    base = sharpness_score(crop)
+                    results.append((crop, base))
+                    continue
+            except Exception:
+                pass
+        h, w = frame.shape[:2]
+        crop = frame[h//4:3*h//4, w//4:3*w//4]
+        base = sharpness_score(crop)
         results.append((crop, base))
     return _rescore_with_au(results)
 
