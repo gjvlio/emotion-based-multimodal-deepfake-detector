@@ -562,6 +562,11 @@ def main():
     parser.add_argument("--classifier_mode",      type=str,   default="baseline", choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
     args = parser.parse_args()
 
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        print("\n  [WARNING] CUDA requested but not available. Falling back to CPU.")
+        print("  NOTE: In Google Colab, select 'Runtime -> Change runtime type -> T4 GPU' to enable GPU acceleration.\n")
+        args.device = "cpu"
+
     _section("DeepSentinel Full Dataset Training")
     print(f"  Device    : {args.device}")
     print(f"  Epochs    : {args.epochs}")

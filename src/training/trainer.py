@@ -76,10 +76,12 @@ class Trainer:
         device:         str        = "cuda" if torch.cuda.is_available() else "cpu",
         ckpt_suffix:    str        = "",
     ):
-        self.model   = model.to(device)
+        if device.startswith("cuda") and not torch.cuda.is_available():
+            device = "cpu"
         self.device  = device
-        self.fp16    = fp16 and (device == "cuda")
-        self._amp_device = "cuda" if device == "cuda" else "cpu"
+        self.model   = model.to(device)
+        self.fp16    = fp16 and (device.startswith("cuda"))
+        self._amp_device = "cuda" if device.startswith("cuda") else "cpu"
         self.train_loader = train_loader
         self.val_loader   = val_loader
         self.criterion    = MultiTaskLoss(lambda_a, lambda_b, lambda_sarcasm, pos_weight)

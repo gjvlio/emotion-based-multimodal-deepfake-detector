@@ -210,6 +210,24 @@ def main():
             if not mosei_found:
                 extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
 
+    # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
+    print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
+    fav_meta = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv"
+    if not fav_meta.exists():
+        csv_path = search_drive_file("meta_data.csv")
+        if csv_path:
+            fav_meta.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(csv_path, fav_meta)
+            print(f"  Successfully copied FakeAVCeleb metadata file to: {fav_meta}")
+        else:
+            print("  meta_data.csv not found directly. Extracting fakeavceleb.zip...")
+            extract_zip("fakeavceleb.zip", REPO_ROOT / "data/raw", optional=True)
+            # Check if extracted to data/FakeAVCeleb_v1.2 instead of data/raw/FakeAVCeleb_v1.2
+            alt_meta = REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv"
+            if alt_meta.exists() and not fav_meta.exists():
+                fav_meta.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(alt_meta.parent), str(fav_meta.parent))
+
     # Print local feature count for validation
     if z_at_dir.exists():
         files = list(z_at_dir.glob("*.pt"))
@@ -265,7 +283,9 @@ def main():
     print("\n" + "=" * 60)
     print("  RUNNING PHASE 2 TRAINING (BOTTLENECK_MODE FINE-TUNING) - 40 EPOCHS")
     print("=" * 60)
-    cmd_p2 = "python scripts/train_full.py --device cuda --epochs 40 --classifier_mode bottleneck --phase2_epochs 40 --phase2_batch 16 --phase2_freeze_layers 10 --skip_phase1 --workers 4 --patience 8"
+    import torch
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 40 --classifier_mode bottleneck --phase2_epochs 40 --phase2_batch 16 --phase2_freeze_layers 10 --skip_phase1 --workers 4 --patience 8"
     os.system(cmd_p2)
 
     # 8. Backup Phase 2 checkpoint to Drive under bottleneck_mode folder
