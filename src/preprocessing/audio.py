@@ -28,31 +28,35 @@ _bert_tokenizer = None
 _whisper_model  = None
 
 
-def _load_wav2vec(model_name: str = "facebook/wav2vec2-base") -> Tuple:
+def _load_wav2vec(model_name: str = "facebook/wav2vec2-base", device: str = "cuda") -> Tuple:
     global _wav2vec_model, _wav2vec_proc
     if _wav2vec_model is None:
         from transformers import Wav2Vec2Model, Wav2Vec2Processor
-        log.info(f"Loading Wav2Vec2: {model_name}")
+        log.info(f"Loading Wav2Vec2: {model_name} on {device}")
         _wav2vec_proc  = Wav2Vec2Processor.from_pretrained(model_name)
-        _wav2vec_model = Wav2Vec2Model.from_pretrained(model_name)
+        _wav2vec_model = Wav2Vec2Model.from_pretrained(model_name).to(device)
         _wav2vec_model.eval()
+    elif str(_wav2vec_model.device) != device:
+        _wav2vec_model = _wav2vec_model.to(device)
     return _wav2vec_model, _wav2vec_proc
 
 
-def _load_bert(model_name: str = "bert-base-uncased") -> Tuple:
+def _load_bert(model_name: str = "bert-base-uncased", device: str = "cuda") -> Tuple:
     global _bert_model, _bert_tokenizer
     if _bert_model is None:
         from transformers import BertModel, BertTokenizer
-        log.info(f"Loading BERT: {model_name}")
+        log.info(f"Loading BERT: {model_name} on {device}")
         _bert_tokenizer = BertTokenizer.from_pretrained(model_name)
-        _bert_model     = BertModel.from_pretrained(model_name)
+        _bert_model     = BertModel.from_pretrained(model_name).to(device)
         _bert_model.eval()
+    elif str(_bert_model.device) != device:
+        _bert_model = _bert_model.to(device)
     return _bert_model, _bert_tokenizer
 
 
-_whisper_device: str = "cpu"
+_whisper_device: str = "cuda"
 
-def _load_whisper(model_name: str = "openai/whisper-base", device: str = "cpu") -> object:
+def _load_whisper(model_name: str = "openai/whisper-base", device: str = "cuda") -> object:
     global _whisper_model, _whisper_device
     if _whisper_model is None or _whisper_device != device:
         import whisper
@@ -96,8 +100,7 @@ def get_acoustic_embedding(
     Returns (768,) float32 tensor.
     """
     import torchaudio
-    model, processor = _load_wav2vec(model_name)
-    model = model.to(device)
+    model, processor = _load_wav2vec(model_name, device=device)
 
     waveform, sr = torchaudio.load(str(wav_path))
     if sr != 16000:
@@ -151,8 +154,7 @@ def get_linguistic_embedding(
     if not text:
         return torch.zeros(768)
 
-    model, tokenizer = _load_bert(model_name)
-    model = model.to(device)
+    model, tokenizer = _load_bert(model_name, device=device)
 
     enc = tokenizer(
         text, return_tensors="pt",

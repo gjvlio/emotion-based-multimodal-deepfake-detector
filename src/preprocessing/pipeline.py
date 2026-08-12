@@ -53,7 +53,7 @@ class PreprocessingPipeline:
         target_fps:           float = 25.0,
         motion_threshold:     float = 0.3,
         confidence_threshold: float = 0.7,
-        device:               str   = "cpu",
+        device:               str   = "cuda",
     ):
         self.cache_dir            = Path(cache_dir)
         self.wav2vec_model        = wav2vec_model

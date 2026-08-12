@@ -51,14 +51,16 @@ except ImportError:
     log.warning("insightface not installed — face detection will use Haar cascade fallback. Install: pip install insightface")
 
 
-def _load_vit(model_name: str = "google/vit-base-patch16-224") -> Tuple:
+def _load_vit(model_name: str = "google/vit-base-patch16-224", device: str = "cuda") -> Tuple:
     global _vit_model, _vit_processor
     if _vit_model is None:
         from transformers import ViTModel, ViTImageProcessor
-        log.info(f"Loading ViT: {model_name}")
+        log.info(f"Loading ViT: {model_name} on {device}")
         _vit_processor = ViTImageProcessor.from_pretrained(model_name)
-        _vit_model     = ViTModel.from_pretrained(model_name)
+        _vit_model     = ViTModel.from_pretrained(model_name).to(device)
         _vit_model.eval()
+    elif str(_vit_model.device) != device:
+        _vit_model = _vit_model.to(device)
     return _vit_model, _vit_processor
 
 
@@ -355,8 +357,7 @@ def get_z_v(
     → AU-saliency weighted Top-8 keyframes → ViT.
     Returns mean-pooled CLS token: (768,) float32.
     """
-    model, processor = _load_vit(vit_model_name)
-    model = model.to(device)
+    model, processor = _load_vit(vit_model_name, device=device)
 
     frames = extract_frames(video_path, target_fps)
     if not frames:
