@@ -46,9 +46,12 @@ def main():
     LOCAL_Z_AT_DIR.mkdir(parents=True, exist_ok=True)
     LOCAL_Z_V_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Locate and extract fakeavceleb.zip if raw videos missing
+    # 1. Locate manifest or extract fakeavceleb.zip if raw videos missing
     fav_meta = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv"
-    if not fav_meta.exists():
+    cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
+    if cached_manifest.exists():
+        print("\n  [MANIFEST OK] Using committed FakeAVCeleb manifest (21,566 clips index ready).")
+    elif not fav_meta.exists():
         print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
         csv_path = search_drive_file("meta_data.csv")
         if csv_path:
