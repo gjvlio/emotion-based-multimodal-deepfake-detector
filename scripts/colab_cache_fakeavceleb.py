@@ -16,8 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.utils.config import Config
-from src.preprocessing.pipeline import PreprocessingPipeline
-from scripts.evaluate_fakeavceleb import load_clips, search_drive_file, extract_zip
+from scripts.colab_stage1 import search_drive_file, extract_zip
+from scripts.evaluate_fakeavceleb import load_clips
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
