@@ -74,7 +74,7 @@ def load_clips(n_real: int, n_fake: int, seed: int = 42, hard: bool = True) -> l
     fake_by_tier: dict[str, list[dict]] = {"hard": [], "med": [], "easy": []}
     missing = 0
 
-    with open(META_CSV, newline="", encoding="utf-8") as f:
+    with open(META_CSV, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
             cat      = row.get("type",   "").strip()
             race     = row.get("race",   "").strip()
