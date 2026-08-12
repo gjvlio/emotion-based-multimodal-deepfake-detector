@@ -353,10 +353,24 @@ class Trainer:
             self.model.unfreeze_top_layers(freeze_layers)
         else:
             self.model.unfreeze_backbones()
-        if grad_ckpt:
-            self.model.enable_gradient_checkpointing()
         self.best_val_loss = float("inf")
-        optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+
+        # Group parameters for differential learning rates (10x higher LR for heads/bottleneck)
+        backbone_params = []
+        head_params = []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if any(b in name for b in ["_wav2vec", "_bert", "_vit", "wav2vec2", "bert", "vit"]):
+                backbone_params.append(param)
+            else:
+                head_params.append(param)
+
+        param_groups = [
+            {"params": backbone_params, "lr": lr},
+            {"params": head_params,     "lr": lr * 10.0},
+        ]
+        optimizer = AdamW(param_groups, weight_decay=weight_decay)
         scheduler = ReduceLROnPlateau(optimizer, patience=2, factor=0.5)
         stopper   = EarlyStopping(patience=patience)
 

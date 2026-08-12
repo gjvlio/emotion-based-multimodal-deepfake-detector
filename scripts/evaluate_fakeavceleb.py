@@ -380,12 +380,20 @@ def compute_metrics(results: list[dict]) -> dict:
     f1   = 2 * prec * rec / max(prec + rec, 1e-8)
 
     # Threshold calibration sweep (find optimal F1 decision boundary)
-    best_thresh, best_cal_f1, best_cal_acc = 0.5, f1, acc
+    best_thresh, best_cal_f1, best_cal_acc = 0.5, 0.0, 0.0
+    best_tp = best_fp = best_fn = best_tn = 0
+    best_prec = best_rec = 0.0
+    
+    # Youden's J Statistic sweep (J = Sensitivity + Specificity - 1 = TPR - FPR)
+    youden_thresh, best_youden_j = 0.5, -1.0
+    youden_acc = youden_sens = youden_spec = 0.0
+
     for th_val in [i / 100.0 for i in range(1, 100)]:
         c_tp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 1)
         c_fp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 0)
         c_fn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 1)
         c_tn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 0)
+        
         c_prec = c_tp / max(c_tp + c_fp, 1)
         c_rec  = c_tp / max(c_tp + c_fn, 1)
         c_f1   = 2 * c_prec * c_rec / max(c_prec + c_rec, 1e-8)
@@ -393,6 +401,23 @@ def compute_metrics(results: list[dict]) -> dict:
             best_cal_f1 = c_f1
             best_thresh = th_val
             best_cal_acc = (c_tp + c_tn) / max(len(results), 1)
+            best_tp, best_fp, best_fn, best_tn = c_tp, c_fp, c_fn, c_tn
+            best_prec, best_rec = c_prec, c_rec
+
+        # Youden's J calculation
+        sens = c_tp / max(c_tp + c_fn, 1)   # Recall / Sensitivity
+        spec = c_tn / max(c_tn + c_fp, 1)   # Specificity / TNR
+        j_stat = sens + spec - 1.0
+        if j_stat > best_youden_j:
+            best_youden_j = j_stat
+            youden_thresh = th_val
+            youden_acc  = (c_tp + c_tn) / max(len(results), 1)
+            youden_sens = sens
+            youden_spec = spec
+
+    # Update predictions with optimal calibrated threshold
+    for r in results:
+        r["pred"] = 1 if r["score"] >= best_thresh else 0
 
     auc = None
     try:
@@ -422,9 +447,11 @@ def compute_metrics(results: list[dict]) -> dict:
             auc_lo, auc_hi = float(np.percentile(boot_aucs, 2.5)), float(np.percentile(boot_aucs, 97.5))
 
     return dict(
-        total=len(results), tp=tp, fp=fp, fn=fn, tn=tn,
-        acc=acc, prec=prec, rec=rec, f1=f1,
+        total=len(results), tp=best_tp, fp=best_fp, fn=best_fn, tn=best_tn,
+        acc=best_cal_acc, prec=best_prec, rec=best_rec, f1=best_cal_f1,
         best_thresh=best_thresh, best_cal_f1=best_cal_f1, best_cal_acc=best_cal_acc,
+        youden_thresh=youden_thresh, best_youden_j=best_youden_j, youden_acc=youden_acc,
+        youden_sens=youden_sens, youden_spec=youden_spec,
         auc=auc, auc_lo=auc_lo, auc_hi=auc_hi,
     )
 
@@ -584,11 +611,10 @@ def main():
     print(f"  F1 (0.5)         : {m['f1']:.4f}")
     print(f"  TP/FP/FN/TN      : {m['tp']}/{m['fp']}/{m['fn']}/{m['tn']}")
 
-    if m.get("best_thresh") is not None and m["best_thresh"] != 0.5:
-        print(f"  --- Calibrated Threshold Sweep ---")
-        print(f"  Optimal Threshold: {m['best_thresh']:.2f}")
-        print(f"  Calibrated Acc   : {m['best_cal_acc']:.4f}")
-        print(f"  Calibrated F1    : {m['best_cal_f1']:.4f}")
+    if m.get("best_thresh") is not None:
+        print(f"  --- Calibrated Threshold Sweeps ---")
+        print(f"  Optimal F1 Threshold  : {m['best_thresh']:.2f}  (F1={m['best_cal_f1']:.4f}, Acc={m['best_cal_acc']:.4f})")
+        print(f"  Youden's J Threshold  : {m['youden_thresh']:.2f}  (J={m['best_youden_j']:.4f}, Acc={m['youden_acc']:.4f}, Sens={m['youden_sens']:.4f}, Spec={m['youden_spec']:.4f})")
 
     if m["auc"] is not None:
         ci_str = (f"  [95% CI: {m['auc_lo']:.4f} to {m['auc_hi']:.4f}]"

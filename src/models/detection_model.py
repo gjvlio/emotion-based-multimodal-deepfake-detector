@@ -76,11 +76,11 @@ class DeepfakeDetector(nn.Module):
             fused_dim = n_emotions + 1
         elif classifier_mode == "emotion_bilinear":
             fused_dim = 36 + n_emotions + 1
-        elif classifier_mode == "bottleneck":
-            self.bilinear_proj = nn.Linear(cbp_dim, 128)
-            self.proj_ln = nn.LayerNorm(128)
-            fused_dim = 128 + n_emotions + 1
-        elif classifier_mode == "high_dropout":
+        elif self.classifier_mode == "bottleneck":
+            self.bilinear_proj = nn.Linear(cbp_dim, 256)
+            self.proj_ln = nn.LayerNorm(256)
+            fused_dim = 256 + 36 + n_emotions + 1
+        elif self.classifier_mode == "high_dropout":
             self.high_dropout = nn.Dropout(0.85)
             fused_dim = cbp_dim + n_emotions + 1
         else:  # baseline
@@ -210,8 +210,10 @@ class DeepfakeDetector(nn.Module):
             fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
             combined = torch.cat([fused_emo, delta, sarc], dim=-1)       # (B, 43)
         elif self.classifier_mode == "bottleneck":
-            fused_proj = F.relu(self.proj_ln(self.bilinear_proj(fused)))
-            combined = torch.cat([fused_proj, delta, sarc], dim=-1)
+            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
+            fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
+            fused_proj = F.gelu(self.proj_ln(self.bilinear_proj(fused))) # (B, 256)
+            combined = torch.cat([fused_proj, fused_emo, delta, sarc], dim=-1) # (B, 299)
         elif self.classifier_mode == "high_dropout":
             fused_drop = self.high_dropout(fused)
             combined = torch.cat([fused_drop, delta, sarc], dim=-1)

@@ -304,7 +304,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
     fake_test  = sum(1 for r in test_recs if r["fake_label"] == 1)
 
     src_counts = Counter(r["source_pipeline"] for r in train_recs)
-    auto_pw = 1.0  # Unweighted BCE to avoid suppressing fake predictions
+    auto_pw = real_train / max(fake_train, 1)  # Exactly 1.3835 (8254 real / 5966 fake)
 
     stats = {
         "total": len(all_recs),
@@ -374,8 +374,8 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             audio_cid = cid
             audio_vp  = vp
 
-            # Audio-Visual Swap Augmentation (30% probability for real clips)
-            if fake_label == 0 and random.random() < 0.3:
+            # Audio-Visual Swap Augmentation (40% probability for real clips)
+            if fake_label == 0 and random.random() < 0.4:
                 other_idx = random.randint(0, len(self._recs) - 1)
                 other_r = self._recs[other_idx]
                 audio_cid = other_r["clip_id"]
