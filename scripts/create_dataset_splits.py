@@ -125,6 +125,10 @@ def create_splits(seed: int = 42):
     rng.shuffle(val_records)
     rng.shuffle(test_records)
 
+    if not records:
+        log.warning("No records found in training_turnover_manifest.csv to split.")
+        return
+
     # Fieldnames for output CSVs
     fieldnames = list(records[0].keys())
 

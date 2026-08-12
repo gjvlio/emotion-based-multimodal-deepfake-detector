@@ -150,6 +150,7 @@ def run_validation_and_turnover():
                   "sarcasm_label", "has_z_at", "has_z_v", "is_ready_for_training", "video_path", "z_at_path", "z_v_path"]
 
     OUT_MANIFEST_CSV.parent.mkdir(parents=True, exist_ok=True)
+    PREPROCESSED_TURNOVER_CSV.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_MANIFEST_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

@@ -38,12 +38,19 @@ def scan_drive_zips():
         print("  No zip files found recursively in THESIS_MOTHERFILE.")
 
 def search_drive_file(zip_name: str) -> Path | None:
-    """Recursive search in Drive for zip_name."""
+    """Recursive search in Drive for zip_name with exact and partial matching."""
     if not DRIVE_BASE.exists():
         return None
+    # 1. Exact match search
     for root, _, files in os.walk(DRIVE_BASE):
         for f in files:
             if f.lower() == zip_name.lower():
+                return Path(root) / f
+    # 2. Substring match fallback
+    stem = Path(zip_name).stem.lower()
+    for root, _, files in os.walk(DRIVE_BASE):
+        for f in files:
+            if f.endswith('.zip') and stem in f.lower():
                 return Path(root) / f
     return None
 
@@ -62,7 +69,14 @@ def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_d
             namelist = zf.namelist()
             if namelist:
                 has_data_prefix = any(name.startswith("data/") for name in namelist)
-                dest = REPO_ROOT if has_data_prefix else extract_to
+                has_prep_prefix = any(name.startswith("preprocessed/") for name in namelist)
+                if has_data_prefix:
+                    dest = REPO_ROOT
+                elif has_prep_prefix:
+                    dest = REPO_ROOT / "data"
+                else:
+                    dest = extract_to
+
                 sample_files = [n for n in namelist if not n.endswith('/') and not n.startswith('__MACOSX')]
                 if sample_files:
                     sample_check = dest / sample_files[min(5, len(sample_files)-1)]
@@ -87,9 +101,26 @@ def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_d
         if not namelist:
             return False
         has_data_prefix = any(name.startswith("data/") for name in namelist)
-        dest = REPO_ROOT if has_data_prefix else extract_to
+        has_prep_prefix = any(name.startswith("preprocessed/") for name in namelist)
+        
+        if has_data_prefix:
+            dest = REPO_ROOT
+        elif has_prep_prefix:
+            dest = REPO_ROOT / "data"
+        else:
+            dest = extract_to
+
         dest.mkdir(parents=True, exist_ok=True)
         zf.extractall(dest)
+
+        # Flatten nested preprocessed/preprocessed/ if present
+        nested = REPO_ROOT / "data/preprocessed/preprocessed"
+        if nested.exists() and nested.is_dir():
+            for item in nested.iterdir():
+                target = REPO_ROOT / "data/preprocessed" / item.name
+                if not target.exists():
+                    shutil.move(str(item), str(target))
+
     print("  Done.")
     return True
 
