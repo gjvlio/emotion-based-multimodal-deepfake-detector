@@ -49,8 +49,10 @@ def main():
             if not (z_at_exists and z_v_exists):
                 missing_features += 1
 
+            video_rel_path = f"data/raw/FakeAVCeleb_v1.2/{cat}/{race}/{gender}/{source}/{filename}"
             records.append({
                 "clip_id":     clip_id,
+                "video_path":  video_rel_path,
                 "fake_label":  0 if cat == REAL_TYPE else 1,
                 "method":      method,
                 "type":        cat,
@@ -60,7 +62,7 @@ def main():
             })
 
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["clip_id", "fake_label", "method", "type", "speaker_id", "z_at_exists", "z_v_exists"]
+    fieldnames = ["clip_id", "video_path", "fake_label", "method", "type", "speaker_id", "z_at_exists", "z_v_exists"]
 
     with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
