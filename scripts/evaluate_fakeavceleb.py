@@ -491,11 +491,55 @@ def per_method_breakdown(results: list[dict]) -> None:
         print(f"  {method:<25} {len(recs):>6}  {a:.4f}  {auc_str}")
 
 
+def ensure_preprocessed_features():
+    """Checks if preprocessed feature tensors exist locally; if not, extracts preprocessed.zip from Drive."""
+    z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
+    if z_at_dir.exists() and any(z_at_dir.glob("*.pt")):
+        return
+
+    drive_base = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
+    if not drive_base.exists():
+        return
+
+    print("\n[AUTO-CHECK] Local preprocessed features missing. Searching Google Drive for preprocessed.zip...")
+    zip_path = None
+    for root, _, files in os.walk(drive_base):
+        for f in files:
+            if "preprocessed" in f.lower() and f.endswith(".zip"):
+                zip_path = Path(root) / f
+                break
+        if zip_path:
+            break
+
+    if zip_path:
+        size_mb = zip_path.stat().st_size / 1e6
+        print(f"  [AUTO-EXTRACT] Extracting {zip_path.name} ({size_mb:.1f} MB) to local SSD...")
+        import shutil
+        import zipfile
+        with zipfile.ZipFile(zip_path) as zf:
+            namelist = zf.namelist()
+            has_data_prefix = any(name.startswith("data/") for name in namelist)
+            has_prep_prefix = any(name.startswith("preprocessed/") for name in namelist)
+            
+            dest = REPO_ROOT if has_data_prefix else (REPO_ROOT / "data" if has_prep_prefix else REPO_ROOT / "data/preprocessed")
+            dest.mkdir(parents=True, exist_ok=True)
+            zf.extractall(dest)
+
+        nested = REPO_ROOT / "data/preprocessed/preprocessed"
+        if nested.exists() and nested.is_dir():
+            for item in nested.iterdir():
+                target = REPO_ROOT / "data/preprocessed" / item.name
+                if not target.exists():
+                    shutil.move(str(item), str(target))
+        print("  [AUTO-EXTRACT] Done! Preprocessed feature cache extracted.\n")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark detector on FakeAVCeleb v1.2")
-    parser.add_argument("--checkpoint", required=True,
-                        help="Path to trained checkpoint (e.g. checkpoints/smoke/best_phase1.pt)")
-    parser.add_argument("--config",     default=None)
+    ensure_preprocessed_features()
+
+    parser = argparse.ArgumentParser(description="Evaluate DeepSentinel on FakeAVCeleb dataset")
+    parser.add_argument("--checkpoint", type=str, default="checkpoints/full/best_phase2_emotion_bilinear.pt")
+    parser.add_argument("--config",     type=str, default="configs/config.yaml")
     _default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device",     default=_default_device)
     parser.add_argument("--n_real",     type=int, default=200,
