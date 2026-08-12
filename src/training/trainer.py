@@ -376,9 +376,14 @@ class Trainer:
         scheduler = ReduceLROnPlateau(optimizer, patience=2, factor=0.5)
         stopper   = EarlyStopping(patience=patience)
 
+        if self.device.startswith("cuda"):
+            torch.cuda.empty_cache()
+
         for epoch in range(1, max_epochs + 1):
             train_loss = self._train_epoch_e2e(optimizer, epoch)
             val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
+            if self.device.startswith("cuda"):
+                torch.cuda.empty_cache()
             scheduler.step(val_loss)
             current_lr = optimizer.param_groups[0]["lr"]
 

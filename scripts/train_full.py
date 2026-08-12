@@ -15,9 +15,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
+import sys
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import csv
 import logging
-import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
