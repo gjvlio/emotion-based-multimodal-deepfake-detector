@@ -596,16 +596,29 @@ def main():
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
-    drive_latest = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / ckpt_path.name
-    drive_base   = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / ckpt_path.name
+    drive_mode_p2 = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase2_bottleneck.pt")
+    drive_mode_p1 = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase1_bottleneck.pt")
+    drive_latest  = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / ckpt_path.name
+    drive_base    = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / ckpt_path.name
     
-    drive_source = drive_latest if drive_latest.exists() else (drive_base if drive_base.exists() else None)
-    if drive_source is not None:
+    drive_source = None
+    if ckpt_path.name == "best_phase2_bottleneck.pt" and drive_mode_p2.exists():
+        drive_source = drive_mode_p2
+    elif ckpt_path.name == "best_phase1_bottleneck.pt" and drive_mode_p1.exists():
+        drive_source = drive_mode_p1
+    elif drive_mode_p2.exists():
+        drive_source = drive_mode_p2
+    elif drive_latest.exists():
+        drive_source = drive_latest
+    elif drive_base.exists():
+        drive_source = drive_base
+
+    if drive_source is not None and drive_source.exists():
         try:
             import shutil
             ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(drive_source, ckpt_path)
-            print(f"  [DRIVE OVERWRITE] Overwrote local evaluation checkpoint from Drive ({drive_source.parent.name}) -> {ckpt_path}")
+            print(f"  [DRIVE OVERWRITE] Loaded evaluation checkpoint from Drive ({drive_source.relative_to(Path('/content/drive/MyDrive'))}) -> {ckpt_path}")
         except Exception as e:
             print(f"  [DRIVE OVERWRITE WARNING] Failed to copy checkpoint from Drive: {e}")
 
