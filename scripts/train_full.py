@@ -610,8 +610,9 @@ def main():
         print("\n  ERROR: No training clips. Run: python scripts/validate_training_prep.py")
         return
 
-    loader_kw = dict(batch_size=args.batch_size, num_workers=args.workers,
-                     pin_memory=args.device.startswith("cuda"))
+    p1_workers = min(args.workers, 2) if args.device.startswith("cuda") else 0
+    loader_kw  = dict(batch_size=args.batch_size, num_workers=p1_workers,
+                      pin_memory=args.device.startswith("cuda"))
     train_loader = DataLoader(train_ds, shuffle=True,  **loader_kw)
     val_loader   = DataLoader(val_ds,   shuffle=False, **loader_kw)
     test_loader  = DataLoader(test_ds,  shuffle=False, **loader_kw)
