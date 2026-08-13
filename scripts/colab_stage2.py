@@ -369,11 +369,19 @@ def main():
 
     if drive_p1_ckpt.exists():
         shutil.copy2(drive_p1_ckpt, local_p1_ckpt)
-        print(f"\nLoaded Stage 1 bottleneck weights from Drive -> {local_p1_ckpt}")
+        print(f"\n[DRIVE FETCH] Loaded Stage 1 bottleneck weights from Drive -> {local_p1_ckpt}")
     else:
-        print(f"ERROR: Phase 1 bottleneck checkpoint not found in Drive: {drive_p1_ckpt}")
-        print("Please run scripts/colab_stage1.py first to create the bottleneck baseline weights.")
-        return
+        # Search anywhere in Drive for best_phase1_bottleneck.pt or best_phase1.pt
+        found_ckpt = search_drive_file("best_phase1_bottleneck.pt") or search_drive_file("best_phase1.pt")
+        if found_ckpt and found_ckpt.exists():
+            shutil.copy2(found_ckpt, local_p1_ckpt)
+            print(f"\n[DRIVE FETCH] Found & loaded Stage 1 weights from Drive -> {local_p1_ckpt}")
+        elif local_p1_ckpt.exists():
+            print(f"\n[LOCAL FETCH] Using local Stage 1 weights -> {local_p1_ckpt}")
+        else:
+            print(f"ERROR: Phase 1 bottleneck checkpoint not found in Drive or local SSD.")
+            print("Please run scripts/colab_stage1.py first to create the bottleneck baseline weights.")
+            return
 
     # 7. Run Stage 2 Training (40 epochs)
     print("\n" + "=" * 60)
