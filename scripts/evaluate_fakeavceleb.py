@@ -303,11 +303,13 @@ class FakeAVCelebEvalDataset(Dataset):
 
 
 def run_inference(
-    clips:    list[dict],
+    clips: list[dict],
     pipeline: PreprocessingPipeline,
-    model:    DeepfakeDetector,
-    device:   str,
+    model: DeepfakeDetector,
+    device: str,
     no_cache: bool,
+    force_features: bool = False,
+    cached_only: bool = False,
 ) -> list[dict]:
     """
     For each clip: extract features (or load from cache) → run detector.
@@ -317,7 +319,7 @@ def run_inference(
     model.eval()
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
-    if model._backbones_loaded and not all_cached:
+    if model._backbones_loaded and not all_cached and not force_features and not cached_only:
         n_workers = 0 if os.name == "nt" else 4
         dataset = FakeAVCelebEvalDataset(clips, pipeline)
         loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, pin_memory=(device != "cpu"))
@@ -594,11 +596,13 @@ def main():
     parser.add_argument("--no_hard",    action="store_true",
                         help="Disable hard method stratification (uniform random sample)")
     parser.add_argument("--save_csv",   default=None,
-                        help="Save per-clip results (clip_id,fake_label,method,type,score,pred) to this CSV path "
-                             "— needed to compare against another framework's scores on the SAME clips "
-                             "(see scripts/compare_frameworks.py)")
+                        help="Save per-clip results (clip_id,fake_label,method,type,score,pred) to this CSV path")
     parser.add_argument("--classifier_mode", type=str, default="baseline",
                         choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
+    parser.add_argument("--cached_only", action="store_true",
+                        help="Evaluate ONLY clips that have pre-extracted .pt feature tensors ready on disk (instant <2s run)")
+    parser.add_argument("--force_features", action="store_true",
+                        help="Force feature-based forward pass (forward_from_features), bypassing raw video decoding & face detector")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -663,7 +667,7 @@ def main():
     
     # Phase 2 checkpoints contain un-frozen backbones. Detect and load them dynamically.
     has_backbones = any(k.startswith("vit.") or k.startswith("wav2vec.") or k.startswith("bert.") for k in ckpt["model_state"].keys())
-    if has_backbones:
+    if has_backbones and not args.force_features and not args.cached_only:
         print("  [HuggingFace] Detected Stage 2 backbone weights in checkpoint.")
         print("  [HuggingFace] Loading ViT, Wav2Vec2, and BERT backbones into GPU VRAM...")
         model.load_backbones()
@@ -690,14 +694,16 @@ def main():
         max_audio_sec = cfg.preprocessing.max_audio_seconds,
         device        = args.device,
     )
-    cached = sum(1 for c in clips if pipeline.is_cached(c["clip_id"]))
-    to_process = len(clips) - cached
-    print(f"  Already cached : {cached}/{len(clips)} clips (run instantly)")
-    print(f"  Need extraction: {to_process} clips (~{to_process * 9 // 60}min on GPU)")
+    if args.cached_only:
+        clips = [c for c in clips if pipeline.is_cached(c["clip_id"])]
+        print(f"  [CACHED ONLY] Filtered evaluation set to {len(clips):,} cached feature clips ready on disk.")
 
     # ── Run inference ──────────────────────────────────────────────────────────
     _section("Running inference (MP4 -> features -> P(fake))")
-    results = run_inference(clips, pipeline, model, args.device, args.no_cache)
+    results = run_inference(
+        clips, pipeline, model, args.device, args.no_cache,
+        force_features=args.force_features, cached_only=args.cached_only
+    )
     print(f"\n  Evaluated : {len(results)} clips  ({len(clips) - len(results)} failed/skipped)")
 
     if not results:
