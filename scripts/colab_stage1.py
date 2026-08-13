@@ -265,7 +265,10 @@ def main():
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     cmd = f"python scripts/train_full.py --device {dev} --epochs 40 --classifier_mode bottleneck --no_phase2"
-    os.system(cmd)
+    ret = os.system(cmd)
+    if ret != 0:
+        print(f"\n[ERROR] Stage 1 training failed with exit code {ret}.")
+        sys.exit(1)
 
     # Copy checkpoints and logs to Drive under bottleneck_mode folder
     drive_mode_dir = DRIVE_BASE / "checkpoints/latest/bottleneck_mode"

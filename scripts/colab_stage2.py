@@ -382,7 +382,10 @@ def main():
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 40 --classifier_mode bottleneck --phase2_epochs 40 --phase2_batch 4 --phase2_freeze_layers 10 --skip_phase1 --workers 2 --patience 8"
-    os.system(cmd_p2)
+    ret_p2 = os.system(cmd_p2)
+    if ret_p2 != 0:
+        print(f"\n[ERROR] Stage 2 training failed with exit code {ret_p2}.")
+        sys.exit(1)
 
     # 8. Backup Phase 2 checkpoint to Drive under bottleneck_mode folder
     p2_ckpt = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase2_bottleneck.pt"
