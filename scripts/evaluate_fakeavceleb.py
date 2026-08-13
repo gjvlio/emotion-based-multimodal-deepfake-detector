@@ -514,20 +514,26 @@ def ensure_preprocessed_features():
     drive_z_at = drive_base / "preprocessed/features/z_at"
     drive_z_v  = drive_base / "preprocessed/features/z_v"
 
-    if drive_z_at.exists() and drive_z_v.exists():
+    local_at_count = len(list(z_at_dir.glob("*.pt")))
+    if local_at_count < 1000 and drive_z_at.exists() and drive_z_v.exists():
         import shutil
-        synced = 0
-        for pt in drive_z_at.glob("*.pt"):
-            local_at = z_at_dir / pt.name
-            local_v  = z_v_dir / pt.name
-            drive_v  = drive_z_v / pt.name
-            if not local_at.exists():
-                shutil.copy2(pt, local_at)
+        print("  [DRIVE SYNC] Fast-checking missing features on Google Drive...")
+        drive_at_names = set(p.name for p in drive_z_at.glob("*.pt"))
+        local_at_names = set(p.name for p in z_at_dir.glob("*.pt"))
+        missing_names  = drive_at_names - local_at_names
+        
+        if missing_names:
+            synced = 0
+            for name in missing_names:
+                drive_at = drive_z_at / name
+                drive_v  = drive_z_v / name
+                local_at = z_at_dir / name
+                local_v  = z_v_dir / name
+                shutil.copy2(drive_at, local_at)
                 synced += 1
-            if drive_v.exists() and not local_v.exists():
-                shutil.copy2(drive_v, local_v)
-        if synced > 0:
-            print(f"  [DRIVE AUTO-SYNC] Synced {synced:,} cached feature pairs from Google Drive to local SSD.")
+                if drive_v.exists():
+                    shutil.copy2(drive_v, local_v)
+            print(f"  [DRIVE AUTO-SYNC] Fast-synced {synced:,} cached feature pairs from Google Drive to local SSD.")
 
     local_at_files = set(p.stem for p in z_at_dir.glob("*.pt"))
     local_v_files  = set(p.stem for p in z_v_dir.glob("*.pt"))
