@@ -381,7 +381,22 @@ def main():
     print("=" * 60)
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 40 --classifier_mode bottleneck --phase2_epochs 40 --phase2_batch 4 --phase2_freeze_layers 10 --skip_phase1 --workers 0 --patience 8"
+
+    # Colab Pro GPU detection (A100 / V100 High-RAM optimization)
+    p2_batch   = 4
+    p2_workers = 0
+    if dev == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"\n[GPU DETECTED] {gpu_name} ({gpu_vram:.1f} GB VRAM)")
+        if gpu_vram > 15.0 or "A100" in gpu_name or "V100" in gpu_name:
+            p2_batch   = 16
+            p2_workers = 2
+            print("  [COLAB PRO OPTIMIZATION] Enabling High-Performance Batching (Batch=16, Workers=2) for ~2.5 mins/epoch!")
+        else:
+            print("  [COLAB STANDARD OPTIMIZATION] Enabling Safe Batching (Batch=4, Workers=0) to prevent OOM!")
+
+    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs 50 --phase2_batch {p2_batch} --phase2_freeze_layers 10 --skip_phase1 --workers {p2_workers} --patience 10"
     ret_p2 = os.system(cmd_p2)
     if ret_p2 != 0:
         print(f"\n[ERROR] Stage 2 training failed with exit code {ret_p2}.")
