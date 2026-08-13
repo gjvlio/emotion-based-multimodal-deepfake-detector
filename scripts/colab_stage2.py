@@ -189,25 +189,30 @@ def verify_dataset_completeness():
     extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
     extract_zip("metadata.zip", REPO_ROOT / "data", optional=True)
 
-    # 3. Direct-sync loose features from Drive if present
+    # 3. Direct-sync loose features from Drive if local cache is incomplete
     drive_prep_features = DRIVE_BASE / "preprocessed/features"
     local_prep_features = REPO_ROOT / "data/preprocessed/features"
-    if drive_prep_features.exists():
-        (local_prep_features / "z_at").mkdir(parents=True, exist_ok=True)
-        (local_prep_features / "z_v").mkdir(parents=True, exist_ok=True)
-        synced = 0
-        if (drive_prep_features / "z_at").exists():
-            for pt in (drive_prep_features / "z_at").glob("*.pt"):
-                local_at = local_prep_features / "z_at" / pt.name
-                local_v  = local_prep_features / "z_v" / pt.name
-                drive_v  = drive_prep_features / "z_v" / pt.name
-                if not local_at.exists():
-                    shutil.copy2(pt, local_at)
-                    synced += 1
-                if drive_v.exists() and not local_v.exists():
+    (local_prep_features / "z_at").mkdir(parents=True, exist_ok=True)
+    (local_prep_features / "z_v").mkdir(parents=True, exist_ok=True)
+
+    local_at_count = len(list((local_prep_features / "z_at").glob("*.pt")))
+    if local_at_count < 10000 and drive_prep_features.exists() and (drive_prep_features / "z_at").exists():
+        drive_at_names = set(p.name for p in (drive_prep_features / "z_at").glob("*.pt"))
+        local_at_names = set(p.name for p in (local_prep_features / "z_at").glob("*.pt"))
+        missing_names  = drive_at_names - local_at_names
+        
+        if missing_names:
+            synced = 0
+            for name in missing_names:
+                drive_at = drive_prep_features / "z_at" / name
+                drive_v  = drive_prep_features / "z_v" / name
+                local_at = local_prep_features / "z_at" / name
+                local_v  = local_prep_features / "z_v" / name
+                shutil.copy2(drive_at, local_at)
+                synced += 1
+                if drive_v.exists():
                     shutil.copy2(drive_v, local_v)
-        if synced > 0:
-            print(f"  [DRIVE SYNC] Direct-synced {synced:,} feature pairs from Google Drive.")
+            print(f"  [DRIVE SYNC] Fast-synced {synced:,} missing feature pairs from Google Drive.")
 
     # 4. Flatten nested directory structure if present
     nested_prep = REPO_ROOT / "data/preprocessed/preprocessed"
