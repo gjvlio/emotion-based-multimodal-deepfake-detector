@@ -404,12 +404,18 @@ def compute_metrics(results: list[dict]) -> dict:
     youden_thresh, best_youden_j = 0.5, -1.0
     youden_acc = youden_sens = youden_spec = 0.0
 
+    zero_fp_thresh = None
+    zero_fp_sens = 0.0
     for th_val in [i / 100.0 for i in range(1, 100)]:
         c_tp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 1)
         c_fp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 0)
         c_fn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 1)
         c_tn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 0)
-        
+
+        if c_fp == 0 and (zero_fp_thresh is None or th_val < zero_fp_thresh):
+            zero_fp_thresh = th_val
+            zero_fp_sens   = c_tp / max(c_tp + c_fn, 1)
+
         c_prec = c_tp / max(c_tp + c_fp, 1)
         c_rec  = c_tp / max(c_tp + c_fn, 1)
         c_f1   = 2 * c_prec * c_rec / max(c_prec + c_rec, 1e-8)
@@ -468,6 +474,7 @@ def compute_metrics(results: list[dict]) -> dict:
         best_thresh=best_thresh, best_cal_f1=best_cal_f1, best_cal_acc=best_cal_acc,
         youden_thresh=youden_thresh, best_youden_j=best_youden_j, youden_acc=youden_acc,
         youden_sens=youden_sens, youden_spec=youden_spec,
+        zero_fp_thresh=zero_fp_thresh, zero_fp_sens=zero_fp_sens,
         auc=auc, auc_lo=auc_lo, auc_hi=auc_hi,
     )
 
@@ -699,6 +706,8 @@ def main():
         print(f"  --- Calibrated Threshold Sweeps ---")
         print(f"  Optimal F1 Threshold  : {m['best_thresh']:.2f}  (F1={m['best_cal_f1']:.4f}, Acc={m['best_cal_acc']:.4f})")
         print(f"  Youden's J Threshold  : {m['youden_thresh']:.2f}  (J={m['best_youden_j']:.4f}, Acc={m['youden_acc']:.4f}, Sens={m['youden_sens']:.4f}, Spec={m['youden_spec']:.4f})")
+        if m.get("zero_fp_thresh") is not None:
+            print(f"  Zero-FP Operating Pt  : {m['zero_fp_thresh']:.2f}  (Specificity=100.0%, FP=0, Recall={m['zero_fp_sens']:.4f})")
 
     if m["auc"] is not None:
         ci_str = (f"  [95% CI: {m['auc_lo']:.4f} to {m['auc_hi']:.4f}]"
