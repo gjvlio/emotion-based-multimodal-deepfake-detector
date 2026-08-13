@@ -658,9 +658,11 @@ def main():
     # Phase 2 checkpoints contain un-frozen backbones. Detect and load them dynamically.
     has_backbones = any(k.startswith("vit.") or k.startswith("wav2vec.") or k.startswith("bert.") for k in ckpt["model_state"].keys())
     if has_backbones:
-        print("  Detected backbone weights in checkpoint. Initializing backbones for evaluation...")
+        print("  [HuggingFace] Detected Stage 2 backbone weights in checkpoint.")
+        print("  [HuggingFace] Loading ViT, Wav2Vec2, and BERT backbones into GPU VRAM...")
         model.load_backbones()
         model.to(args.device)
+        print("  [HuggingFace] Backbone weights loaded successfully.")
         
     model.load_state_dict(ckpt["model_state"], strict=False)
     model.eval()
@@ -668,6 +670,7 @@ def main():
 
     # ── Load preprocessing pipeline ────────────────────────────────────────────
     _section("Initializing preprocessing pipeline")
+    print("  [Pipeline] Connecting feature cache and checking preprocessed feature tensors...")
     cfg = Config.from_yaml(args.config)
     pipeline = PreprocessingPipeline(
         cache_dir     = cfg.paths.preprocessed_dir,
