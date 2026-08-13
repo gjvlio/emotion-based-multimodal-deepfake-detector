@@ -696,10 +696,11 @@ def main():
             print(f"\n[INFO] Found CMU-MOSEI source archive/directory. Including MOSEI clips in Phase 2!")
 
         p2_ds = Phase2FullDataset(p2_train_recs, PREPROCESSED_DIR, KEYFRAME_CACHE_DIR)
-        p2_loader = DataLoader(p2_ds, shuffle=True,
-                               batch_size=args.phase2_batch,
-                               num_workers=args.workers,
-                               pin_memory=args.device.startswith("cuda"))
+        p2_workers = min(args.workers, 1) if args.device.startswith("cuda") else 0
+        p2_loader  = DataLoader(p2_ds, shuffle=True,
+                                batch_size=args.phase2_batch,
+                                num_workers=p2_workers,
+                                pin_memory=args.device.startswith("cuda"))
         trainer.train_loader = p2_loader
         trainer.train_phase2(
             lr            = args.phase2_lr,
