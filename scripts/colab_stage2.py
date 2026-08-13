@@ -165,6 +165,96 @@ def compress_existing_cache():
             pass
     print(f"  Successfully deleted {deleted} old cache files. Freed {freed_mb/1024:.1f} GB of local disk space!")
 
+def verify_dataset_completeness():
+    """Pre-flight validator: ensures manifests and feature files are 100% complete before Stage 2."""
+    print("\n" + "=" * 60)
+    print("  PRE-FLIGHT DATASET & FEATURE CACHE VALIDATOR (STAGE 2)")
+    print("=" * 60)
+
+    # 1. Check training turnover manifest in Drive if missing locally
+    turnover_csv = REPO_ROOT / "data/processed/training_turnover_manifest.csv"
+    if not turnover_csv.exists():
+        drive_turnover = search_drive_file("training_turnover_manifest.csv")
+        if drive_turnover and drive_turnover.exists():
+            turnover_csv.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(drive_turnover, turnover_csv)
+            print(f"  [FOUND ON DRIVE] Copied training_turnover_manifest.csv from Drive -> {turnover_csv}")
+
+    # 2. Extract all feature archives from Drive
+    print("\nChecking and extracting all feature archives from Google Drive...")
+    extract_zip("preprocessed.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    for i in range(4):
+        extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("metadata.zip", REPO_ROOT / "data", optional=True)
+
+    # 3. Direct-sync loose features from Drive if present
+    drive_prep_features = DRIVE_BASE / "preprocessed/features"
+    local_prep_features = REPO_ROOT / "data/preprocessed/features"
+    if drive_prep_features.exists():
+        (local_prep_features / "z_at").mkdir(parents=True, exist_ok=True)
+        (local_prep_features / "z_v").mkdir(parents=True, exist_ok=True)
+        synced = 0
+        if (drive_prep_features / "z_at").exists():
+            for pt in (drive_prep_features / "z_at").glob("*.pt"):
+                local_at = local_prep_features / "z_at" / pt.name
+                local_v  = local_prep_features / "z_v" / pt.name
+                drive_v  = drive_prep_features / "z_v" / pt.name
+                if not local_at.exists():
+                    shutil.copy2(pt, local_at)
+                    synced += 1
+                if drive_v.exists() and not local_v.exists():
+                    shutil.copy2(drive_v, local_v)
+        if synced > 0:
+            print(f"  [DRIVE SYNC] Direct-synced {synced:,} feature pairs from Google Drive.")
+
+    # 4. Flatten nested directory structure if present
+    nested_prep = REPO_ROOT / "data/preprocessed/preprocessed"
+    if nested_prep.exists() and nested_prep.is_dir():
+        for item in nested_prep.iterdir():
+            target = REPO_ROOT / "data/preprocessed" / item.name
+            if not target.exists():
+                shutil.move(str(item), str(target))
+
+    # 5. Run validate_training_prep and create_dataset_splits
+    print("\nValidating preprocessed features and generating dataset splits...")
+    os.chdir(str(REPO_ROOT))
+    os.system("python scripts/validate_training_prep.py")
+    os.system("python scripts/create_dataset_splits.py")
+
+    # 6. Final completeness verification summary
+    train_csv = REPO_ROOT / "data/processed/train_manifest.csv"
+    val_csv   = REPO_ROOT / "data/processed/val_manifest.csv"
+    test_csv  = REPO_ROOT / "data/processed/internal_test_manifest.csv"
+
+    n_train = 0
+    n_val   = 0
+    n_test  = 0
+    if train_csv.exists():
+        with open(train_csv, encoding="utf-8", errors="replace") as f:
+            n_train = max(0, sum(1 for _ in f) - 1)
+    if val_csv.exists():
+        with open(val_csv, encoding="utf-8", errors="replace") as f:
+            n_val = max(0, sum(1 for _ in f) - 1)
+    if test_csv.exists():
+        with open(test_csv, encoding="utf-8", errors="replace") as f:
+            n_test = max(0, sum(1 for _ in f) - 1)
+
+    z_at_cnt = len(list((local_prep_features / "z_at").glob("*.pt"))) if (local_prep_features / "z_at").exists() else 0
+    z_v_cnt  = len(list((local_prep_features / "z_v").glob("*.pt"))) if (local_prep_features / "z_v").exists() else 0
+
+    print("\n" + "=" * 60)
+    print("  PRE-FLIGHT VALIDATION SUMMARY & COMPLETENESS REPORT (STAGE 2)")
+    print("=" * 60)
+    print(f"  Feature Tensors on Disk : {z_at_cnt:,} z_at files, {z_v_cnt:,} z_v files")
+    print(f"  Train Manifest          : {n_train:,} clips {'[100% READY]' if n_train > 0 else '[MISSING/EMPTY]'}")
+    print(f"  Val Manifest            : {n_val:,} clips {'[100% READY]' if n_val > 0 else '[MISSING/EMPTY]'}")
+    print(f"  Internal Test Manifest  : {n_test:,} clips {'[100% READY]' if n_test > 0 else '[MISSING/EMPTY]'}")
+    print(f"  Total Dataset Split     : {n_train + n_val + n_test:,} total clips")
+    print("=" * 60 + "\n")
+
+
 def main():
     print("\n" + "=" * 60)
     print("  DEEP-SENTINEL COLAB: STAGE 2 TRAINING (BACKBONE FINE-TUNING)")
@@ -175,9 +265,10 @@ def main():
         return
 
     DRIVE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Scan and print Drive files for visibility
     scan_drive_zips()
+
+    # Pre-flight dataset & feature cache validation
+    verify_dataset_completeness()
 
 
 

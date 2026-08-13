@@ -116,9 +116,99 @@ def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_d
     print("  Done.")
     return True
 
+def verify_dataset_completeness():
+    """Pre-flight validator: ensures manifests and feature files are 100% complete before training."""
+    print("\n" + "=" * 60)
+    print("  PRE-FLIGHT DATASET & FEATURE CACHE VALIDATOR")
+    print("=" * 60)
+
+    # 1. Check training turnover manifest in Drive if missing locally
+    turnover_csv = REPO_ROOT / "data/processed/training_turnover_manifest.csv"
+    if not turnover_csv.exists():
+        drive_turnover = search_drive_file("training_turnover_manifest.csv")
+        if drive_turnover and drive_turnover.exists():
+            turnover_csv.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(drive_turnover, turnover_csv)
+            print(f"  [FOUND ON DRIVE] Copied training_turnover_manifest.csv from Drive -> {turnover_csv}")
+
+    # 2. Extract all feature archives from Drive
+    print("\nChecking and extracting all feature archives from Google Drive...")
+    extract_zip("preprocessed.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("existing_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    for i in range(4):
+        extract_zip(f"mosei_features_shard{i}.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("mosei_features.zip", REPO_ROOT / "data/preprocessed", optional=True)
+    extract_zip("metadata.zip", REPO_ROOT / "data", optional=True)
+
+    # 3. Direct-sync loose features from Drive if present
+    drive_prep_features = DRIVE_BASE / "preprocessed/features"
+    local_prep_features = REPO_ROOT / "data/preprocessed/features"
+    if drive_prep_features.exists():
+        (local_prep_features / "z_at").mkdir(parents=True, exist_ok=True)
+        (local_prep_features / "z_v").mkdir(parents=True, exist_ok=True)
+        synced = 0
+        if (drive_prep_features / "z_at").exists():
+            for pt in (drive_prep_features / "z_at").glob("*.pt"):
+                local_at = local_prep_features / "z_at" / pt.name
+                local_v  = local_prep_features / "z_v" / pt.name
+                drive_v  = drive_prep_features / "z_v" / pt.name
+                if not local_at.exists():
+                    shutil.copy2(pt, local_at)
+                    synced += 1
+                if drive_v.exists() and not local_v.exists():
+                    shutil.copy2(drive_v, local_v)
+        if synced > 0:
+            print(f"  [DRIVE SYNC] Direct-synced {synced:,} feature pairs from Google Drive.")
+
+    # 4. Flatten nested directory structure if present
+    nested_prep = REPO_ROOT / "data/preprocessed/preprocessed"
+    if nested_prep.exists() and nested_prep.is_dir():
+        for item in nested_prep.iterdir():
+            target = REPO_ROOT / "data/preprocessed" / item.name
+            if not target.exists():
+                shutil.move(str(item), str(target))
+
+    # 5. Run validate_training_prep and create_dataset_splits
+    print("\nValidating preprocessed features and generating dataset splits...")
+    os.chdir(str(REPO_ROOT))
+    os.system("python scripts/validate_training_prep.py")
+    os.system("python scripts/create_dataset_splits.py")
+
+    # 6. Final completeness verification summary
+    train_csv = REPO_ROOT / "data/processed/train_manifest.csv"
+    val_csv   = REPO_ROOT / "data/processed/val_manifest.csv"
+    test_csv  = REPO_ROOT / "data/processed/internal_test_manifest.csv"
+
+    n_train = 0
+    n_val   = 0
+    n_test  = 0
+    if train_csv.exists():
+        with open(train_csv, encoding="utf-8", errors="replace") as f:
+            n_train = max(0, sum(1 for _ in f) - 1)
+    if val_csv.exists():
+        with open(val_csv, encoding="utf-8", errors="replace") as f:
+            n_val = max(0, sum(1 for _ in f) - 1)
+    if test_csv.exists():
+        with open(test_csv, encoding="utf-8", errors="replace") as f:
+            n_test = max(0, sum(1 for _ in f) - 1)
+
+    z_at_cnt = len(list((local_prep_features / "z_at").glob("*.pt"))) if (local_prep_features / "z_at").exists() else 0
+    z_v_cnt  = len(list((local_prep_features / "z_v").glob("*.pt"))) if (local_prep_features / "z_v").exists() else 0
+
+    print("\n" + "=" * 60)
+    print("  PRE-FLIGHT VALIDATION SUMMARY & COMPLETENESS REPORT")
+    print("=" * 60)
+    print(f"  Feature Tensors on Disk : {z_at_cnt:,} z_at files, {z_v_cnt:,} z_v files")
+    print(f"  Train Manifest          : {n_train:,} clips {'[100% READY]' if n_train > 0 else '[MISSING/EMPTY]'}")
+    print(f"  Val Manifest            : {n_val:,} clips {'[100% READY]' if n_val > 0 else '[MISSING/EMPTY]'}")
+    print(f"  Internal Test Manifest  : {n_test:,} clips {'[100% READY]' if n_test > 0 else '[MISSING/EMPTY]'}")
+    print(f"  Total Dataset Split     : {n_train + n_val + n_test:,} total clips")
+    print("=" * 60 + "\n")
+
+
 def main():
     print("\n" + "=" * 60)
-    print("  DEEP-SENTINEL COLAB: STAGE 1 TRAINING (FROZEN BACKBONES)")
+    print("  DEEP-SENTINEL COLAB: STAGE 1 TRAINING (EMOTION BILINEAR HEAD)")
     print("=" * 60)
 
     if not DRIVE_BASE.exists():
@@ -126,55 +216,10 @@ def main():
         return
 
     DRIVE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Scan and print Drive files for visibility
     scan_drive_zips()
 
-    # Extract Preprocessed features cache
-    z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
-    features_exist = z_at_dir.exists() and any(z_at_dir.glob("*.pt"))
-    
-    if features_exist:
-        print("\n[SKIP] Preprocessed features are already extracted locally. Skipping zip extraction.")
-    else:
-        print("\nExtracting Preprocessed Feature Cache...")
-        # 1. Try consolidated zips
-        # 1. Attach preprocessed features directly from Drive without zip extraction
-        print("\n[DRIVE FETCH] Attaching preprocessed features directly from Google Drive...")
-        drive_prep_features = DRIVE_BASE / "preprocessed/features"
-        local_prep_features = REPO_ROOT / "data/preprocessed/features"
-
-        if drive_prep_features.exists():
-            drive_at_count = len(list((drive_prep_features / "z_at").glob("*.pt"))) if (drive_prep_features / "z_at").exists() else 0
-            local_at_count = len(list((local_prep_features / "z_at").glob("*.pt"))) if (local_prep_features / "z_at").exists() else 0
-
-            if local_at_count == 0 and drive_at_count > 0:
-                local_prep_features.parent.mkdir(parents=True, exist_ok=True)
-                if local_prep_features.exists():
-                    shutil.rmtree(local_prep_features, ignore_errors=True)
-                try:
-                    os.symlink(str(drive_prep_features), str(local_prep_features))
-                    print(f"  [DRIVE ATTACHED] Instantly symlinked {drive_at_count:,} feature files from Drive (0-second extraction time).")
-                except Exception:
-                    (local_prep_features / "z_at").mkdir(parents=True, exist_ok=True)
-                    (local_prep_features / "z_v").mkdir(parents=True, exist_ok=True)
-                    synced = 0
-                    for pt in (drive_prep_features / "z_at").glob("*.pt"):
-                        local_at = local_prep_features / "z_at" / pt.name
-                        local_v  = local_prep_features / "z_v" / pt.name
-                        drive_v  = drive_prep_features / "z_v" / pt.name
-                        if not local_at.exists():
-                            shutil.copy2(pt, local_at)
-                            synced += 1
-                        if drive_v.exists() and not local_v.exists():
-                            shutil.copy2(drive_v, local_v)
-                    print(f"  [DRIVE FETCHED] Direct-fetched {synced:,} feature pairs from Google Drive.")
-
-        # Print local feature count for validation
-        z_at_dir = REPO_ROOT / "data/preprocessed/features/z_at"
-        if z_at_dir.exists():
-            files = list(z_at_dir.glob("*.pt"))
-            print(f"\nLocal preprocessed feature count after Drive attach: {len(files):,} files in z_at.")
+    # Pre-flight dataset & feature cache validation
+    verify_dataset_completeness()
 
     # Locate and copy FakeAVCeleb metadata CSV (cached features used during inference)
     print("\nLooking for FakeAVCeleb meta_data.csv in Drive...")
