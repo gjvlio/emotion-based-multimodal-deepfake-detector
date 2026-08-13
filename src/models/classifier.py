@@ -36,17 +36,19 @@ class ClassifierMLP(nn.Module):
         dropout: float = 0.4,
     ):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden1)
-        self.act1 = nn.GELU()
-        self.se   = SqueezeExcitation1D(hidden1, reduction=4)
-        self.drop = nn.Dropout(dropout)
-        self.fc2  = nn.Linear(hidden1, hidden2)
-        self.act2 = nn.GELU()
-        self.out  = nn.Linear(hidden2, 1)
+        self.fc1   = nn.Linear(input_dim, hidden1)
+        self.norm1 = nn.LayerNorm(hidden1)
+        self.act1  = nn.GELU()
+        self.se    = SqueezeExcitation1D(hidden1, reduction=4)
+        self.drop  = nn.Dropout(dropout)
+        self.fc2   = nn.Linear(hidden1, hidden2)
+        self.norm2 = nn.LayerNorm(hidden2)
+        self.act2  = nn.GELU()
+        self.out   = nn.Linear(hidden2, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Args: x (B, input_dim). Returns logit (B, 1)."""
-        h1 = self.act1(self.fc1(x))
+        h1 = self.act1(self.norm1(self.fc1(x)))
         h1_se = self.se(h1)
-        h2 = self.act2(self.fc2(self.drop(h1_se)))
+        h2 = self.act2(self.norm2(self.fc2(self.drop(h1_se))))
         return self.out(h2)

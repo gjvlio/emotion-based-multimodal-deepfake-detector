@@ -78,10 +78,11 @@ def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_d
                     dest = extract_to
 
                 sample_files = [n for n in namelist if not n.endswith('/') and not n.startswith('__MACOSX')]
-                if sample_files:
-                    sample_check = dest / sample_files[min(5, len(sample_files)-1)]
+                media_files = [n for n in sample_files if n.lower().endswith(('.mp4', '.avi', '.wav', '.jpg', '.png', '.pt'))]
+                if media_files:
+                    sample_check = dest / media_files[min(5, len(media_files)-1)]
                     if sample_check.exists():
-                        print(f"  [ALREADY EXTRACTED] Skipping {zip_name} ({size_mb:.1f} MB) — already extracted on local SSD.")
+                        print(f"  [ALREADY EXTRACTED] Skipping {zip_name} ({size_mb:.1f} MB) — media files present on local SSD.")
                         return True
     except Exception:
         pass
