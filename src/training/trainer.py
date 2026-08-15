@@ -381,7 +381,12 @@ class Trainer:
 
         for epoch in range(1, max_epochs + 1):
             train_loss = self._train_epoch_e2e(optimizer, epoch)
-            val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
+            if hasattr(self, "val_loader_p2") and self.val_loader_p2 is not None:
+                val_loss, val_acc, sarc_acc, emo_a_acc, emo_b_acc, val_components = self._val_epoch_e2e(epoch)
+            else:
+                val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
+                emo_a_acc, emo_b_acc = 0.0, 0.0
+
             if self.device.startswith("cuda"):
                 torch.cuda.empty_cache()
             scheduler.step(val_loss)
@@ -391,19 +396,11 @@ class Trainer:
             print(
                 f"\n[P2 Epoch {epoch:3d}/{max_epochs}]  LR={current_lr:.2e}  "
                 f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  val_acc={val_acc:.4f}  "
-                f"sarc_acc={sarc_acc:.4f}"
+                f"sarc_acc={sarc_acc:.4f}  emo_a_acc={emo_a_acc:.4f}  emo_b_acc={emo_b_acc:.4f}"
             )
-            log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
+            log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f} emo_a={emo_a_acc:.4f} emo_b={emo_b_acc:.4f}")
             filename = f"best_phase2_{self.ckpt_suffix}.pt" if self.ckpt_suffix else "best_phase2.pt"
             self._save_checkpoint(filename, val_loss, epoch)
-            # Backup the preprocessed JPEG/WAV cache to Google Drive after Epoch 1 (disabled to skip redundant compression)
-            # if epoch == 1:
-            #     try:
-            #         import subprocess
-            #         print("\n[BACKUP] Epoch 1 complete. Zipping and saving keyframes/audio cache to Drive...")
-            #         subprocess.run(["python", "scripts/zip_preprocessed.py"], check=False)
-            #     except Exception as e:
-            #         print(f"  [BACKUP WARNING] Failed to run zip_preprocessed.py: {e}")
             if stopper.step(val_loss):
                 print(f"\n  Early stopping triggered at epoch {epoch}.")
                 log.info(f"Early stopping at epoch {epoch}.")
@@ -412,7 +409,7 @@ class Trainer:
         print(f"\n  Phase 2 complete. Best val_loss={stopper.best:.4f}")
 
     def _train_epoch_e2e(self, optimizer, epoch: int) -> float:
-        """End-to-end epoch — requires DataLoader returning raw audio/text/frames."""
+        """End-to-end epoch — requires DataLoader returning raw audio/text/frames with Supervised Margin Loss."""
         self.model.train()
         total_loss = 0.0
         pbar = tqdm(self.train_loader, desc=f"P2 Train Ep{epoch}", unit="batch",
@@ -435,15 +432,122 @@ class Trainer:
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
                 )
-            self.scaler.scale(loss.total).backward()
+                # Supervised Contrastive Margin Loss (forces inter-class logit margin >= 1.5)
+                valid_mask = fl != -1
+                fake_mask = (fl == 1) & valid_mask
+                real_mask = (fl == 0) & valid_mask
+                if fake_mask.any() and real_mask.any():
+                    mean_fake = out.logit[fake_mask].mean()
+                    mean_real = out.logit[real_mask].mean()
+                    margin_loss = torch.clamp(1.5 - (mean_fake - mean_real), min=0.0)
+                else:
+                    margin_loss = torch.tensor(0.0, device=self.device)
+
+                total_step_loss = loss.total + 0.2 * margin_loss
+
+            self.scaler.scale(total_step_loss).backward()
             self.scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.scaler.step(optimizer)
             self.scaler.update()
-            total_loss += loss.total.item()
-            pbar.set_postfix(loss=f"{loss.total.item():.3f}")
+            total_loss += total_step_loss.item()
+            pbar.set_postfix(
+                loss=f"{total_step_loss.item():.3f}",
+                bce=f"{loss.bce.item():.3f}",
+                margin=f"{margin_loss.item():.3f}"
+            )
 
         return total_loss / max(len(self.train_loader), 1)
+
+    @torch.no_grad()
+    def _val_epoch_e2e(self, epoch: int):
+        """End-to-end validation pass over raw keyframes and audio waveforms."""
+        self.model.eval()
+        total_loss, correct, total = 0.0, 0, 0
+        sarc_correct, sarc_total = 0, 0
+        emo_a_correct, emo_a_total = 0, 0
+        emo_b_correct, emo_b_total = 0, 0
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "margin": 0.0}
+        loader = getattr(self, "val_loader_p2", self.val_loader)
+        n_batches = len(loader)
+
+        pbar = tqdm(loader, desc=f"P2 Val   Ep{epoch}", unit="batch",
+                    leave=False, dynamic_ncols=True)
+        for batch in pbar:
+            audio   = batch["audio_values"].to(self.device)
+            ids     = batch["input_ids"].to(self.device)
+            mask    = batch["attention_mask"].to(self.device)
+            pixels  = batch["keyframe_pixels"].to(self.device)
+            fl      = batch["fake_label"].to(self.device)
+            ae      = batch["audio_emotion"].to(self.device)
+            ve      = batch["visual_emotion"].to(self.device)
+            sl      = batch["sarcasm_label"].to(self.device)
+
+            with autocast(self._amp_device, enabled=self.fp16):
+                out  = self.model(audio, ids, mask, pixels)
+                loss = self.criterion(
+                    out.logit, fl,
+                    out.emotion_a, out.emotion_b, ae, ve,
+                    out.sarcasm, sl,
+                )
+                valid_mask = fl != -1
+                fake_mask = (fl == 1) & valid_mask
+                real_mask = (fl == 0) & valid_mask
+                if fake_mask.any() and real_mask.any():
+                    mean_fake = out.logit[fake_mask].mean()
+                    mean_real = out.logit[real_mask].mean()
+                    margin_loss = torch.clamp(1.5 - (mean_fake - mean_real), min=0.0)
+                else:
+                    margin_loss = torch.tensor(0.0, device=self.device)
+
+                total_step_loss = loss.total + 0.2 * margin_loss
+
+            total_loss     += total_step_loss.item()
+            comp["bce"]    += loss.bce.item()
+            comp["emo_a"]  += loss.emotion_a.item()
+            comp["emo_b"]  += loss.emotion_b.item()
+            comp["sarc"]   += loss.sarcasm.item()
+            comp["margin"] += margin_loss.item()
+
+            if valid_mask.any():
+                preds   = (torch.sigmoid(out.logit.squeeze(1)[valid_mask]) >= 0.5).long()
+                correct += (preds == fl[valid_mask]).sum().item()
+                total   += valid_mask.sum().item()
+
+            ae_mask = ae != -1
+            if ae_mask.any():
+                ae_preds = out.emotion_a[ae_mask].argmax(dim=-1)
+                emo_a_correct += (ae_preds == ae[ae_mask]).sum().item()
+                emo_a_total   += ae_mask.sum().item()
+
+            ve_mask = ve != -1
+            if ve_mask.any():
+                ve_preds = out.emotion_b[ve_mask].argmax(dim=-1)
+                emo_b_correct += (ve_preds == ve[ve_mask]).sum().item()
+                emo_b_total   += ve_mask.sum().item()
+
+            sarc_mask = sl != -1
+            if sarc_mask.any():
+                sarc_preds    = (torch.sigmoid(out.sarcasm.squeeze(1)[sarc_mask]) >= SARCASM_THRESHOLD).long()
+                sarc_correct += (sarc_preds == sl[sarc_mask]).sum().item()
+                sarc_total   += sarc_mask.sum().item()
+
+        for k in comp:
+            comp[k] /= max(n_batches, 1)
+
+        val_acc = correct / max(total, 1)
+        sarc_acc = sarc_correct / max(sarc_total, 1)
+        emo_a_acc = emo_a_correct / max(emo_a_total, 1)
+        emo_b_acc = emo_b_correct / max(emo_b_total, 1)
+
+        return (
+            total_loss / max(n_batches, 1),
+            val_acc,
+            sarc_acc,
+            emo_a_acc,
+            emo_b_acc,
+            comp,
+        )
 
     # ── Checkpointing ─────────────────────────────────────────────────────────
 

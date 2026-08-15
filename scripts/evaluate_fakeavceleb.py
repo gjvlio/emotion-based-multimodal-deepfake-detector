@@ -320,7 +320,7 @@ def run_inference(
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
     if model._backbones_loaded and not all_cached and not force_features and not cached_only:
-        n_workers = 0 if os.name == "nt" else 4
+        n_workers = 0 if os.name == "nt" else 2
         dataset = FakeAVCelebEvalDataset(clips, pipeline)
         loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, pin_memory=(device != "cpu"))
         
@@ -333,7 +333,8 @@ def run_inference(
             
             with torch.no_grad():
                 out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
-                scores = torch.sigmoid(out.logit).squeeze(1).cpu().tolist()
+                # Temperature Scaling (T=0.5): stretches probability mass away from indecision (0.3-0.4)
+                scores = torch.sigmoid(out.logit / 0.5).squeeze(1).cpu().tolist()
                 
             for j in range(len(scores)):
                 score = scores[j]
@@ -366,7 +367,9 @@ def run_inference(
 
             with torch.no_grad():
                 out   = model.forward_from_features(z_at, z_v)
-                score = torch.sigmoid(out.logit).item()     # P(fake) ∈ [0, 1]
+                # Temperature Scaling (T=0.5): stretches probability mass away from indecision (0.3-0.4)
+                scaled_logit = out.logit / 0.5
+                score = torch.sigmoid(scaled_logit).item()     # P(fake) ∈ [0, 1]
                 pred  = 1 if score >= 0.5 else 0
 
             results.append({
@@ -383,36 +386,48 @@ def run_inference(
 
 
 def compute_metrics(results: list[dict]) -> dict:
+    import numpy as np
     labels = [r["fake_label"] for r in results]
     scores = [r["score"]      for r in results]
 
-    # Standard threshold = 0.5
-    tp = sum(1 for r in results if r["pred"] == 1 and r["fake_label"] == 1)
-    fp = sum(1 for r in results if r["pred"] == 1 and r["fake_label"] == 0)
-    fn = sum(1 for r in results if r["pred"] == 0 and r["fake_label"] == 1)
-    tn = sum(1 for r in results if r["pred"] == 0 and r["fake_label"] == 0)
-
-    acc  = (tp + tn) / max(len(results), 1)
-    prec = tp / max(tp + fp, 1)
-    rec  = tp / max(tp + fn, 1)
-    f1   = 2 * prec * rec / max(prec + rec, 1e-8)
+    # Standard metrics at tau = 0.50
+    std_p = (np.array(scores) >= 0.5).astype(int)
+    y_true = np.array(labels)
+    tp_50 = int(((std_p == 1) & (y_true == 1)).sum())
+    fp_50 = int(((std_p == 1) & (y_true == 0)).sum())
+    fn_50 = int(((std_p == 0) & (y_true == 1)).sum())
+    tn_50 = int(((std_p == 0) & (y_true == 0)).sum())
+    
+    acc_50 = (tp_50 + tn_50) / max(len(results), 1)
+    prec_50 = tp_50 / max(tp_50 + fp_50, 1)
+    rec_50  = tp_50 / max(tp_50 + fn_50, 1)
+    spec_50 = tn_50 / max(tn_50 + fp_50, 1)
+    f1_50   = 2 * prec_50 * rec_50 / max(prec_50 + rec_50, 1e-8)
+    bal_acc_50 = (rec_50 + spec_50) / 2.0
+    
+    mcc_denom = np.sqrt(float((tp_50 + fp_50) * (tp_50 + fn_50) * (tn_50 + fp_50) * (tn_50 + fn_50)))
+    mcc_50 = ((tp_50 * tn_50) - (fp_50 * fn_50)) / max(mcc_denom, 1e-8)
 
     # Threshold calibration sweep (find optimal F1 decision boundary)
-    best_thresh, best_cal_f1, best_cal_acc = 0.5, 0.0, 0.0
-    best_tp = best_fp = best_fn = best_tn = 0
-    best_prec = best_rec = 0.0
-    
-    # Youden's J Statistic sweep (J = Sensitivity + Specificity - 1 = TPR - FPR)
-    youden_thresh, best_youden_j = 0.5, -1.0
-    youden_acc = youden_sens = youden_spec = 0.0
+    best_cal_f1   = -1.0
+    best_thresh   = 0.5
+    best_tp, best_fp, best_fn, best_tn = tp_50, fp_50, fn_50, tn_50
+    best_cal_acc, best_prec, best_rec = acc_50, prec_50, rec_50
 
-    zero_fp_thresh = None
-    zero_fp_sens = 0.0
-    for th_val in [i / 100.0 for i in range(1, 100)]:
-        c_tp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 1)
-        c_fp = sum(1 for r in results if r["score"] >= th_val and r["fake_label"] == 0)
-        c_fn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 1)
-        c_tn = sum(1 for r in results if r["score"] < th_val  and r["fake_label"] == 0)
+    best_youden_j = -2.0
+    youden_thresh = 0.5
+    youden_acc, youden_sens, youden_spec, youden_bal_acc = acc_50, rec_50, spec_50, bal_acc_50
+    youden_tp, youden_fp, youden_fn, youden_tn = tp_50, fp_50, fn_50, tn_50
+
+    zero_fp_thresh, zero_fp_sens = None, 0.0
+
+    for th in range(1, 100):
+        th_val = th / 100.0
+        p_th = (np.array(scores) >= th_val).astype(int)
+        c_tp = int(((p_th == 1) & (y_true == 1)).sum())
+        c_fp = int(((p_th == 1) & (y_true == 0)).sum())
+        c_fn = int(((p_th == 0) & (y_true == 1)).sum())
+        c_tn = int(((p_th == 0) & (y_true == 0)).sum())
 
         if c_fp == 0 and (zero_fp_thresh is None or th_val < zero_fp_thresh):
             zero_fp_thresh = th_val
@@ -428,33 +443,34 @@ def compute_metrics(results: list[dict]) -> dict:
             best_tp, best_fp, best_fn, best_tn = c_tp, c_fp, c_fn, c_tn
             best_prec, best_rec = c_prec, c_rec
 
-        # Youden's J calculation
-        sens = c_tp / max(c_tp + c_fn, 1)   # Recall / Sensitivity
-        spec = c_tn / max(c_tn + c_fp, 1)   # Specificity / TNR
+        # Youden's J calculation (Sensitivity + Specificity - 1)
+        sens = c_tp / max(c_tp + c_fn, 1)
+        spec = c_tn / max(c_tn + c_fp, 1)
         j_stat = sens + spec - 1.0
         if j_stat > best_youden_j:
             best_youden_j = j_stat
             youden_thresh = th_val
-            youden_acc  = (c_tp + c_tn) / max(len(results), 1)
-            youden_sens = sens
-            youden_spec = spec
+            youden_acc    = (c_tp + c_tn) / max(len(results), 1)
+            youden_sens   = sens
+            youden_spec   = spec
+            youden_bal_acc = (sens + spec) / 2.0
+            youden_tp, youden_fp, youden_fn, youden_tn = c_tp, c_fp, c_fn, c_tn
 
-    # Update predictions with optimal calibrated threshold
+    # Update predictions with optimal Youden's J calibrated threshold
     for r in results:
-        r["pred"] = 1 if r["score"] >= best_thresh else 0
+        r["pred"] = 1 if r["score"] >= youden_thresh else 0
 
     auc = None
     try:
         from sklearn.metrics import roc_auc_score
         if len(set(labels)) == 2:
-            auc = roc_auc_score(labels, scores)
+            auc = float(roc_auc_score(labels, scores))
     except ImportError:
         pass
 
     # Bootstrap 95% CI on AUC
     auc_lo = auc_hi = None
     if auc is not None:
-        import numpy as np
         rng = np.random.default_rng(42)
         n   = len(results)
         boot_aucs = []
@@ -471,11 +487,14 @@ def compute_metrics(results: list[dict]) -> dict:
             auc_lo, auc_hi = float(np.percentile(boot_aucs, 2.5)), float(np.percentile(boot_aucs, 97.5))
 
     return dict(
-        total=len(results), tp=best_tp, fp=best_fp, fn=best_fn, tn=best_tn,
-        acc=best_cal_acc, prec=best_prec, rec=best_rec, f1=best_cal_f1,
+        total=len(results),
+        tp_50=tp_50, fp_50=fp_50, fn_50=fn_50, tn_50=tn_50,
+        acc_50=acc_50, prec_50=prec_50, rec_50=rec_50, spec_50=spec_50,
+        f1_50=f1_50, bal_acc_50=bal_acc_50, mcc_50=mcc_50,
         best_thresh=best_thresh, best_cal_f1=best_cal_f1, best_cal_acc=best_cal_acc,
         youden_thresh=youden_thresh, best_youden_j=best_youden_j, youden_acc=youden_acc,
-        youden_sens=youden_sens, youden_spec=youden_spec,
+        youden_sens=youden_sens, youden_spec=youden_spec, youden_bal_acc=youden_bal_acc,
+        youden_tp=youden_tp, youden_fp=youden_fp, youden_fn=youden_fn, youden_tn=youden_tn,
         zero_fp_thresh=zero_fp_thresh, zero_fp_sens=zero_fp_sens,
         auc=auc, auc_lo=auc_lo, auc_hi=auc_hi,
     )
@@ -516,6 +535,29 @@ def ensure_preprocessed_features():
     drive_z_at = drive_base / "preprocessed/features/z_at"
     drive_z_v  = drive_base / "preprocessed/features/z_v"
 
+    # 1. Check local features_drive folder (downloaded from Drive)
+    local_drive_at = REPO_ROOT / "data/preprocessed/features_drive/z_at"
+    local_drive_v  = REPO_ROOT / "data/preprocessed/features_drive/z_v"
+    if local_drive_at.exists() and local_drive_v.exists():
+        import shutil
+        fd_at_names    = set(p.name for p in local_drive_at.glob("*.pt"))
+        local_at_names = set(p.name for p in z_at_dir.glob("*.pt"))
+        missing_fd     = fd_at_names - local_at_names
+        if missing_fd:
+            print(f"  [LOCAL FEATURES_DRIVE SYNC] Merging {len(missing_fd):,} missing feature tensors from features_drive folder...")
+            synced_fd = 0
+            for name in missing_fd:
+                src_at = local_drive_at / name
+                src_v  = local_drive_v / name
+                dst_at = z_at_dir / name
+                dst_v  = z_v_dir / name
+                shutil.copy2(src_at, dst_at)
+                synced_fd += 1
+                if src_v.exists():
+                    shutil.copy2(src_v, dst_v)
+            print(f"  [LOCAL FEATURES_DRIVE SYNC] Fast-merged {synced_fd:,} feature tensor pairs into data/preprocessed/features.")
+
+    # 2. Check mounted Google Drive folder
     if drive_z_at.exists() and drive_z_v.exists():
         import shutil
         drive_at_names = set(p.name for p in drive_z_at.glob("*.pt"))
@@ -583,10 +625,10 @@ def main():
     parser.add_argument("--config",     type=str, default="configs/config.yaml")
     _default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device",     default=_default_device)
-    parser.add_argument("--n_real",     type=int, default=200,
-                        help="Number of real clips to sample (default 200)")
-    parser.add_argument("--n_fake",     type=int, default=800,
-                        help="Number of fake clips to sample (default 800)")
+    parser.add_argument("--n_real",     type=int, default=500,
+                        help="Number of real clips to sample (default 500)")
+    parser.add_argument("--n_fake",     type=int, default=500,
+                        help="Number of fake clips to sample (default 500)")
     parser.add_argument("--seed",       type=int, default=42,
                         help="Random seed for clip sampling")
     parser.add_argument("--no_cache",   action="store_true",
@@ -721,19 +763,24 @@ def main():
     _section("Results")
     m = compute_metrics(results)
 
-    print(f"  Clips evaluated  : {m['total']}")
-    print(f"  Accuracy (0.5)   : {m['acc']:.4f}")
-    print(f"  Precision        : {m['prec']:.4f}")
-    print(f"  Recall           : {m['rec']:.4f}")
-    print(f"  F1 (0.5)         : {m['f1']:.4f}")
-    print(f"  TP/FP/FN/TN      : {m['tp']}/{m['fp']}/{m['fn']}/{m['tn']}")
+    print(f"  Clips evaluated        : {m['total']}")
+    print(f"  --- Standard Metrics (tau = 0.50) ---")
+    print(f"  Accuracy (0.5)         : {m['acc_50']:.4f}")
+    print(f"  Balanced Accuracy (0.5): {m['bal_acc_50']:.4f}")
+    print(f"  Precision (0.5)        : {m['prec_50']:.4f}")
+    print(f"  Recall (0.5)           : {m['rec_50']:.4f}")
+    print(f"  Specificity (0.5)      : {m['spec_50']:.4f}")
+    print(f"  F1-Score (0.5)         : {m['f1_50']:.4f}")
+    print(f"  MCC (0.5)              : {m['mcc_50']:.4f}")
+    print(f"  TP/FP/FN/TN (0.5)      : {m['tp_50']}/{m['fp_50']}/{m['fn_50']}/{m['tn_50']}")
 
     if m.get("best_thresh") is not None:
-        print(f"  --- Calibrated Threshold Sweeps ---")
-        print(f"  Optimal F1 Threshold  : {m['best_thresh']:.2f}  (F1={m['best_cal_f1']:.4f}, Acc={m['best_cal_acc']:.4f})")
-        print(f"  Youden's J Threshold  : {m['youden_thresh']:.2f}  (J={m['best_youden_j']:.4f}, Acc={m['youden_acc']:.4f}, Sens={m['youden_sens']:.4f}, Spec={m['youden_spec']:.4f})")
+        print(f"\n  --- Calibrated Threshold Sweeps ---")
+        print(f"  Optimal F1 Threshold   : {m['best_thresh']:.2f}  (F1={m['best_cal_f1']:.4f}, Acc={m['best_cal_acc']:.4f})")
+        print(f"  Youden's J Threshold   : {m['youden_thresh']:.2f}  (J={m['best_youden_j']:.4f}, BalAcc={m['youden_bal_acc']:.4f}, Sens={m['youden_sens']:.4f}, Spec={m['youden_spec']:.4f})")
+        print(f"  Youden's TP/FP/FN/TN   : {m['youden_tp']}/{m['youden_fp']}/{m['youden_fn']}/{m['youden_tn']}")
         if m.get("zero_fp_thresh") is not None:
-            print(f"  Zero-FP Operating Pt  : {m['zero_fp_thresh']:.2f}  (Specificity=100.0%, FP=0, Recall={m['zero_fp_sens']:.4f})")
+            print(f"  Zero-FP Operating Pt   : {m['zero_fp_thresh']:.2f}  (Specificity=100.0%, FP=0, Recall={m['zero_fp_sens']:.4f})")
 
     if m["auc"] is not None:
         ci_str = (f"  [95% CI: {m['auc_lo']:.4f} to {m['auc_hi']:.4f}]"

@@ -542,7 +542,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
     val_ds   = FullDataset(val_recs)
     test_ds  = FullDataset(test_recs)
 
-    return train_ds, val_ds, test_ds, stats, Phase2FullDataset, train_recs
+    return train_ds, val_ds, test_ds, stats, Phase2FullDataset, train_recs, val_recs
 
 
 def main():
@@ -555,10 +555,10 @@ def main():
     parser.add_argument("--no_sarcasm",           action="store_true")
     parser.add_argument("--no_phase2",            action="store_true")
     parser.add_argument("--skip_phase1",          action="store_true")
-    parser.add_argument("--phase2_epochs",        type=int,   default=5)
+    parser.add_argument("--phase2_epochs",        type=int,   default=15)
     parser.add_argument("--phase2_batch",         type=int,   default=4)
-    parser.add_argument("--phase2_lr",            type=float, default=1e-6)
-    parser.add_argument("--phase2_freeze_layers", type=int,   default=2)
+    parser.add_argument("--phase2_lr",            type=float, default=3e-6)
+    parser.add_argument("--phase2_freeze_layers", type=int,   default=4)
     parser.add_argument("--no_grad_ckpt",         action="store_true")
     parser.add_argument("--workers",              type=int,   default=0)
     parser.add_argument("--seed",                 type=int,   default=42)
@@ -579,7 +579,7 @@ def main():
 
     cfg = Config()
 
-    train_ds, val_ds, test_ds, stats, Phase2FullDataset, p2_train_recs = build_datasets(
+    train_ds, val_ds, test_ds, stats, Phase2FullDataset, p2_train_recs, p2_val_recs = build_datasets(
         cfg,
         seed=args.seed,
         no_sarcasm=args.no_sarcasm,
@@ -696,12 +696,18 @@ def main():
             print(f"\n[INFO] Found CMU-MOSEI source archive/directory. Including MOSEI clips in Phase 2!")
 
         p2_ds = Phase2FullDataset(p2_train_recs, PREPROCESSED_DIR, KEYFRAME_CACHE_DIR)
+        p2_val_ds = Phase2FullDataset(p2_val_recs, PREPROCESSED_DIR, KEYFRAME_CACHE_DIR)
         p2_workers = min(args.workers, 1) if args.device.startswith("cuda") else 0
         p2_loader  = DataLoader(p2_ds, shuffle=True,
                                 batch_size=args.phase2_batch,
                                 num_workers=p2_workers,
                                 pin_memory=args.device.startswith("cuda"))
+        p2_val_loader = DataLoader(p2_val_ds, shuffle=False,
+                                   batch_size=args.phase2_batch,
+                                   num_workers=p2_workers,
+                                   pin_memory=args.device.startswith("cuda"))
         trainer.train_loader = p2_loader
+        trainer.val_loader_p2 = p2_val_loader
         trainer.train_phase2(
             lr            = args.phase2_lr,
             weight_decay  = 1e-4,

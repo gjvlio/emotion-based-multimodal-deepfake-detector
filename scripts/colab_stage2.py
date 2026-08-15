@@ -405,8 +405,8 @@ def main():
         else:
             print("  [COLAB STANDARD OPTIMIZATION] Enabling Safe Batching (Batch=4, Workers=0) to prevent OOM!")
 
-    # Configured for Stable Fine-Tuning (Top-2 layers unfrozen, LR=1e-6 to prevent val_loss explosion & enable continuous epoch improvements)
-    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs 10 --phase2_batch {p2_batch} --phase2_lr 1e-6 --phase2_freeze_layers 2 --skip_phase1 --workers {p2_workers} --patience 5"
+    # Configured for Deep Adaptation & Margin Separation (Top-4 layers unfrozen, LR=3e-6, 15 Epochs with live E2E val & margin loss)
+    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs 15 --phase2_batch {p2_batch} --phase2_lr 3e-6 --phase2_freeze_layers 4 --skip_phase1 --workers {p2_workers} --patience 7"
     ret_p2 = os.system(cmd_p2)
     if ret_p2 != 0:
         print(f"\n[ERROR] Stage 2 training failed with exit code {ret_p2}.")
@@ -425,19 +425,8 @@ def main():
         shutil.copytree(logs, drive_mode_dir / "logs_phase2_bottleneck", dirs_exist_ok=True)
         print("[BACKUP] Saved training logs to Google Drive.")
 
-    # 9. Run FakeAVCeleb evaluation on the bottleneck fine-tuned model
-    print("\n" + "=" * 60)
-    print("  RUNNING CROSS-DATASET BENCHMARK (FAKEAVCELEB - BOTTLENECK MODE)")
-    print("=" * 60)
-    cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {p2_ckpt} --classifier_mode bottleneck --n_real 500 --n_fake 9500 --save_csv benchmark_results_bottleneck.csv"
-    os.system(cmd_eval)
-
-    # Backup benchmark CSV to Drive
-    if Path("benchmark_results_bottleneck.csv").exists():
-        shutil.copy2("benchmark_results_bottleneck.csv", drive_mode_dir / "benchmark_results_bottleneck.csv")
-        print(f"\n[BACKUP] Saved bottleneck benchmark results CSV to Google Drive: {drive_mode_dir / 'benchmark_results_bottleneck.csv'}")
-
-    print("\nStage 2 bottleneck fine-tuning and evaluation complete! Final results are saved in Google Drive under bottleneck_mode/.")
+    print("\nStage 2 bottleneck fine-tuning complete! Model saved to Google Drive under bottleneck_mode/.")
+    print("To evaluate FakeAVCeleb benchmark, execute Cell 4 (evaluate_fakeavceleb.py) separately.")
 
 if __name__ == "__main__":
     main()
