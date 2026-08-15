@@ -516,15 +516,13 @@ def ensure_preprocessed_features():
     drive_z_at = drive_base / "preprocessed/features/z_at"
     drive_z_v  = drive_base / "preprocessed/features/z_v"
 
-    local_at_count = len(list(z_at_dir.glob("*.pt")))
-    if local_at_count < 1000 and drive_z_at.exists() and drive_z_v.exists():
+    if drive_z_at.exists() and drive_z_v.exists():
         import shutil
-        print("  [DRIVE SYNC] Fast-checking missing features on Google Drive...")
         drive_at_names = set(p.name for p in drive_z_at.glob("*.pt"))
         local_at_names = set(p.name for p in z_at_dir.glob("*.pt"))
         missing_names  = drive_at_names - local_at_names
-        
         if missing_names:
+            print(f"  [DRIVE AUTO-SYNC] Syncing {len(missing_names):,} missing feature tensors from Google Drive...")
             synced = 0
             for name in missing_names:
                 drive_at = drive_z_at / name
