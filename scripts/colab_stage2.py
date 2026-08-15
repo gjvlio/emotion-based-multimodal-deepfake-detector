@@ -405,8 +405,8 @@ def main():
         else:
             print("  [COLAB STANDARD OPTIMIZATION] Enabling Safe Batching (Batch=4, Workers=0) to prevent OOM!")
 
-    # Configured for 7 Epochs (optimized for Free Colab T4 GPU runtime ~15 mins)
-    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs 7 --phase2_batch {p2_batch} --phase2_freeze_layers 10 --skip_phase1 --workers {p2_workers} --patience 5"
+    # Configured for Stable Fine-Tuning (Top-2 layers unfrozen, LR=1e-6 to prevent val_loss explosion & enable continuous epoch improvements)
+    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs 10 --phase2_batch {p2_batch} --phase2_lr 1e-6 --phase2_freeze_layers 2 --skip_phase1 --workers {p2_workers} --patience 5"
     ret_p2 = os.system(cmd_p2)
     if ret_p2 != 0:
         print(f"\n[ERROR] Stage 2 training failed with exit code {ret_p2}.")

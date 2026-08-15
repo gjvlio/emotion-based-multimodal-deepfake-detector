@@ -148,14 +148,16 @@ def main():
         print("\n" + "=" * 60)
         print("  RUNNING PHASE 2 TRAINING (FINE-TUNING BACKBONES)")
         print("=" * 60)
-        cmd_p2 = "python scripts/train_full.py --device cuda --epochs 10 --classifier_mode emotion_bilinear --phase2_epochs 10"
+        cmd_p2 = "python scripts/train_full.py --device cuda --epochs 50 --classifier_mode bottleneck --phase2_epochs 10 --phase2_lr 1e-6 --phase2_freeze_layers 2"
         os.system(cmd_p2)
 
         # Backup Phase 2 checkpoint to Drive
-        p2_ckpt = REPO_ROOT / "checkpoints/full/best_phase2_emotion_bilinear.pt"
+        p2_ckpt = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase2_bottleneck.pt"
+        if not p2_ckpt.exists():
+            p2_ckpt = REPO_ROOT / "checkpoints/full/best_phase2_bottleneck.pt"
         if p2_ckpt.exists():
-            shutil.copy2(p2_ckpt, DRIVE_OUTPUT_DIR / "best_phase2_emotion_bilinear.pt")
-            print(f"\n[BACKUP] Saved Phase 2 checkpoint to Google Drive: {DRIVE_OUTPUT_DIR / 'best_phase2_emotion_bilinear.pt'}")
+            shutil.copy2(p2_ckpt, DRIVE_OUTPUT_DIR / "latest/bottleneck_mode/best_phase2_bottleneck.pt")
+            print(f"\n[BACKUP] Saved Phase 2 checkpoint to Google Drive: {DRIVE_OUTPUT_DIR / 'latest/bottleneck_mode/best_phase2_bottleneck.pt'}")
 
         # 8. Run Evaluation (Compare all trained architectures)
         print("\n" + "=" * 60)
@@ -163,7 +165,7 @@ def main():
         print("=" * 60)
         # Try to copy existing checkpoints from Drive so they can all be compared
         for m in ["baseline", "mismatch_only", "bottleneck", "high_dropout"]:
-            drive_m_ckpt = DRIVE_OUTPUT_DIR / f"best_phase1_{m}.pt" if m != "baseline" else DRIVE_OUTPUT_DIR / "best_phase1_baseline.pt"
+            drive_m_ckpt = DRIVE_OUTPUT_DIR / f"latest/bottleneck_mode/best_phase1_{m}.pt"
             local_m_ckpt = REPO_ROOT / "checkpoints/full" / (f"best_phase1_{m}.pt" if m != "baseline" else "best_phase1_baseline.pt")
             if drive_m_ckpt.exists() and not local_m_ckpt.exists():
                 shutil.copy2(drive_m_ckpt, local_m_ckpt)
@@ -174,22 +176,22 @@ def main():
         print("  RUNNING CROSS-DATASET BENCHMARK (FAKEAVCELEB)")
         print("=" * 60)
         final_ckpt = p2_ckpt if p2_ckpt.exists() else p1_ckpt
-        cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {final_ckpt} --classifier_mode emotion_bilinear --save_csv benchmark_results.csv"
+        cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {final_ckpt} --classifier_mode bottleneck --n_real 500 --n_fake 9500 --save_csv benchmark_results_bottleneck.csv"
         os.system(cmd_eval)
 
         # Backup benchmark results to Drive
-        if Path("benchmark_results.csv").exists():
-            shutil.copy2("benchmark_results.csv", DRIVE_OUTPUT_DIR / "benchmark_results.csv")
-            print(f"\n[BACKUP] Saved benchmark results CSV to Google Drive: {DRIVE_OUTPUT_DIR / 'benchmark_results.csv'}")
+        if Path("benchmark_results_bottleneck.csv").exists():
+            shutil.copy2("benchmark_results_bottleneck.csv", DRIVE_OUTPUT_DIR / "latest/bottleneck_mode/benchmark_results_bottleneck.csv")
+            print(f"\n[BACKUP] Saved benchmark results CSV to Google Drive: {DRIVE_OUTPUT_DIR / 'latest/bottleneck_mode/benchmark_results_bottleneck.csv'}")
     else:
         print("\n[SKIP] Raw video/audio files missing in Drive datasets/. Skipping Phase 2 fine-tuning.")
         print("Running FakeAVCeleb evaluation on Phase 1 checkpoint instead...")
-        cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {p1_ckpt} --classifier_mode emotion_bilinear --save_csv benchmark_results.csv"
+        cmd_eval = f"python scripts/evaluate_fakeavceleb.py --checkpoint {p1_ckpt} --classifier_mode bottleneck --n_real 500 --n_fake 9500 --save_csv benchmark_results_bottleneck.csv"
         os.system(cmd_eval)
 
-        if Path("benchmark_results.csv").exists():
-            shutil.copy2("benchmark_results.csv", DRIVE_OUTPUT_DIR / "benchmark_results.csv")
-            print(f"\n[BACKUP] Saved benchmark results CSV to Google Drive: {DRIVE_OUTPUT_DIR / 'benchmark_results.csv'}")
+        if Path("benchmark_results_bottleneck.csv").exists():
+            shutil.copy2("benchmark_results_bottleneck.csv", DRIVE_OUTPUT_DIR / "latest/bottleneck_mode/benchmark_results_bottleneck.csv")
+            print(f"\n[BACKUP] Saved benchmark results CSV to Google Drive: {DRIVE_OUTPUT_DIR / 'latest/bottleneck_mode/benchmark_results_bottleneck.csv'}")
 
     print("\nPipeline complete! Checkpoints and metrics are safely saved in your Google Drive.")
 

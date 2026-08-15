@@ -264,7 +264,7 @@ def main():
     print("=" * 60)
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    cmd = f"python scripts/train_full.py --device {dev} --epochs 40 --classifier_mode bottleneck --no_phase2"
+    cmd = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --no_phase2"
     ret = os.system(cmd)
     if ret != 0:
         print(f"\n[ERROR] Stage 1 training failed with exit code {ret}.")

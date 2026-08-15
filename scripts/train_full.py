@@ -557,8 +557,8 @@ def main():
     parser.add_argument("--skip_phase1",          action="store_true")
     parser.add_argument("--phase2_epochs",        type=int,   default=5)
     parser.add_argument("--phase2_batch",         type=int,   default=4)
-    parser.add_argument("--phase2_lr",            type=float, default=1e-5)
-    parser.add_argument("--phase2_freeze_layers", type=int,   default=10)
+    parser.add_argument("--phase2_lr",            type=float, default=1e-6)
+    parser.add_argument("--phase2_freeze_layers", type=int,   default=2)
     parser.add_argument("--no_grad_ckpt",         action="store_true")
     parser.add_argument("--workers",              type=int,   default=0)
     parser.add_argument("--seed",                 type=int,   default=42)
@@ -634,9 +634,9 @@ def main():
         checkpoint_dir = CKPT_DIR,
         log_dir        = LOG_DIR,
         fp16           = args.device.startswith("cuda"),
-        lambda_a       = 0.5,
-        lambda_b       = 0.5,
-        lambda_sarcasm = 0.3,
+        lambda_a       = 0.1,
+        lambda_b       = 0.1,
+        lambda_sarcasm = 0.05,
         pos_weight     = effective_pw,
         device         = args.device,
         ckpt_suffix    = args.classifier_mode,
