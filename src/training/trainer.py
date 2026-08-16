@@ -569,16 +569,24 @@ class Trainer:
         print(f"  [CKPT] Saved {filename}  (val_loss={current_loss:.4f}, epoch={epoch})")
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
-        # Directly overwrite Drive latest folder with new best checkpoint from active run
-        drive_backup = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest")
-        drive_backup.mkdir(parents=True, exist_ok=True)
-        drive_ckpt = drive_backup / filename
+        # Directly backup and flush to all Google Drive checkpoint folders
+        drive_dirs = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/bottleneck_mode"),
+        ]
         try:
-            import shutil
-            shutil.copy2(ckpt, drive_ckpt)
-            print(f"  [DRIVE OVERWRITE] Overwrote {filename} on Google Drive (latest) with new best model (val_loss={current_loss:.4f}).")
+            import shutil, os
+            for d in drive_dirs:
+                if d.parent.parent.exists():  # If Google Drive is mounted
+                    d.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ckpt, d / filename)
+            if hasattr(os, "sync"):
+                os.sync()
+            print(f"  [DRIVE BACKUP] Successfully saved & flushed {filename} to Google Drive (val_loss={current_loss:.4f}).")
         except Exception as e:
-            print(f"  [DRIVE OVERWRITE WARNING] Failed to copy checkpoint to Drive: {e}")
+            print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
 
     def load_best(self, phase: int = 1) -> None:
         filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"

@@ -319,7 +319,7 @@ def run_inference(
     model.eval()
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
-    if model._backbones_loaded and not all_cached and not force_features and not cached_only:
+    if model._backbones_loaded and not force_features and not cached_only:
         n_workers = 0 if os.name == "nt" else 2
         dataset = FakeAVCelebEvalDataset(clips, pipeline)
         loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, pin_memory=(device != "cpu"))

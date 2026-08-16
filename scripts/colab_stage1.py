@@ -270,19 +270,27 @@ def main():
         print(f"\n[ERROR] Stage 1 training failed with exit code {ret}.")
         sys.exit(1)
 
-    # Copy checkpoints and logs to Drive under bottleneck_mode folder
-    drive_mode_dir = DRIVE_BASE / "checkpoints/latest/bottleneck_mode"
-    drive_mode_dir.mkdir(parents=True, exist_ok=True)
+    # Copy checkpoints and logs to Drive across all relevant folders
+    drive_dirs = [
+        DRIVE_BASE / "checkpoints/latest/bottleneck_mode",
+        DRIVE_BASE / "checkpoints/bottleneck_mode",
+        DRIVE_BASE / "checkpoints/latest",
+        DRIVE_BASE / "checkpoints",
+    ]
     ckpt = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase1_bottleneck.pt"
     if not ckpt.exists():
         ckpt = REPO_ROOT / "checkpoints/full/best_phase1_bottleneck.pt"
     if ckpt.exists():
-        shutil.copy2(ckpt, drive_mode_dir / "best_phase1_bottleneck.pt")
-        print(f"\n[BACKUP] Saved Phase 1 bottleneck checkpoint to Google Drive: {drive_mode_dir / 'best_phase1_bottleneck.pt'}")
+        for d in drive_dirs:
+            d.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ckpt, d / "best_phase1_bottleneck.pt")
+        if hasattr(os, "sync"):
+            os.sync()
+        print(f"\n[BACKUP] Saved & flushed Phase 1 checkpoint across Google Drive: {DRIVE_BASE / 'checkpoints/latest/bottleneck_mode/best_phase1_bottleneck.pt'}")
 
     logs = REPO_ROOT / "logs/full"
     if logs.exists():
-        shutil.copytree(logs, drive_mode_dir / "logs_phase1_bottleneck", dirs_exist_ok=True)
+        shutil.copytree(logs, DRIVE_BASE / "checkpoints/latest/bottleneck_mode/logs_phase1_bottleneck", dirs_exist_ok=True)
         print("[BACKUP] Saved training logs to Google Drive.")
 
     print("\nStage 1 bottleneck mode complete! Model is ready for Stage 2.")
