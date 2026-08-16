@@ -86,7 +86,7 @@ Thumbs.db
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 /knowledge
-/docs
+docs/*.pdf
 /logs
 
 # =============================================================================

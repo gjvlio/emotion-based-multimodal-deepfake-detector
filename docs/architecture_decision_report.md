@@ -489,3 +489,36 @@ flowchart LR
   year={2019}
 }
 ```
+
+---
+
+### 10.E. Comprehensive Summary of Persisting Bugs Diagnosed & Resolved
+
+Below is the definitive reference table of the five recurring failure vectors that were uncovered, diagnosed, and resolved across the training and evaluation pipeline:
+
+```
+[BUG 1: Phase 2 Checkpoint Lockout / Validation Skew]
+  ├── Problem : Phase 2 trained on live raw video, but validated on old un-tuned cached features (_val_epoch_cached).
+  ├── Effect  : Fine-tuning caused classifier to diverge from old cached features -> val_loss rose -> Locked at Epoch 1.
+  └── Fix     : Implemented _val_epoch_e2e to validate live keyframes/audio, allowing epochs 1-15 to save progressively.
+
+[BUG 2: Offline Feature Routing Trap (Covariate Shift Collapse)]
+  ├── Problem : evaluate_fakeavceleb.py checked if .pt files existed on disk and routed to offline cached features.
+  ├── Effect  : Phase 2 head evaluated on base-backbone features -> Covariate shift -> All P(fake) <= 0.001 (TP=0, TN=500).
+  └── Fix     : Overhauled routing logic so loaded backbones automatically execute live GPU end-to-end evaluation.
+
+[BUG 3: Google Drive Buffer Loss & Folder Discrepancy]
+  ├── Problem : Linux/Colab memory write buffering delayed checkpoint flushes to Google Drive FUSE mount.
+  ├── Effect  : Sessions lost latest checkpoints upon disconnect, and scripts looked in mismatched subdirectories.
+  └── Fix     : Multi-folder simultaneous backup across all 4 Drive paths + mandatory os.sync() kernel buffer flushing.
+
+[BUG 4: Evaluation Metric Decoupling & Display Labeling]
+  ├── Problem : Evaluator printed calibrated sweep results under standard headers ("Accuracy (0.5)", "F1 (0.5)").
+  ├── Effect  : Masked true 0.50 operating metrics and obscured Youden's J calibration differences.
+  └── Fix     : Explicitly decoupled Standard tau=0.50 (Acc, BalAcc, Prec, Rec, Spec, F1, MCC) from Youden's J operating points.
+
+[BUG 5: Missing Media VideoIO Crash Safeguard]
+  ├── Problem : Missing raw MP4 files (e.g. MOSEI validation monologues) risked throwing fatal PyTorch DataLoader crashes.
+  ├── Effect  : OpenCV VideoIO threw "Cannot open video:" warnings when searching for absent video files.
+  └── Fix     : Built-in neutral black-frame placeholder tensor fallback, preserving audio/text/emotion without crashing.
+```
