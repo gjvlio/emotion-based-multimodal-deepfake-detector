@@ -618,8 +618,6 @@ def ensure_preprocessed_features():
 
 
 def main():
-    ensure_preprocessed_features()
-
     parser = argparse.ArgumentParser(description="Evaluate DeepSentinel on FakeAVCeleb dataset")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/full/best_phase2_emotion_bilinear.pt")
     parser.add_argument("--config",     type=str, default="configs/config.yaml")
@@ -713,6 +711,9 @@ def main():
         model.load_backbones()
         model.to(args.device)
         print("  [HuggingFace] Backbone weights loaded successfully.")
+    else:
+        # We need the feature cache for Phase 1 / offline cached evaluation
+        ensure_preprocessed_features()
         
     model.load_state_dict(ckpt["model_state"], strict=False)
     model.eval()
