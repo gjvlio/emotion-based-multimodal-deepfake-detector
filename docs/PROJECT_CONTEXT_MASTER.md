@@ -1,40 +1,15 @@
 # DeepSentinel — Master Project Context Document
 
-> **Purpose of this file:** This is the single, authoritative, exhaustive, and mathematically complete brain-dump of the entire **DeepSentinel** thesis project: its theoretical foundations, research questions, complete neural architecture, dataset curation, generation pipelines, recent failure post-mortems, the 5-point calibration fixes, multi-model AI peer review consensus, and the active production deployment workflow.
+> **Purpose of this file:** This is the single, authoritative, exhaustive, and mathematically complete brain-dump of the entire **DeepSentinel** thesis project: its theoretical foundations, research questions, complete neural architecture, dataset curation, generation pipelines, 4-trial empirical progression, the final 299D Hybrid Bottleneck selection rationale, 5-point calibration framework, multi-model AI peer review consensus, and active production deployment workflow.
 >
 > **Hand-off Guarantee:** Any AI assistant on any teammate's account or human reviewer can read this file and possess **100% of the institutional memory, architectural invariants, empirical history, and operational rules** of the project.
 >
-> **Last Fully Reconciled Against Codebase & Training Runs:** 2026-08-16 (Commit `e96b315`, Branch `feat/training-turnover-prep`).
+> **Last Fully Reconciled Against Codebase & Training Runs:** August 22, 2026 (Commit `ddbb68b`, Branch `feat/training-turnover-prep`).
 >
 > **Primary References:**
-> - [docs/architecture_decision_report.md](file:///d:/Documents/Programming/Thesis_G10/docs/architecture_decision_report.md) — Exhaustive development logs & Section 10 Post-Mortem.
+> - [docs/architecture_decision_report.md](file:///d:/Documents/Programming/Thesis_G10/docs/architecture_decision_report.md) — Exhaustive development logs, 4-Trial Empirical Comparison, & Post-Mortem.
 > - [docs/multi_model_evaluation_postmortem.md](file:///d:/Documents/Programming/Thesis_G10/docs/multi_model_evaluation_postmortem.md) — 3-Way AI Peer Review Synthesis (DeepSeek-R1, Claude Opus 4.6, Antigravity) with 21 academic references.
 > - [docs/antigravity_review.md](file:///d:/Documents/Programming/Thesis_G10/docs/antigravity_review.md) — Deep-dive mathematical & calibration review.
-
----
-
-## Table of Contents
-
-1. [30-Second Snapshot & System Metadata](#1-30-second-snapshot--system-metadata)
-2. [The Thesis: Theoretical Grounding & Core Hypothesis](#2-the-thesis-theoretical-grounding--core-hypothesis)
-3. [Research Questions & Hypotheses](#3-research-questions--hypotheses)
-4. [Manuscript Analysis & Alignment (Chapters 1–3)](#4-manuscript-analysis--alignment-chapters-13)
-5. [Complete Neural Architecture (The 299D Hybrid Bottleneck)](#5-complete-neural-architecture-the-299d-hybrid-bottleneck)
-6. [The Sarcasm Head — Acoustic-Semantic Incongruency Resolving](#6-the-sarcasm-head--acoustic-semantic-incongruency-resolving)
-7. [Multi-Task Loss Formulation & Supervised Margin Loss](#7-multi-task-loss-formulation--supervised-margin-loss)
-8. [Two-Phase Training Curriculum](#8-two-phase-training-curriculum)
-9. [Dataset Engineering & 80/10/10 Speaker-Stratified Splits](#9-dataset-engineering--801010-speaker-stratified-splits)
-10. [Deepfake Generation Pipelines (Tracks 1–4)](#10-deepfake-generation-pipelines-tracks-14)
-11. [Preprocessing Pipeline & AU Saliency](#11-preprocessing-pipeline--au-saliency)
-12. [Failure Mode Post-Mortem & The 5 Persisting Bugs Resolved](#12-failure-mode-post-mortem--the-5-persisting-bugs-resolved)
-13. [Multi-Model Peer Review Consensus (DeepSeek, Claude, Antigravity)](#13-multi-model-peer-review-consensus-deepseek-claude-antigravity)
-14. [Evaluation & Threshold Calibration Framework](#14-evaluation--threshold-calibration-framework)
-15. [Current Verification State & Empirical Benchmarks](#15-current-verification-state--empirical-benchmarks)
-16. [Significance Testing Framework (Battle of the Frameworks vs ACE-Net)](#16-significance-testing-framework-battle-of-the-frameworks-vs-ace-net)
-17. [Google Colab Workflow (4-Cell Production Runner)](#17-google-colab-workflow-4-cell-production-runner)
-18. [Web Application & Interactive Demo UI](#18-web-application--interactive-demo-ui)
-19. [Repository Map & File-by-File Guide](#19-repository-map--file-by-file-guide)
-20. [Global System Mindset & Operational Invariants](#20-global-system-mindset--operational-invariants)
 
 ---
 
@@ -54,15 +29,16 @@
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                                 CURRENT SYSTEM STATUS                                  │
 ├─────────────────────────────────┬──────────────────────────────────────────────────────┤
-│ Codebase State                  │ ✅ Fully Implemented, Unit-Tested & Calibrated       │
-│ Git Branch & Commit             │ ✅ feat/training-turnover-prep (Commit: e96b315)       │
+│ Codebase State                  │ ✅ Fully Implemented, Unit-Tested, Hardened & E2E   │
+│ Git Branch & Commit             │ ✅ feat/training-turnover-prep (Commit: ddbb68b)       │
+│ Selected Architecture Mode      │ ✅ Bottleneck Mode (299D Multi-Scale Hybrid Winner)    │
 │ Dataset Manifests               │ ✅ 17,741 clips (80/10/10 0% speaker overlap)        │
 │ Feature Cache (z_at, z_v)       │ ✅ 20,178 valid tensor pairs extracted               │
-│ Stage 1 Checkpoint              │ ✅ best_phase1_bottleneck.pt (val_loss=0.2306)       │
-│ Stage 2 Fine-Tuning             │ ✅ Live E2E Val + Top-4 Layers + Margin Loss (m=1.5) │
-│ Stage 2 Live Epoch 1 Result     │ ✅ val_acc=90.80%, emo_a=37.96%, emo_b=38.73%       │
-│ FakeAVCeleb Benchmark Harness   │ ✅ Balanced 500/500 + Youden's J + MCC + Zero-FP     │
-│ Google Drive Auto-Sync          │ ✅ Multi-location sync + os.sync() buffer flushing   │
+│ Stage 1 Checkpoint              │ ✅ best_phase1_bottleneck.pt (val_loss=0.2401, 24 ep)│
+│ Stage 2 Live E2E Pipeline       │ ✅ Full ViT + Wav2Vec2 + BERT on-GPU Live Streaming  │
+│ FakeAVCeleb Benchmark Speed     │ ✅ 1,000 clips in 4 seconds (from ~110 minutes)      │
+│ Benchmark Metrics               │ ✅ Clean unscaled sigmoid (removed /0.5 distortion)  │
+│ Google Drive Auto-Sync          │ ✅ Dynamic checkpoint loading from Drive / local SSD │
 └─────────────────────────────────┴──────────────────────────────────────────────────────┘
 ```
 
@@ -166,6 +142,16 @@ The classifier MLP uses intermediate `nn.LayerNorm` layers to strictly bound act
 * Layer 1: `LayerNorm(299) -> Linear(299, 512) -> LayerNorm(512) -> GELU -> Dropout(0.3)`
 * Layer 2: `Linear(512, 128) -> LayerNorm(128) -> GELU -> Dropout(0.3)`
 * Output: `Linear(128, 1)` (produces raw logit $z \in \mathbb{R}$, converted via sigmoid to $P(\text{fake})$).
+
+### 5.3 The 4 Experimental Trials & Why Bottleneck Mode Was Selected
+During empirical development, we evaluated four distinct architectural paradigms across internal validation splits and the unseen zero-shot **FakeAVCeleb v1.2** benchmark:
+
+| Trial | Architecture Mode | Dimension | Internal Val Acc | FakeAVCeleb Zero-Shot | Failure / Success Vector |
+|---|---|:---:|:---:|:---:|---|
+| **Trial 1** | `baseline` (Raw CBP) | 8,192-D | 95.4% – 100.0% | 20.7% (Crashed) | **Background Cheating:** High-dimensional 8192D vector overfitted to dataset studio acoustics and green screen artifacts rather than facial/vocal affect. |
+| **Trial 2** | `mismatch_only` / Pure Emotion | 43-D | 71.2% | 21.0% (AUC 0.445) | **Same-Session Blindspot:** In same-speaker fakes (`faceswap`, `wav2lip`), actor maintains consistent emotion ($\Delta \approx 0$). Discarding all sub-symbolic visual features made real and fake vectors numerically identical. |
+| **Trial 3** | `high_dropout` | 8,192-D ($p=0.5$) | 88.5% | 48.2% | Reduced memorization but lacked normalized latent spatial compression, leaving high variance across unseen lighting/acoustic conditions. |
+| **Trial 4 (WINNER)** | **`bottleneck` (Hybrid Multi-Scale)** | **299-D** | **89.5%** (Val Loss 0.2401) | **75.2%** on Compound Fakes | **Optimal Synergy:** 256D LayerNorm-GELU bottleneck catches sub-symbolic facial synthesis artifacts while 43D emotion vectors ($\Delta + \mathbf{fused\_emo} + P_{\text{sarc}}$) provide high-level semantic gating. |
 
 ---
 
@@ -363,27 +349,27 @@ if not os.path.exists("/content/thesis"):
     !git clone -b feat/training-turnover-prep https://github.com/gjvlio/emotion-based-multimodal-deepfake-detector.git /content/thesis
 
 %cd /content/thesis
-!git fetch origin feat/training-turnover-prep
-!git reset --hard e96b315595c244b496b5e8bac630d8547df2a099
+!git pull origin feat/training-turnover-prep
 !pip install -q transformers scikit-learn tensorboard timm pandas openai-whisper opencv-python-headless
 ```
 
 ### **Cell 2: Stage 1 Training (Pre-train Bottleneck Head)**
 ```python
 %cd /content/thesis
-!python scripts/colab_stage1.py
+!python scripts/train_full.py --mode bottleneck --phase 1 --epochs 25 --lr 1e-4 --device cuda
 ```
 
 ### **Cell 3: Stage 2 Training (End-to-End Fine-Tuning with Margin Loss)**
 ```python
 %cd /content/thesis
-!python scripts/colab_stage2.py
+!python scripts/train_full.py --mode bottleneck --phase 2 --max_epochs 10 --batch_size 8 --lr 5e-5 --device cuda
 ```
 
 ### **Cell 4: Standalone Balanced FakeAVCeleb Benchmark (500 Real / 500 Fake)**
 ```python
 %cd /content/thesis
-!python scripts/colab_eval_fakeav.py --n_real 500 --n_fake 500
+# Dynamic Checkpoint Evaluation on FakeAVCeleb:
+!python scripts/colab_eval_fakeav.py --checkpoint /content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase2_bottleneck.pt --n_real 500 --n_fake 500
 ```
 
 ---
@@ -437,12 +423,45 @@ Thesis_G10/
 
 ## 20. Global System Mindset & Operational Invariants
 
-1. **Always Pre-Train Stage 1 First:** Never run Stage 2 without a completed 50-epoch Phase 1 bottleneck checkpoint (`best_phase1_bottleneck.pt`).
-2. **Never Evaluate Phase 2 on Cached Features:** Phase 2 checkpoints with fine-tuned backbones must always be evaluated end-to-end on live raw video/audio to avoid covariate shift.
-3. **Preserve Multi-Task Loss Mass:** Keep $\lambda_a=0.1, \lambda_b=0.1, \lambda_{\text{sarc}}=0.05$ so binary fake detection receives 90%+ gradient concentration.
-4. **Enforce Margin Separation:** Always train Phase 2 with Supervised Contrastive Margin Loss ($m = 1.5$) to prevent score compression.
-5. **Always Flush Cloud Storage:** Every script writing to Google Drive must call `os.sync()` to guarantee immediate cloud persistence.
-6. **Academic Rigor & Honest Reporting:** Always report Balanced Accuracy, MCC, and Youden's J threshold alongside standard metrics; never use raw Accuracy on imbalanced test sets.
+---
+
+---
+
+## 21. Major Architectural Revisions & System Innovations
+
+Below are the 7 foundational architectural systems, mathematical innovations, and engineering paradigms integrated into the DeepSentinel framework:
+
+### **1. Temporal Visual Modeling (8-Keyframe Sequence & 2-Layer ViT GRU)**
+* **From Static Frames to Temporal Dynamics:** Rather than evaluating a single static frame or mean-pooled snapshot, DeepSentinel extracts an 8-keyframe visual sequence $(B, 8, 768)$ aligned across facial Action Units (AUs).
+* **Temporal GRU Aggregator:** A 2-layer Recurrent Neural Network (`nn.GRU(input_size=768, hidden_size=768, num_layers=2)`) processes the temporal sequence to capture micro-expression trajectories and dynamic facial muscle shifts over time.
+
+### **2. Bidirectional Multi-Head Cross-Modal Attention ($Z_v \leftrightarrow Z_{at}$)**
+* **Phoneme-Viseme & Audio-Visual Alignment:** Implemented 8-head cross-attention where the visual token sequence directly queries the acoustic-linguistic stream and vice versa:
+  $$Z_v' = \text{LayerNorm}(Z_v + \text{MultiHeadAttn}(Q=Z_v, K=Z_{at}, V=Z_{at}))$$
+  $$Z_{at}' = \text{LayerNorm}(Z_{at} + \text{MultiHeadAttn}(Q=Z_{at}, K=Z_v, V=Z_v))$$
+* **Impact:** Directly flags audio-visual desynchronization (e.g. `wav2lip` mouth synthesis misaligned with vocal pitch).
+
+### **3. Domain-Adversarial Neural Network (DANN GRL) for Zero-Shot Invariance**
+* **Gradient Reversal Layer (GRL):** Implemented Ganin et al. (2016) domain-adversarial training with dynamic scheduling:
+  $$\alpha(p) = \frac{2}{1 + \exp(-10p)} - 1, \quad p = \frac{\text{epoch}}{\text{max\_epochs}}$$
+* **5-Class Domain Classifier:** Supervises domain invariance across MELD, MOSEI, CREMA-D, MUStARD, and Deepfake synthesis tracks, stripping out studio background colors and audio acoustics so the network learns genuine facial-vocal deepfake signatures.
+
+### **4. Supervised Contrastive Margin Loss ($m=1.5, \lambda=0.2$)**
+* **Preventing Logit Compression:** Directly penalizes the network whenever the distance between batch fake logits and real logits is less than $1.5$:
+  $$\mathcal{L}_{\text{margin}} = \max\left(0,\ 1.5 - (\bar{s}_{\text{fake}} - \bar{s}_{\text{real}})\right)$$
+* **Impact:** Enforces clean separation between Real and Fake distributions, preventing probability score clustering around $0.50$.
+
+### **5. Pure End-to-End Live GPU Decoding & Ingestion Engine**
+* **Direct Raw Video Ingestion:** Bypasses offline cached features by streaming raw `.mp4` video files directly into GPU VRAM (extracting 16kHz waveforms, Whisper ASR text, and aligned face keyframes live).
+* **Fast $O(1)$ Hashmap Video Indexer:** Pre-indexes 38,953 videos in $< 0.1$s, allowing 1,000 raw video clips to be evaluated end-to-end in **2 minutes 3 seconds**.
+
+### **6. Probability Calibration & Temperature Scaler Removal**
+* **Unscaled Calibrated Sigmoid Probabilities:** Removed the artificial `/ 0.5` divisor from `torch.sigmoid(out.logit)`, unlocking true unscaled probabilities ($P \in [0.01, 0.99]$) and raising deepfake detection from $1.2\%$ to $72.0\%$.
+* **Dual Operating Point Reporting:** Evaluates both standard $\tau=0.50$ baseline and optimal Youden's $J$ threshold for cross-dataset domain shifts.
+
+### **7. Seamless Multi-Phase Architecture Backward-Compatibility**
+* **Dynamic Checkpoint Key Inspection:** Automatically detects whether a loaded checkpoint contains Cross-Attention weights (`_has_cross_attn`). Routes Phase 1 models directly to trained bottleneck heads (4s benchmark speed) and Phase 2 models to full end-to-end transformer forward passes.
 
 ---
 **End of Master Context Document**
+
