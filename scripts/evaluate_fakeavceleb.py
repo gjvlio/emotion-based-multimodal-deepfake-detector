@@ -119,13 +119,20 @@ def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool 
     else:
         print(f"  [Dataset] Discovered active FakeAVCeleb video root: {active_fav_roots[0]}")
 
+    print("  [Dataset] Building fast MP4 video hashmap index from disk...")
+    mp4_index = {}
+    for p in REPO_ROOT.glob("data/**/*.mp4"):
+        mp4_index[p.name] = p
+        mp4_index[f"{p.parent.name}/{p.name}"] = p
+    print(f"  [Dataset] Indexed {len(mp4_index):,} MP4 video files ready on local SSD.")
+
     with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
             cat      = row.get("type",   "").strip()
             source   = row.get("source", row.get("speaker_id", "")).strip()
             filename = row.get("path",   "").strip()
             method   = row.get("method", "real").strip()
-            clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem}"
+            clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem if filename else 'clip'}"
             race     = row.get("race",   "").strip()
             gender   = row.get("gender", "").strip()
             rel_v_path = row.get("video_path", "").strip()
@@ -138,12 +145,25 @@ def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool 
                         video_path = p
                         break
 
+            # 1. Look up via active directory hierarchy
             if video_path is None and filename:
                 for root in active_fav_roots:
                     cand = root / cat / race / gender / source / filename
                     if cand.is_file():
                         video_path = cand
                         break
+
+            # 2. Fast hashmap index lookup
+            if video_path is None and filename:
+                video_path = mp4_index.get(f"{source}/{filename}") or mp4_index.get(filename)
+
+            # 3. Clip_id fallback extraction
+            if video_path is None and clip_id:
+                parts = clip_id.split("_")
+                if len(parts) >= 3:
+                    spk = parts[1]
+                    fname = f"{parts[2]}.mp4"
+                    video_path = mp4_index.get(f"{spk}/{fname}") or mp4_index.get(fname)
 
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
             z_v_p  = REPO_ROOT / "data/preprocessed/features/z_v"  / f"{clip_id}.pt"

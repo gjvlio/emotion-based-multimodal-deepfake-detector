@@ -20,46 +20,54 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 DRIVE_BASE = Path("/content/drive/MyDrive/THESIS_MOTHERFILE")
+DRIVE_DATASETS = DRIVE_BASE / "datasets"
 
 def search_drive_file(name: str) -> Path | None:
-    if not DRIVE_BASE.exists():
-        return None
-    for root, _, files in os.walk(DRIVE_BASE):
-        for f in files:
-            if f.lower() == name.lower():
-                return Path(root) / f
-    stem = Path(name).stem.lower()
-    for root, _, files in os.walk(DRIVE_BASE):
-        for f in files:
-            if f.endswith(".zip") and stem in f.lower():
-                return Path(root) / f
+    search_roots = [DRIVE_DATASETS, DRIVE_BASE, Path("/content/drive/MyDrive")]
+    for base in search_roots:
+        if not base.exists():
+            continue
+        for root, _, files in os.walk(base):
+            for f in files:
+                if f.lower() == name.lower():
+                    return Path(root) / f
+        stem = Path(name).stem.lower()
+        for root, _, files in os.walk(base):
+            for f in files:
+                if f.endswith(".zip") and stem in f.lower():
+                    return Path(root) / f
     return None
 
 def ensure_fakeavceleb_dataset():
     """Ensure FakeAVCeleb dataset videos and metadata are extracted on local SSD."""
     target_meta = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv"
-    alt_meta = REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv"
-    
-    has_meta = target_meta.exists() or alt_meta.exists()
+    alt_meta    = REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv"
+    root_meta   = REPO_ROOT / "data/meta_data.csv"
+
+    # Always ensure metadata CSV is placed locally from Drive if available
+    csv_path = search_drive_file("meta_data.csv")
+    if csv_path:
+        for m_dest in [target_meta, alt_meta, root_meta]:
+            m_dest.parent.mkdir(parents=True, exist_ok=True)
+            if not m_dest.exists():
+                shutil.copy2(csv_path, m_dest)
+        print(f"  [Dataset] Synced metadata CSV from Drive ({csv_path}) to local SSD.")
+
     has_videos = False
-    for p in [REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2"]:
+    for p in [REPO_ROOT / "data/raw", REPO_ROOT / "data"]:
         if p.exists() and any(p.glob("**/*.mp4")):
             has_videos = True
             break
 
-    if has_meta and has_videos:
-        print("  [Dataset] FakeAVCeleb videos and metadata verified on local SSD.")
+    if has_videos:
+        v_cnt = len(list(REPO_ROOT.glob("data/**/*.mp4")))
+        print(f"  [Dataset] FakeAVCeleb videos verified on local SSD: {v_cnt:,} MP4 files ready.")
         return
 
     print("  [Dataset] FakeAVCeleb dataset missing or incomplete on local SSD. Extracting from Google Drive...")
     fav_zip = search_drive_file("fakeavceleb.zip")
     if not fav_zip:
-        print("  [WARNING] fakeavceleb.zip not found in Drive. Checking for meta_data.csv...")
-        csv_path = search_drive_file("meta_data.csv")
-        if csv_path:
-            target_meta.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(csv_path, target_meta)
-            print(f"  Copied metadata CSV to: {target_meta}")
+        print("  [WARNING] fakeavceleb.zip not found in Drive.")
         return
 
     print(f"  Extracting {fav_zip.name} ({fav_zip.stat().st_size / 1e6:.1f} MB) to {REPO_ROOT / 'data/raw'} ...")
