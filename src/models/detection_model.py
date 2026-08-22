@@ -28,12 +28,40 @@ from .classifier import ClassifierMLP
 from .sarcasm_head import SarcasmHead
 
 
+class GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        ctx.alpha = alpha
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        output = grad_output.neg() * ctx.alpha
+        return output, None
+
+
+class GradientReversalLayer(nn.Module):
+    """
+    Gradient Reversal Layer (GRL) for Domain-Adversarial Training (DANN).
+    Forward pass: Identity mapping.
+    Backward pass: Multiplies gradients by -alpha.
+    """
+    def __init__(self, alpha: float = 1.0):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, x: torch.Tensor, alpha: float | None = None) -> torch.Tensor:
+        a = alpha if alpha is not None else self.alpha
+        return GradientReversalFunction.apply(x, a)
+
+
 @dataclass
 class DetectorOutput:
-    logit: torch.Tensor       # (B, 1) — raw, no sigmoid
-    emotion_a: torch.Tensor   # (B, 6) — audio emotion logits
-    emotion_b: torch.Tensor   # (B, 6) — visual emotion logits
-    sarcasm: torch.Tensor     # (B, 1) — raw sarcasm logit
+    logit: torch.Tensor             # (B, 1) — raw, no sigmoid
+    emotion_a: torch.Tensor         # (B, 6) — audio emotion logits
+    emotion_b: torch.Tensor         # (B, 6) — visual emotion logits
+    sarcasm: torch.Tensor           # (B, 1) — raw sarcasm logit
+    domain_logits: Optional[torch.Tensor] = None  # (B, 5) — domain classifier logits (DANN)
 
 
 class DeepfakeDetector(nn.Module):
@@ -87,6 +115,17 @@ class DeepfakeDetector(nn.Module):
             fused_dim = cbp_dim + n_emotions + 1
 
         self.classifier = ClassifierMLP(fused_dim, dropout=dropout_cls)
+
+        # Domain Adversarial Classifier (DANN / GRL) to neutralize dataset shortcuts
+        self.grl = GradientReversalLayer(alpha=1.0)
+        domain_in_dim = 256 if classifier_mode == "bottleneck" else (cbp_dim if classifier_mode in ("baseline", "high_dropout") else fused_dim)
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(domain_in_dim, 128),
+            nn.LayerNorm(128),
+            nn.GELU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 5),  # 5 Source Domains: {0: CREMA-D, 1: MELD, 2: MOSEI, 3: MUStARD, 4: SYNTHETIC}
+        )
 
         # Cross-Modal Attention between audio/text and visual keyframes
         self.cross_attn_at = nn.MultiheadAttention(embed_dim=768, num_heads=8, batch_first=True)
@@ -191,7 +230,7 @@ class DeepfakeDetector(nn.Module):
 
     # ── Core detection logic ───────────────────────────────────────────────────
 
-    def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor) -> DetectorOutput:
+    def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor, grl_alpha: float = 1.0) -> DetectorOutput:
         """Shared logic after feature extraction."""
         emo_a = self.emotion_head_a(z_at)  # (B, 6)
         emo_b = self.emotion_head_b(z_v)   # (B, 6)
@@ -205,24 +244,39 @@ class DeepfakeDetector(nn.Module):
 
         if self.classifier_mode == "mismatch_only":
             combined = torch.cat([delta, sarc], dim=-1)
+            domain_in = combined
         elif self.classifier_mode == "emotion_bilinear":
             outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
             fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
             combined = torch.cat([fused_emo, delta, sarc], dim=-1)       # (B, 43)
+            domain_in = combined
         elif self.classifier_mode == "bottleneck":
             outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
             fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
             fused_proj = F.gelu(self.proj_ln(self.bilinear_proj(fused))) # (B, 256)
             combined = torch.cat([fused_proj, fused_emo, delta, sarc], dim=-1) # (B, 299)
+            domain_in = fused_proj
         elif self.classifier_mode == "high_dropout":
             fused_drop = self.high_dropout(fused)
             combined = torch.cat([fused_drop, delta, sarc], dim=-1)
+            domain_in = fused
         else:  # baseline
             combined = torch.cat([fused, delta, sarc], dim=-1)
+            domain_in = fused
 
         logit = self.classifier(combined)                    # (B, 1)
 
-        return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b, sarcasm=sarc)
+        # Domain adversarial classifier through GRL
+        rev_feat = self.grl(domain_in, alpha=grl_alpha)
+        domain_logits = self.domain_classifier(rev_feat)      # (B, 5)
+
+        return DetectorOutput(
+            logit=logit,
+            emotion_a=emo_a,
+            emotion_b=emo_b,
+            sarcasm=sarc,
+            domain_logits=domain_logits,
+        )
 
     # ── Phase 1 path (cached features) ────────────────────────────────────────
 
@@ -230,15 +284,21 @@ class DeepfakeDetector(nn.Module):
         self,
         z_at: torch.Tensor,
         z_v:  torch.Tensor,
+        grl_alpha: float = 1.0,
     ) -> DetectorOutput:
         """
-        Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768).
+        Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768) or (B,8,768).
         Does NOT require backbones to be loaded.
         """
         w2v_emb = z_at[:, :768]
         bert_emb = z_at[:, 768:]
-        z_v_seq = z_v.unsqueeze(1).repeat(1, 8, 1)  # Expand to sequence of length 8
-        return self._forward_impl(w2v_emb, bert_emb, z_v_seq)
+        if z_v.ndim == 2:
+            z_v_seq = z_v.unsqueeze(1).repeat(1, 8, 1)  # Expand legacy (B, 768) to (B, 8, 768)
+        elif z_v.ndim == 3:
+            z_v_seq = z_v                               # Genuine keyframe sequence (B, K, 768)
+        else:
+            raise ValueError(f"Unexpected z_v shape: {z_v.shape}")
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha)
 
     # ── Phase 2 path (end-to-end) ─────────────────────────────────────────────
 
@@ -248,6 +308,7 @@ class DeepfakeDetector(nn.Module):
         input_ids:       torch.Tensor,            # (B, seq_len)
         attention_mask:  torch.Tensor,            # (B, seq_len)
         keyframe_pixels: torch.Tensor,            # (B, K, 3, 224, 224)
+        grl_alpha:       float = 1.0,
     ) -> DetectorOutput:
         """
         Phase 2 end-to-end forward pass.
@@ -275,13 +336,14 @@ class DeepfakeDetector(nn.Module):
         vit_out = self._vit(pixel_values=frames).last_hidden_state[:, 0, :]  # (B*K, 768)
         z_v_seq = vit_out.view(B, K, 768)                        # (B, K, 768)
 
-        return self._forward_impl(w2v_emb, bert_emb, z_v_seq)
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha)
 
     def _forward_impl(
         self,
         w2v_emb: torch.Tensor,
         bert_emb: torch.Tensor,
         z_v_seq: torch.Tensor,
+        grl_alpha: float = 1.0,
     ) -> DetectorOutput:
         # 1. Multi-Head Cross-Modal Attention
         audio_text_seq = torch.stack([w2v_emb, bert_emb], dim=1)  # (B, 2, 768)
@@ -304,7 +366,7 @@ class DeepfakeDetector(nn.Module):
         z_v = gru_out[:, -1, :]                                  # Take last hidden state (B, 768)
 
         # 3. Detect
-        return self._detect(z_at, z_v)
+        return self._detect(z_at, z_v, grl_alpha=grl_alpha)
 
     # ── Convenience ───────────────────────────────────────────────────────────
 

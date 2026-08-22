@@ -6,7 +6,7 @@ Processes a single video clip and caches:
         audio/{clip_id}.wav          16kHz mono WAV
         transcripts/{clip_id}.txt    Whisper ASR output
         features/z_at/{clip_id}.pt   (1536,) tensor
-        features/z_v/{clip_id}.pt    (768,)  tensor
+        features/z_v/{clip_id}.pt    (8, 768) keyframe sequence tensor (or legacy 768,)
 
 Re-running on an already-processed clip is a no-op (cached files respected).
 """
@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 class ClipFeatures:
     clip_id:    str
     z_at:       torch.Tensor    # (1536,)
-    z_v:        torch.Tensor    # (768,)
+    z_v:        torch.Tensor    # (8, 768) or (768,)
     transcript: str
 
 

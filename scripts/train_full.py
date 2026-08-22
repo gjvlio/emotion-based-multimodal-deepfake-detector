@@ -52,6 +52,17 @@ TRAIN_MANIFEST_CSV = REPO_ROOT / "data/processed/train_manifest.csv"
 VAL_MANIFEST_CSV   = REPO_ROOT / "data/processed/val_manifest.csv"
 TEST_MANIFEST_CSV  = REPO_ROOT / "data/processed/internal_test_manifest.csv"
 
+DOMAIN_MAP = {
+    "crema_d": 0,
+    "meld": 1,
+    "mosei": 2,
+    "mustard": 3,
+    "track1": 4,
+    "track2": 4,
+    "track3": 4,
+    "synthetic": 4,
+}
+
 SECTION = "=" * 60
 
 
@@ -333,6 +344,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             return len(self._records)
         def __getitem__(self, i):
             r = self._records[i]
+            dom_idx = DOMAIN_MAP.get(r["source_pipeline"].lower(), 4)
             return {
                 "z_at":            torch.load(r["z_at_path"], weights_only=True).float(),
                 "z_v":             torch.load(r["z_v_path"],  weights_only=True).float(),
@@ -340,6 +352,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
                 "audio_emotion":   torch.tensor(r["audio_emotion"], dtype=torch.long),
                 "visual_emotion":  torch.tensor(r["visual_emotion"],dtype=torch.long),
                 "sarcasm_label":   torch.tensor(r["sarcasm_label"], dtype=torch.long),
+                "domain_label":    torch.tensor(dom_idx,            dtype=torch.long),
                 "source_pipeline": r["source_pipeline"],
                 "clip_id":         r["clip_id"],
                 "speaker_id":      r["speaker_id"],
@@ -386,6 +399,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
                 audio_vp  = other_r["video_path"]
                 fake_label = 1.0  # Synthetic mismatch fake
 
+            dom_idx = DOMAIN_MAP.get(r["source_pipeline"].lower(), 4)
             return {
                 "audio_values":   self._audio_values(audio_cid, audio_vp),
                 "input_ids":      self._bert_inputs(audio_cid)[0],
@@ -395,6 +409,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
                 "audio_emotion":  torch.tensor(r["audio_emotion"], dtype=torch.long),
                 "visual_emotion": torch.tensor(r["visual_emotion"],dtype=torch.long),
                 "sarcasm_label":  torch.tensor(r["sarcasm_label"], dtype=torch.long),
+                "domain_label":   torch.tensor(dom_idx,            dtype=torch.long),
                 "source_pipeline":r["source_pipeline"],
                 "clip_id":        cid,
                 "speaker_id":     r["speaker_id"],

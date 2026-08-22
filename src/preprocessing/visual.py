@@ -355,14 +355,14 @@ def get_z_v(
     """
     Full visual pipeline: extract → optical flow gate → detect (conf≥0.7)
     → AU-saliency weighted Top-8 keyframes → ViT.
-    Returns mean-pooled CLS token: (768,) float32.
+    Returns keyframe CLS token sequence: (K, 768) float32 (default K=8).
     """
     model, processor = _load_vit(vit_model_name, device=device)
 
     frames = extract_frames(video_path, target_fps)
     if not frames:
         log.warning(f"No frames extracted from {video_path}")
-        return torch.zeros(768)
+        return torch.zeros(n_keyframes, 768)
 
     gated_frames = optical_flow_gate(frames, motion_threshold)
 
@@ -392,5 +392,4 @@ def get_z_v(
     with torch.no_grad():
         out = model(**inputs)
     cls_tokens = out.last_hidden_state[:, 0, :]   # (K, 768)
-    z_v = cls_tokens.mean(dim=0).cpu()            # (768,)
-    return z_v
+    return cls_tokens.cpu()                       # (K, 768) keyframe sequence

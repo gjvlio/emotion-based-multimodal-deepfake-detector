@@ -704,7 +704,12 @@ def main():
     ckpt  = torch.load(ckpt_path, map_location=args.device, weights_only=True)
     
     # Phase 2 checkpoints contain un-frozen backbones. Detect and load them dynamically.
-    has_backbones = any(k.startswith("vit.") or k.startswith("wav2vec.") or k.startswith("bert.") for k in ckpt["model_state"].keys())
+    has_backbones = any(
+        k.startswith("vit.") or k.startswith("_vit.") or
+        k.startswith("wav2vec.") or k.startswith("wav2vec2.") or k.startswith("_wav2vec.") or
+        k.startswith("bert.") or k.startswith("_bert.")
+        for k in ckpt["model_state"].keys()
+    )
     if has_backbones and not args.force_features and not args.cached_only:
         print("  [HuggingFace] Detected Stage 2 backbone weights in checkpoint.")
         print("  [HuggingFace] Loading ViT, Wav2Vec2, and BERT backbones into GPU VRAM...")

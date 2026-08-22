@@ -72,7 +72,10 @@ class Trainer:
         lambda_a:       float      = 0.1,
         lambda_b:       float      = 0.1,
         lambda_sarcasm: float      = 0.05,
-        pos_weight:     float | None = None,
+        lambda_domain:  float      = 0.1,
+        lambda_margin:  float      = 0.2,
+        margin:         float      = 1.5,
+        pos_weight:     float | None = 1.3835,
         device:         str        = "cuda" if torch.cuda.is_available() else "cpu",
         ckpt_suffix:    str        = "",
     ):
@@ -84,7 +87,15 @@ class Trainer:
         self._amp_device = "cuda" if device.startswith("cuda") else "cpu"
         self.train_loader = train_loader
         self.val_loader   = val_loader
-        self.criterion    = MultiTaskLoss(lambda_a, lambda_b, lambda_sarcasm, pos_weight)
+        self.criterion    = MultiTaskLoss(
+            lambda_a=lambda_a,
+            lambda_b=lambda_b,
+            lambda_sarcasm=lambda_sarcasm,
+            lambda_domain=lambda_domain,
+            lambda_margin=lambda_margin,
+            margin=margin,
+            pos_weight=pos_weight,
+        )
         self.scaler       = GradScaler("cuda", enabled=self.fp16)
         self.ckpt_dir     = Path(checkpoint_dir)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -99,7 +110,9 @@ class Trainer:
         print(f"  lambda_a     : {lambda_a}  (audio emotion loss weight)")
         print(f"  lambda_b     : {lambda_b}  (visual emotion loss weight)")
         print(f"  lambda_sarc  : {lambda_sarcasm}  (sarcasm loss weight)")
-        print(f"  pos_weight   : {pos_weight}  (BCE fake class weight — None=balanced)")
+        print(f"  lambda_domain: {lambda_domain}  (DANN domain adversarial weight)")
+        print(f"  lambda_margin: {lambda_margin}  (Supervised margin loss weight)")
+        print(f"  pos_weight   : {pos_weight}  (BCE fake class weight — 1.3835=balanced)")
         print(f"  Train batches: {len(train_loader)}")
         print(f"  Val   batches: {len(val_loader)}")
         print(f"{'='*60}\n")
@@ -176,9 +189,9 @@ class Trainer:
             "BilinearFusion": self.model.bilinear_fusion,
             "Classifier":     self.model.classifier,
         }
-        print(f"\n  {'─'*52}")
+        print(f"\n  {'-'*52}")
         print(f"  GRADIENT FLOW REPORT")
-        print(f"  {'─'*52}")
+        print(f"  {'-'*52}")
         total_norm = 0.0
         for name, module in modules.items():
             norms = [p.grad.norm().item() for p in module.parameters()
@@ -191,17 +204,21 @@ class Trainer:
             else:
                 print(f"  {name:<18} NO GRAD (frozen or not in graph)")
         total_norm = total_norm ** 0.5
-        print(f"  {'─'*52}")
+        print(f"  {'-'*52}")
         print(f"  Total grad norm  : {total_norm:.6f}")
-        print(f"  {'─'*52}\n")
+        print(f"  {'-'*52}\n")
         return total_norm
 
     def _train_epoch_cached(self, optimizer, epoch: int, global_step: int):
         self.model.train()
         total_loss = 0.0
-        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0}
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
         n_batches = len(self.train_loader)
         first_batch = (epoch == 1)
+
+        import numpy as np
+        p_val = float(epoch) / 10.0
+        grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
 
         pbar = tqdm(self.train_loader, desc=f"P1 Train Ep{epoch}", unit="batch",
                     leave=False, dynamic_ncols=True)
@@ -212,14 +229,19 @@ class Trainer:
             ae    = batch["audio_emotion"].to(self.device)
             ve    = batch["visual_emotion"].to(self.device)
             sl    = batch["sarcasm_label"].to(self.device)
+            dl    = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             optimizer.zero_grad()
             with autocast(self._amp_device, enabled=self.fp16):
-                out  = self.model.forward_from_features(z_at, z_v)
+                out  = self.model.forward_from_features(z_at, z_v, grl_alpha=grl_alpha)
                 loss = self.criterion(
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
 
             if first_batch:
@@ -228,16 +250,20 @@ class Trainer:
                 print(f"  FIRST BATCH FORWARD PASS — shape check")
                 print(f"  {'='*52}")
                 print(f"  z_at shape      : {z_at.shape}   (expect B x 1536)")
-                print(f"  z_v  shape      : {z_v.shape}    (expect B x 768)")
+                print(f"  z_v  shape      : {z_v.shape}    (expect B x 768 or B x 8 x 768)")
                 print(f"  out.logit       : {out.logit.shape}    (expect B x 1)")
                 print(f"  out.emotion_a   : {out.emotion_a.shape}  (expect B x 6)")
                 print(f"  out.emotion_b   : {out.emotion_b.shape}  (expect B x 6)")
                 print(f"  out.sarcasm     : {out.sarcasm.shape}    (expect B x 1)")
+                if out.domain_logits is not None:
+                    print(f"  out.domain_logits: {out.domain_logits.shape}  (expect B x 5)")
                 print(f"  loss.total      : {loss.total.item():.6f}")
                 print(f"  loss.bce        : {loss.bce.item():.6f}")
                 print(f"  loss.emotion_a  : {loss.emotion_a.item():.6f}")
                 print(f"  loss.emotion_b  : {loss.emotion_b.item():.6f}")
                 print(f"  loss.sarcasm    : {loss.sarcasm.item():.6f}")
+                print(f"  loss.domain     : {loss.domain.item():.6f}")
+                print(f"  loss.margin     : {loss.margin.item():.6f}")
                 print(f"  {'='*52}")
                 print(f"  TRIGGERING BACKPROPAGATION...")
 
@@ -263,13 +289,14 @@ class Trainer:
             comp["emo_a"]   += loss.emotion_a.item()
             comp["emo_b"]   += loss.emotion_b.item()
             comp["sarc"]    += loss.sarcasm.item()
+            comp["domain"]  += loss.domain.item()
+            comp["margin"]  += loss.margin.item()
             global_step     += 1
 
             pbar.set_postfix(
                 bce=f"{loss.bce.item():.3f}",
-                emo_a=f"{loss.emotion_a.item():.3f}",
-                emo_b=f"{loss.emotion_b.item():.3f}",
-                sarc=f"{loss.sarcasm.item():.3f}",
+                dom=f"{loss.domain.item():.3f}",
+                mar=f"{loss.margin.item():.3f}",
             )
 
         for k in comp:
@@ -281,7 +308,7 @@ class Trainer:
         self.model.eval()
         total_loss, correct, total = 0.0, 0, 0
         sarc_correct, sarc_total = 0, 0
-        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0}
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
         n_batches = len(self.val_loader)
 
         pbar = tqdm(self.val_loader, desc=f"P1 Val   Ep{epoch}", unit="batch",
@@ -293,6 +320,9 @@ class Trainer:
             ae   = batch["audio_emotion"].to(self.device)
             ve   = batch["visual_emotion"].to(self.device)
             sl   = batch["sarcasm_label"].to(self.device)
+            dl   = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             with autocast(self._amp_device, enabled=self.fp16):
                 out  = self.model.forward_from_features(z_at, z_v)
@@ -300,12 +330,16 @@ class Trainer:
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
             total_loss     += loss.total.item()
             comp["bce"]    += loss.bce.item()
             comp["emo_a"]  += loss.emotion_a.item()
             comp["emo_b"]  += loss.emotion_b.item()
             comp["sarc"]   += loss.sarcasm.item()
+            comp["domain"] += loss.domain.item()
+            comp["margin"] += loss.margin.item()
 
             # Only count non-MUStARD clips for fake/real accuracy
             valid_mask = fl != -1
@@ -409,9 +443,14 @@ class Trainer:
         print(f"\n  Phase 2 complete. Best val_loss={stopper.best:.4f}")
 
     def _train_epoch_e2e(self, optimizer, epoch: int) -> float:
-        """End-to-end epoch — requires DataLoader returning raw audio/text/frames with Supervised Margin Loss."""
+        """End-to-end epoch — requires DataLoader returning raw audio/text/frames with DANN and Supervised Margin Loss."""
         self.model.train()
         total_loss = 0.0
+
+        import numpy as np
+        p_val = float(epoch) / 15.0
+        grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
+
         pbar = tqdm(self.train_loader, desc=f"P2 Train Ep{epoch}", unit="batch",
                     leave=False, dynamic_ncols=True)
         for batch in pbar:
@@ -423,27 +462,21 @@ class Trainer:
             ae      = batch["audio_emotion"].to(self.device)
             ve      = batch["visual_emotion"].to(self.device)
             sl      = batch["sarcasm_label"].to(self.device)
+            dl      = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             optimizer.zero_grad()
             with autocast(self._amp_device, enabled=self.fp16):
-                out  = self.model(audio, ids, mask, pixels)
+                out  = self.model(audio, ids, mask, pixels, grl_alpha=grl_alpha)
                 loss = self.criterion(
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
-                # Supervised Contrastive Margin Loss (forces inter-class logit margin >= 1.5)
-                valid_mask = fl != -1
-                fake_mask = (fl == 1) & valid_mask
-                real_mask = (fl == 0) & valid_mask
-                if fake_mask.any() and real_mask.any():
-                    mean_fake = out.logit[fake_mask].mean()
-                    mean_real = out.logit[real_mask].mean()
-                    margin_loss = torch.clamp(1.5 - (mean_fake - mean_real), min=0.0)
-                else:
-                    margin_loss = torch.tensor(0.0, device=self.device)
-
-                total_step_loss = loss.total + 0.2 * margin_loss
+                total_step_loss = loss.total
 
             self.scaler.scale(total_step_loss).backward()
             self.scaler.unscale_(optimizer)
@@ -454,7 +487,8 @@ class Trainer:
             pbar.set_postfix(
                 loss=f"{total_step_loss.item():.3f}",
                 bce=f"{loss.bce.item():.3f}",
-                margin=f"{margin_loss.item():.3f}"
+                dom=f"{loss.domain.item():.3f}",
+                mar=f"{loss.margin.item():.3f}",
             )
 
         return total_loss / max(len(self.train_loader), 1)
@@ -467,7 +501,7 @@ class Trainer:
         sarc_correct, sarc_total = 0, 0
         emo_a_correct, emo_a_total = 0, 0
         emo_b_correct, emo_b_total = 0, 0
-        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "margin": 0.0}
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
         loader = getattr(self, "val_loader_p2", self.val_loader)
         n_batches = len(loader)
 
@@ -482,6 +516,9 @@ class Trainer:
             ae      = batch["audio_emotion"].to(self.device)
             ve      = batch["visual_emotion"].to(self.device)
             sl      = batch["sarcasm_label"].to(self.device)
+            dl      = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             with autocast(self._amp_device, enabled=self.fp16):
                 out  = self.model(audio, ids, mask, pixels)
@@ -489,25 +526,18 @@ class Trainer:
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
-                valid_mask = fl != -1
-                fake_mask = (fl == 1) & valid_mask
-                real_mask = (fl == 0) & valid_mask
-                if fake_mask.any() and real_mask.any():
-                    mean_fake = out.logit[fake_mask].mean()
-                    mean_real = out.logit[real_mask].mean()
-                    margin_loss = torch.clamp(1.5 - (mean_fake - mean_real), min=0.0)
-                else:
-                    margin_loss = torch.tensor(0.0, device=self.device)
-
-                total_step_loss = loss.total + 0.2 * margin_loss
+                total_step_loss = loss.total
 
             total_loss     += total_step_loss.item()
             comp["bce"]    += loss.bce.item()
             comp["emo_a"]  += loss.emotion_a.item()
             comp["emo_b"]  += loss.emotion_b.item()
             comp["sarc"]   += loss.sarcasm.item()
-            comp["margin"] += margin_loss.item()
+            comp["domain"] += loss.domain.item()
+            comp["margin"] += loss.margin.item()
 
             if valid_mask.any():
                 preds   = (torch.sigmoid(out.logit.squeeze(1)[valid_mask]) >= 0.5).long()
