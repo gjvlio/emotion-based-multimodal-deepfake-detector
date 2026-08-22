@@ -73,7 +73,8 @@ def ensure_fakeavceleb_dataset():
     target_dir = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2"
     if alt_dir.exists() and not target_dir.exists():
         shutil.move(str(alt_dir), str(target_dir))
-    print("  [Dataset] FakeAVCeleb extraction complete.")
+    v_cnt = len(list(REPO_ROOT.glob("data/**/*.mp4")))
+    print(f"  [Dataset] FakeAVCeleb extraction complete. Total MP4 videos found: {v_cnt:,}")
 
 def main():
     parser = argparse.ArgumentParser(description="Standalone FakeAVCeleb Colab Evaluator")

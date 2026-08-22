@@ -75,12 +75,27 @@ def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool 
     fake_by_tier: dict[str, list[dict]] = {"hard": [], "med": [], "easy": []}
     missing = 0
 
-    cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
-    csv_file_to_use = META_CSV if META_CSV.exists() else cached_manifest
+    meta_candidates = [
+        FAV_ROOT / "meta_data.csv",
+        REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv",
+        REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv",
+        REPO_ROOT / "data/raw/FakeAVCeleb/meta_data.csv",
+        REPO_ROOT / "data/FakeAVCeleb/meta_data.csv",
+        REPO_ROOT / "data/raw/meta_data.csv",
+        REPO_ROOT / "data/meta_data.csv",
+        REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv",
+    ]
+    csv_file_to_use = None
+    for c in meta_candidates:
+        if c.exists():
+            csv_file_to_use = c
+            break
 
-    if not csv_file_to_use.exists():
-        log.error(f"Neither meta_data.csv nor fakeavceleb_cached_manifest.csv found.")
+    if csv_file_to_use is None or not csv_file_to_use.exists():
+        log.error("Neither meta_data.csv nor fakeavceleb_cached_manifest.csv found.")
         return []
+
+    print(f"  [Dataset] Using metadata CSV: {csv_file_to_use}")
 
     with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
@@ -89,24 +104,41 @@ def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool 
             filename = row.get("path",   "").strip()
             method   = row.get("method", "real").strip()
             clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem}"
-
+            race     = row.get("race",   "").strip()
+            gender   = row.get("gender", "").strip()
             rel_v_path = row.get("video_path", "").strip()
+
+            video_candidates = []
             if rel_v_path:
-                video_path = REPO_ROOT / rel_v_path
-            else:
-                video_path = FAV_ROOT / cat / row.get("race","").strip() / row.get("gender","").strip() / source / filename
+                video_candidates.extend([REPO_ROOT / rel_v_path, FAV_ROOT / rel_v_path])
+
+            video_candidates.extend([
+                FAV_ROOT / cat / race / gender / source / filename,
+                FAV_ROOT / "FakeAVCeleb_v1.2" / cat / race / gender / source / filename,
+                REPO_ROOT / "data/raw/FakeAVCeleb_v1.2" / cat / race / gender / source / filename,
+                REPO_ROOT / "data/FakeAVCeleb_v1.2" / cat / race / gender / source / filename,
+                REPO_ROOT / "data/raw" / cat / race / gender / source / filename,
+                REPO_ROOT / "data" / cat / race / gender / source / filename,
+                REPO_ROOT / "data/raw" / filename,
+            ])
+
+            video_path = None
+            for v_cand in video_candidates:
+                if v_cand.exists():
+                    video_path = v_cand
+                    break
 
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
-            z_v_p = REPO_ROOT / "data/preprocessed/features/z_v" / f"{clip_id}.pt"
-            
+            z_v_p  = REPO_ROOT / "data/preprocessed/features/z_v"  / f"{clip_id}.pt"
             features_cached = z_at_p.exists() and z_v_p.exists()
-            if not ignore_missing and not features_cached and not video_path.exists():
+
+            if not ignore_missing and not features_cached and video_path is None:
                 missing += 1
                 continue
 
             entry = {
                 "clip_id":    clip_id,
-                "video_path": str(video_path),
+                "video_path": str(video_path) if video_path is not None else "",
                 "fake_label": 0 if cat == REAL_TYPE else 1,
                 "method":     method,
                 "type":       cat,
