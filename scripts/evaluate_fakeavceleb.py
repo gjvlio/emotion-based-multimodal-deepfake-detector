@@ -97,6 +97,28 @@ def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool 
 
     print(f"  [Dataset] Using metadata CSV: {csv_file_to_use}")
 
+    fav_data_dirs = [
+        FAV_ROOT,
+        FAV_ROOT / "FakeAVCeleb",
+        FAV_ROOT / "FakeAVCeleb_v1.2",
+        FAV_ROOT / "FakeAVCeleb_v1.2" / "FakeAVCeleb",
+        REPO_ROOT / "data/raw/FakeAVCeleb_v1.2",
+        REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/FakeAVCeleb",
+        REPO_ROOT / "data/raw/FakeAVCeleb",
+        REPO_ROOT / "data/raw",
+        REPO_ROOT / "data/FakeAVCeleb_v1.2",
+        REPO_ROOT / "data/FakeAVCeleb_v1.2/FakeAVCeleb",
+        REPO_ROOT / "data/FakeAVCeleb",
+        REPO_ROOT / "data",
+    ]
+    active_fav_roots = [d for d in fav_data_dirs if d.exists() and any((d / t).exists() for t in [
+        "RealVideo-RealAudio", "RealVideo-FakeAudio", "FakeVideo-RealAudio", "FakeVideo-FakeAudio"
+    ])]
+    if not active_fav_roots:
+        active_fav_roots = fav_data_dirs
+    else:
+        print(f"  [Dataset] Discovered active FakeAVCeleb video root: {active_fav_roots[0]}")
+
     with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
             cat      = row.get("type",   "").strip()
@@ -108,29 +130,24 @@ def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool 
             gender   = row.get("gender", "").strip()
             rel_v_path = row.get("video_path", "").strip()
 
-            video_candidates = []
-            if rel_v_path:
-                video_candidates.extend([REPO_ROOT / rel_v_path, FAV_ROOT / rel_v_path])
-
-            video_candidates.extend([
-                FAV_ROOT / cat / race / gender / source / filename,
-                FAV_ROOT / "FakeAVCeleb_v1.2" / cat / race / gender / source / filename,
-                REPO_ROOT / "data/raw/FakeAVCeleb_v1.2" / cat / race / gender / source / filename,
-                REPO_ROOT / "data/FakeAVCeleb_v1.2" / cat / race / gender / source / filename,
-                REPO_ROOT / "data/raw" / cat / race / gender / source / filename,
-                REPO_ROOT / "data" / cat / race / gender / source / filename,
-                REPO_ROOT / "data/raw" / filename,
-            ])
-
             video_path = None
-            for v_cand in video_candidates:
-                if v_cand.exists():
-                    video_path = v_cand
-                    break
+            if rel_v_path:
+                for base in [REPO_ROOT, FAV_ROOT]:
+                    p = base / rel_v_path
+                    if p.is_file():
+                        video_path = p
+                        break
+
+            if video_path is None and filename:
+                for root in active_fav_roots:
+                    cand = root / cat / race / gender / source / filename
+                    if cand.is_file():
+                        video_path = cand
+                        break
 
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
             z_v_p  = REPO_ROOT / "data/preprocessed/features/z_v"  / f"{clip_id}.pt"
-            features_cached = z_at_p.exists() and z_v_p.exists()
+            features_cached = z_at_p.is_file() and z_v_p.is_file()
 
             if not ignore_missing and not features_cached and video_path is None:
                 missing += 1
