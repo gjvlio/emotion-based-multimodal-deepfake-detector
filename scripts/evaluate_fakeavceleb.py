@@ -661,14 +661,15 @@ def main():
     elif drive_base.exists():
         drive_source = drive_base
 
-    if drive_source is not None and drive_source.exists():
+    # Only fetch from Drive if local checkpoint is missing or 0-byte corrupted
+    if (not ckpt_path.exists() or ckpt_path.stat().st_size < 1000000) and drive_source is not None and drive_source.exists():
         try:
             import shutil
             ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(drive_source, ckpt_path)
-            print(f"  [DRIVE OVERWRITE] Loaded evaluation checkpoint from Drive ({drive_source.relative_to(Path('/content/drive/MyDrive'))}) -> {ckpt_path}")
+            print(f"  [DRIVE FETCH] Loaded evaluation checkpoint from Drive ({drive_source.relative_to(Path('/content/drive/MyDrive'))}) -> {ckpt_path}")
         except Exception as e:
-            print(f"  [DRIVE OVERWRITE WARNING] Failed to copy checkpoint from Drive: {e}")
+            print(f"  [DRIVE FETCH WARNING] Failed to copy checkpoint from Drive: {e}")
 
     if not ckpt_path.exists():
         print(f"ERROR: checkpoint not found: {ckpt_path}")
