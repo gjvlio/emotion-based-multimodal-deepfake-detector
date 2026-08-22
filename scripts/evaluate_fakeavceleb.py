@@ -620,25 +620,25 @@ def ensure_preprocessed_features():
                     shutil.copy2(src_v, dst_v)
             print(f"  [LOCAL FEATURES_DRIVE SYNC] Fast-merged {synced_fd:,} feature tensor pairs into data/preprocessed/features.")
 
-    # 2. Check mounted Google Drive folder
-    if drive_z_at.exists() and drive_z_v.exists():
-        import shutil
-        drive_at_names = set(p.name for p in drive_z_at.glob("*.pt"))
-        local_at_names = set(p.name for p in z_at_dir.glob("*.pt"))
-        missing_names  = drive_at_names - local_at_names
-        if missing_names:
-            print(f"  [DRIVE AUTO-SYNC] Syncing {len(missing_names):,} missing feature tensors from Google Drive...")
-            synced = 0
-            for name in missing_names:
-                drive_at = drive_z_at / name
-                drive_v  = drive_z_v / name
-                local_at = z_at_dir / name
-                local_v  = z_v_dir / name
-                shutil.copy2(drive_at, local_at)
-                synced += 1
-                if drive_v.exists():
-                    shutil.copy2(drive_v, local_v)
-            print(f"  [DRIVE AUTO-SYNC] Fast-synced {synced:,} cached feature pairs from Google Drive to local SSD.")
+    # 2. Check mounted Google Drive folder for preprocessed.zip (bulk fast extraction)
+    if drive_base.exists() and (not any(z_at_dir.glob("*.pt"))):
+        zip_path = None
+        for root, _, files in os.walk(drive_base):
+            for f in files:
+                if "preprocessed" in f.lower() and f.endswith(".zip"):
+                    zip_path = Path(root) / f
+                    break
+            if zip_path:
+                break
+
+        if zip_path:
+            size_mb = zip_path.stat().st_size / 1e6
+            print(f"  [AUTO-EXTRACT] Fast-extracting {zip_path.name} ({size_mb:.1f} MB) to local SSD...")
+            import shutil
+            import zipfile
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(REPO_ROOT / "data")
+            print("  [AUTO-EXTRACT] Done! Preprocessed feature cache extracted.\n")
 
     local_at_files = set(p.stem for p in z_at_dir.glob("*.pt"))
     local_v_files  = set(p.stem for p in z_v_dir.glob("*.pt"))
