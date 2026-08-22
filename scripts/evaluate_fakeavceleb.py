@@ -260,17 +260,15 @@ class FakeAVCelebEvalDataset(Dataset):
 
     def __getitem__(self, idx):
         import torchaudio
+        import cv2
         from PIL import Image
         
         c = self.clips[idx]
         clip_id = c["clip_id"]
         video_path = c["video_path"]
         
-        # 1. Audio (Self-Caching Resampled WAV + Drive Lookup)
+        # 1. Audio (Fast resampled WAV extraction)
         wav_path = self.pipeline._wav_path(clip_id)
-        drive_wav_path = self.drive_cache_dir / "audio" / f"{clip_id}.wav"
-        self._sync_from_drive(wav_path, drive_wav_path)
-
         try:
             if not wav_path.exists():
                 wav, sr = torchaudio.load(video_path)
@@ -291,11 +289,8 @@ class FakeAVCelebEvalDataset(Dataset):
         except Exception:
             audio_values = torch.zeros(80000)
             
-        # 2. Text (Drive Lookup)
+        # 2. Text (Fast transcript check)
         txt_path = self.pipeline._txt_path(clip_id)
-        drive_txt_path = self.drive_cache_dir / "transcripts" / f"{clip_id}.txt"
-        self._sync_from_drive(txt_path, drive_txt_path)
-
         try:
             text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
             bert_enc = self.bert_tok(
@@ -308,12 +303,10 @@ class FakeAVCelebEvalDataset(Dataset):
             input_ids = torch.zeros(128, dtype=torch.long)
             attention_mask = torch.zeros(128, dtype=torch.long)
             
-        # 3. Visual (Self-Caching Aligned JPEGs + Drive Lookup)
+        # 3. Visual (Fast Keyframe Extraction: 16 Uniform Temporal Samples)
         kf_dir = self.pipeline.cache_dir / "keyframes"
         kf_dir.mkdir(parents=True, exist_ok=True)
         kf_path = kf_dir / f"{clip_id}.jpg"
-        drive_kf_path = self.drive_cache_dir / "keyframes" / f"{clip_id}.jpg"
-        self._sync_from_drive(kf_path, drive_kf_path)
 
         try:
             if kf_path.exists():
@@ -323,20 +316,25 @@ class FakeAVCelebEvalDataset(Dataset):
                     crop_box = (224 * idx_kf, 0, 224 * (idx_kf + 1), 224)
                     pils.append(grid_img.crop(crop_box))
             else:
-                from src.preprocessing.visual import optical_flow_gate, detect_and_align_faces, extract_frames
+                from src.preprocessing.visual import detect_and_align_faces
                 from src.preprocessing.filters import sharpness_score, select_keyframes, frames_to_pil
                 
-                frames = extract_frames(video_path, target_fps=25.0)
-                if not frames:
-                    raise ValueError("No frames extracted")
-                    
-                gated_frames = optical_flow_gate(frames, motion_threshold=0.3)
-                face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.7)
+                cap = cv2.VideoCapture(video_path)
+                total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                sample_indices = [int(i * total_f / 16) for i in range(16)] if total_f > 16 else list(range(max(total_f, 1)))
                 
-                if not face_results:
-                    face_results = detect_and_align_faces(gated_frames, detector="retinaface", confidence_threshold=0.0)
-                if not face_results:
-                    face_results = detect_and_align_faces(frames, detector="retinaface", confidence_threshold=0.0)
+                frames = []
+                for f_idx in sample_indices:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                cap.release()
+
+                if not frames:
+                    raise ValueError("No frames read from video")
+
+                face_results = detect_and_align_faces(frames, detector="retinaface", confidence_threshold=0.5)
                 if not face_results:
                     face_results = [(f, sharpness_score(f)) for f in frames]
                     
@@ -348,7 +346,6 @@ class FakeAVCelebEvalDataset(Dataset):
                 while len(pils) < 8:
                     pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
                     
-                # Save horizontal concatenated JPEG strip to cache
                 grid_img = Image.new('RGB', (224 * 8, 224))
                 for idx_kf, img in enumerate(pils):
                     grid_img.paste(img, (224 * idx_kf, 0))
