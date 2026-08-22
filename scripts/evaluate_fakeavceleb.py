@@ -785,6 +785,7 @@ def main():
         ensure_preprocessed_features()
         
     model.load_state_dict(ckpt["model_state"], strict=False)
+    model._has_cross_attn = any(k.startswith("cross_attn_") for k in ckpt["model_state"].keys())
     model.eval()
     print(f"  Loaded epoch {ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss', '?')}")
 

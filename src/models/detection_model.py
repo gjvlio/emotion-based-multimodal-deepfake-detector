@@ -290,11 +290,14 @@ class DeepfakeDetector(nn.Module):
         Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768) or (B,8,768).
         Does NOT require backbones to be loaded.
         """
+        has_cross_attn = getattr(self, "_has_cross_attn", True)
+        if not has_cross_attn or z_v.ndim == 2:
+            z_v_vec = z_v if z_v.ndim == 2 else z_v.mean(dim=1)
+            return self._detect(z_at, z_v_vec, grl_alpha=grl_alpha)
+
         w2v_emb = z_at[:, :768]
         bert_emb = z_at[:, 768:]
-        if z_v.ndim == 2:
-            z_v_seq = z_v.unsqueeze(1).repeat(1, 8, 1)  # Expand legacy (B, 768) to (B, 8, 768)
-        elif z_v.ndim == 3:
+        if z_v.ndim == 3:
             z_v_seq = z_v                               # Genuine keyframe sequence (B, K, 768)
         else:
             raise ValueError(f"Unexpected z_v shape: {z_v.shape}")
