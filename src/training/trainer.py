@@ -538,7 +538,8 @@ class Trainer:
             comp["sarc"]   += loss.sarcasm.item()
             comp["domain"] += loss.domain.item()
             comp["margin"] += loss.margin.item()
-
+            # Only count non-MUStARD clips for fake/real accuracy
+            valid_mask = fl != -1
             if valid_mask.any():
                 preds   = (torch.sigmoid(out.logit.squeeze(1)[valid_mask]) >= 0.5).long()
                 correct += (preds == fl[valid_mask]).sum().item()
