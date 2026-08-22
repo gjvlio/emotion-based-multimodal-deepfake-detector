@@ -88,6 +88,8 @@ def main():
     parser = argparse.ArgumentParser(description="Standalone FakeAVCeleb Colab Evaluator")
     parser.add_argument("--checkpoint", type=str, default=None,
                         help="Path to checkpoint. Defaults to latest Phase 2 model on Drive or local disk.")
+    parser.add_argument("--phase", type=int, default=2, choices=[1, 2],
+                        help="Phase to evaluate: 1 (feature-level best_phase1_bottleneck.pt) or 2 (end-to-end best_phase2_bottleneck.pt). Default: 2.")
     parser.add_argument("--n_real", type=int, default=500, help="Number of real clips to sample")
     parser.add_argument("--n_fake", type=int, default=500, help="Number of fake clips to sample")
     parser.add_argument("--mode", type=str, default="bottleneck", choices=["bottleneck", "baseline"])
@@ -95,36 +97,42 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  STANDALONE FAKEAVCELEB BENCHMARK EVALUATION (COLAB CELL 4)")
+    print(f"  STANDALONE FAKEAVCELEB BENCHMARK EVALUATION (PHASE {args.phase})")
     print("=" * 60)
 
     # 1. Ensure test dataset is present
     ensure_fakeavceleb_dataset()
 
-    # 2. Resolve best valid checkpoint (> 50 MB)
-    drive_p2_bottleneck = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase2_bottleneck.pt")
-    local_p2_bottleneck = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase2_bottleneck.pt"
-    local_p2_alt        = REPO_ROOT / "checkpoints/full/best_phase2_bottleneck.pt"
-    drive_p2_root       = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/best_phase2_bottleneck.pt")
-
-    candidates = []
-    if args.checkpoint:
-        candidates.append(Path(args.checkpoint))
-    candidates.extend([
-        drive_p2_bottleneck,
-        drive_p2_root,
-        local_p2_bottleneck,
-        local_p2_alt,
-    ])
-
     ckpt_path = None
-    for cand in candidates:
-        if cand.exists() and cand.stat().st_size > 50000000: # > 50 MB valid checkpoint
+    if args.checkpoint:
+        cand = Path(args.checkpoint)
+        if cand.exists() and cand.stat().st_size > 1000000:
             ckpt_path = cand
-            break
+        else:
+            print(f"ERROR: Specified checkpoint not found or invalid: {args.checkpoint}")
+            sys.exit(1)
+    else:
+        # Resolve best valid checkpoint based on selected phase
+        if args.phase == 1:
+            drive_p1_bottleneck = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase1_bottleneck.pt")
+            drive_p1_root       = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/best_phase1_bottleneck.pt")
+            local_p1_bottleneck = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase1_bottleneck.pt"
+            local_p1_alt        = REPO_ROOT / "checkpoints/full/best_phase1_bottleneck.pt"
+            phase_candidates = [drive_p1_bottleneck, drive_p1_root, local_p1_bottleneck, local_p1_alt]
+        else:
+            drive_p2_bottleneck = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase2_bottleneck.pt")
+            drive_p2_root       = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/best_phase2_bottleneck.pt")
+            local_p2_bottleneck = REPO_ROOT / "checkpoints/full/bottleneck_mode/best_phase2_bottleneck.pt"
+            local_p2_alt        = REPO_ROOT / "checkpoints/full/best_phase2_bottleneck.pt"
+            phase_candidates = [drive_p2_bottleneck, drive_p2_root, local_p2_bottleneck, local_p2_alt]
+
+        for cand in phase_candidates:
+            if cand.exists() and cand.stat().st_size > 1000000: # > 1 MB valid checkpoint
+                ckpt_path = cand
+                break
 
     if not ckpt_path:
-        print("ERROR: No valid checkpoint (> 50 MB) found! Please verify Phase 1 or Phase 2 training.")
+        print(f"ERROR: No valid checkpoint found! Please check your checkpoints folder.")
         sys.exit(1)
 
     print(f"  Selected Checkpoint : {ckpt_path} ({ckpt_path.stat().st_size / 1e6:.1f} MB)")

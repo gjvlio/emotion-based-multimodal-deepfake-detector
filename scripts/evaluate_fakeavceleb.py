@@ -399,8 +399,7 @@ def run_inference(
             
             with torch.no_grad():
                 out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
-                # Temperature Scaling (T=0.5): stretches probability mass away from indecision (0.3-0.4)
-                scores = torch.sigmoid(out.logit / 0.5).squeeze(1).cpu().tolist()
+                scores = torch.sigmoid(out.logit).squeeze(1).cpu().tolist()
                 
             for j in range(len(scores)):
                 score = scores[j]
@@ -433,9 +432,7 @@ def run_inference(
 
             with torch.no_grad():
                 out   = model.forward_from_features(z_at, z_v)
-                # Temperature Scaling (T=0.5): stretches probability mass away from indecision (0.3-0.4)
-                scaled_logit = out.logit / 0.5
-                score = torch.sigmoid(scaled_logit).item()     # P(fake) ∈ [0, 1]
+                score = torch.sigmoid(out.logit).item()     # P(fake) in [0, 1]
                 pred  = 1 if score >= 0.5 else 0
 
             results.append({
