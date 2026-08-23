@@ -410,6 +410,8 @@ def run_inference(
     no_cache: bool,
     force_features: bool = False,
     cached_only: bool = False,
+    batch_size: int = 16,
+    num_workers: int = 4,
 ) -> list[dict]:
     """
     For each clip: extract features (or load from cache) → run detector.
@@ -420,9 +422,14 @@ def run_inference(
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
     if model._backbones_loaded and not force_features and not cached_only:
-        # Use num_workers=0 to prevent CUDA re-initialization error in forked subprocesses
         dataset = FakeAVCelebEvalDataset(clips, pipeline)
-        loader = DataLoader(dataset, batch_size=8, num_workers=0, pin_memory=(device.startswith("cuda")))
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=(device.startswith("cuda")),
+            persistent_workers=(num_workers > 0),
+        )
         
         pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
         for batch in pbar:
@@ -738,6 +745,10 @@ def main():
                         help="Evaluate ONLY clips that have pre-extracted .pt feature tensors ready on disk (instant <2s run)")
     parser.add_argument("--force_features", action="store_true",
                         help="Force feature-based forward pass (forward_from_features), bypassing raw video decoding & face detector")
+    parser.add_argument("--batch_size", type=int, default=16,
+                        help="Inference batch size (default: 16, recommended 32 on A100)")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="DataLoader worker subprocesses for parallel I/O and frame loading (default: 4)")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -859,7 +870,8 @@ def main():
     _section("Running inference (MP4 -> features -> P(fake))")
     results = run_inference(
         clips, pipeline, model, args.device, args.no_cache,
-        force_features=args.force_features, cached_only=args.cached_only
+        force_features=args.force_features, cached_only=args.cached_only,
+        batch_size=args.batch_size, num_workers=args.workers
     )
     print(f"\n  Evaluated : {len(results)} clips  ({len(clips) - len(results)} failed/skipped)")
 
