@@ -412,6 +412,12 @@ def run_inference(
             with torch.no_grad():
                 out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
                 scores = torch.sigmoid(out.logit).squeeze(1).cpu().tolist()
+                prob_a = F.softmax(out.emotion_a, dim=-1)
+                prob_b = F.softmax(out.emotion_b, dim=-1)
+                delta = torch.abs(prob_a - prob_b)
+                delta_norms = delta.norm(dim=-1).cpu().tolist()
+                emo_a_cls = out.emotion_a.argmax(dim=-1).cpu().tolist()
+                emo_b_cls = out.emotion_b.argmax(dim=-1).cpu().tolist()
                 
             for j in range(len(scores)):
                 score = scores[j]
@@ -423,6 +429,9 @@ def run_inference(
                     "type":       batch["type"][j],
                     "score":      score,
                     "pred":       pred,
+                    "delta_norm": delta_norms[j],
+                    "emo_a":      emo_a_cls[j],
+                    "emo_b":      emo_b_cls[j],
                 })
     else:
         # Load precomputed feature vectors from cache (runs in ~1 second)
@@ -446,6 +455,11 @@ def run_inference(
                 out   = model.forward_from_features(z_at, z_v)
                 score = torch.sigmoid(out.logit).item()     # P(fake) in [0, 1]
                 pred  = 1 if score >= 0.5 else 0
+                prob_a = F.softmax(out.emotion_a, dim=-1)
+                prob_b = F.softmax(out.emotion_b, dim=-1)
+                delta_norm = torch.abs(prob_a - prob_b).norm(dim=-1).item()
+                emo_a_cls = out.emotion_a.argmax(dim=-1).item()
+                emo_b_cls = out.emotion_b.argmax(dim=-1).item()
 
             results.append({
                 "clip_id":    c["clip_id"],
@@ -454,6 +468,9 @@ def run_inference(
                 "type":       c["type"],
                 "score":      score,
                 "pred":       pred,
+                "delta_norm": delta_norm,
+                "emo_a":      emo_a_cls,
+                "emo_b":      emo_b_cls,
             })
             pbar.set_postfix(score=f"{score:.3f}")
 
@@ -891,6 +908,28 @@ def main():
 
     _section("Per-method breakdown")
     per_method_breakdown(results)
+
+    # ── Affective Incongruency Analysis ────────────────────────────────────────
+    delta_reals = [r["delta_norm"] for r in results if r["fake_label"] == 0 and "delta_norm" in r]
+    delta_fakes = [r["delta_norm"] for r in results if r["fake_label"] == 1 and "delta_norm" in r]
+    
+    if delta_reals and delta_fakes:
+        _section("Affective Incongruency & Emotion Delta (||Δ||)")
+        m_real = float(np.mean(delta_reals))
+        m_fake = float(np.mean(delta_fakes))
+        ratio = (m_fake / m_real) if m_real > 0 else 1.0
+        print(f"  Mean ||Δ|| Disparity on Real Clips (Congruent)  : {m_real:.4f}")
+        print(f"  Mean ||Δ|| Disparity on Fake Clips (Incongruent): {m_fake:.4f}")
+        print(f"  Affective Mismatch Contrast Ratio (Fake / Real) : {ratio:.2f}x higher on fakes")
+
+        # Concordance Rate (Audio Emotion == Visual Emotion)
+        conc_reals = [r["emo_a"] == r["emo_b"] for r in results if r["fake_label"] == 0 and "emo_a" in r]
+        conc_fakes = [r["emo_a"] == r["emo_b"] for r in results if r["fake_label"] == 1 and "emo_a" in r]
+        if conc_reals and conc_fakes:
+            p_real = (sum(conc_reals) / len(conc_reals)) * 100
+            p_fake = (sum(conc_fakes) / len(conc_fakes)) * 100
+            print(f"  Audio-Visual Emotion Concordance (Real)         : {p_real:.1f}% match")
+            print(f"  Audio-Visual Emotion Concordance (Fake)         : {p_fake:.1f}% match (Incongruent)")
 
     print(f"\n  NOTE: Smoke checkpoint trained on ~1k clips. Full dataset will yield higher AUC.")
     print(f"  Rival comparison requires DeLong's test — run evaluation notebook for full stats.\n")
