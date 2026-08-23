@@ -275,11 +275,6 @@ class FakeAVCelebEvalDataset(Dataset):
                 import shutil
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(drive_path, local_path)
-                return True
-            except Exception:
-                pass
-        return False
-
     def __getitem__(self, idx):
         import torchaudio
         import cv2
@@ -292,7 +287,7 @@ class FakeAVCelebEvalDataset(Dataset):
         # 1. Audio (Robust FFmpeg extraction + Wav2Vec2)
         wav_path = self.pipeline._wav_path(clip_id)
         try:
-            if not wav_path.exists() or wav_path.stat().st_size < 1000:
+            if self.no_cache or not wav_path.exists() or wav_path.stat().st_size < 1000:
                 from src.preprocessing.audio import extract_audio_to_wav
                 wav_path.parent.mkdir(parents=True, exist_ok=True)
                 extract_audio_to_wav(video_path, wav_path)
@@ -314,7 +309,7 @@ class FakeAVCelebEvalDataset(Dataset):
         # 2. Text (Whisper GPU ASR transcript + BERT)
         txt_path = self.pipeline._txt_path(clip_id)
         try:
-            if not txt_path.exists() and wav_path.exists():
+            if (self.no_cache or not txt_path.exists()) and wav_path.exists():
                 from src.preprocessing.audio import transcribe
                 try:
                     text = transcribe(wav_path, device="cuda" if torch.cuda.is_available() else "cpu")
@@ -338,13 +333,13 @@ class FakeAVCelebEvalDataset(Dataset):
             input_ids = torch.zeros(128, dtype=torch.long)
             attention_mask = torch.zeros(128, dtype=torch.long)
             
-        # 3. Visual (Ultra-Fast 8-Keyframe Temporal Sampling)
+        # 3. Visual (Synchronized 0.0 - 5.0s 8-Keyframe Temporal Sampling)
         kf_dir = self.pipeline.cache_dir / "keyframes"
         kf_dir.mkdir(parents=True, exist_ok=True)
         kf_path = kf_dir / f"{clip_id}.jpg"
 
         try:
-            if kf_path.exists():
+            if not self.no_cache and kf_path.exists():
                 grid_img = Image.open(kf_path)
                 pils = []
                 for idx_kf in range(8):
@@ -356,7 +351,16 @@ class FakeAVCelebEvalDataset(Dataset):
                 
                 cap = cv2.VideoCapture(video_path)
                 total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                sample_indices = [int(i * total_f / 8) for i in range(8)] if total_f > 8 else list(range(max(total_f, 1)))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if not fps or fps <= 0 or np.isnan(fps):
+                    fps = 25.0
+                
+                # Align visual sampling window to the exact 5.0-second audio window (80,000 samples @ 16kHz)
+                max_f = min(total_f, int(5.0 * fps)) if total_f > 0 else 0
+                if max_f > 8:
+                    sample_indices = [int(i * max_f / 8) for i in range(8)]
+                else:
+                    sample_indices = list(range(max(total_f, 1)))
                 
                 frames = []
                 for f_idx in sample_indices:
@@ -423,7 +427,7 @@ def run_inference(
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
     if model._backbones_loaded and not force_features and not cached_only:
-        dataset = FakeAVCelebEvalDataset(clips, pipeline)
+        dataset = FakeAVCelebEvalDataset(clips, pipeline, no_cache=no_cache)
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
