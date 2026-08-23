@@ -124,16 +124,23 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
     else:
         print(f"  [Dataset] Discovered active FakeAVCeleb video root: {active_fav_roots[0]}")
 
-    print("  [Dataset] Building collision-free MP4 video index from disk...")
+    print("  [Dataset] Building fast collision-free MP4 video index from local SSD...")
     mp4_index = {}
-    for root_dir in [REPO_ROOT / "data", Path("/content/thesis/data"), Path("/content")]:
-        if root_dir.exists():
-            for dirpath, _, filenames in os.walk(root_dir):
+    local_roots = [REPO_ROOT / "data", Path("/content/thesis/data"), Path("/content/thesis/data/raw")]
+    seen_roots = set()
+    for root_dir in local_roots:
+        resolved = root_dir.resolve()
+        if resolved.exists() and resolved not in seen_roots:
+            seen_roots.add(resolved)
+            for dirpath, dirnames, filenames in os.walk(resolved):
+                # Never traverse Google Drive or git folders
+                if "drive" in dirpath or ".git" in dirpath:
+                    dirnames.clear()
+                    continue
                 dp = Path(dirpath)
                 for fn in filenames:
                     if fn.lower().endswith(".mp4"):
                         p = dp / fn
-                        # Key by full path, relative path parts, and unique speaker/name pairs
                         mp4_index[str(p).replace("\\", "/")] = p
                         parts = p.parts
                         if len(parts) >= 2:
