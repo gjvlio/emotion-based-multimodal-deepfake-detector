@@ -311,7 +311,7 @@ class FakeAVCelebEvalDataset(Dataset):
         except Exception as e:
             audio_values = torch.zeros(80000)
             
-        # 2. Text (Whisper ASR transcript + BERT)
+        # 2. Text (Whisper GPU ASR transcript + BERT)
         txt_path = self.pipeline._txt_path(clip_id)
         try:
             if not txt_path.exists() and wav_path.exists():
@@ -319,9 +319,10 @@ class FakeAVCelebEvalDataset(Dataset):
                 try:
                     text = transcribe(wav_path, device="cuda" if torch.cuda.is_available() else "cpu")
                 except Exception:
-                    text = transcribe(wav_path, device="cpu")
-                txt_path.parent.mkdir(parents=True, exist_ok=True)
-                txt_path.write_text(text, encoding="utf-8")
+                    text = ""
+                if text:
+                    txt_path.parent.mkdir(parents=True, exist_ok=True)
+                    txt_path.write_text(text, encoding="utf-8")
             elif txt_path.exists():
                 text = txt_path.read_text(encoding="utf-8").strip()
             else:
@@ -337,7 +338,7 @@ class FakeAVCelebEvalDataset(Dataset):
             input_ids = torch.zeros(128, dtype=torch.long)
             attention_mask = torch.zeros(128, dtype=torch.long)
             
-        # 3. Visual (Fast Keyframe Extraction: 16 Uniform Temporal Samples)
+        # 3. Visual (Ultra-Fast 8-Keyframe Temporal Sampling)
         kf_dir = self.pipeline.cache_dir / "keyframes"
         kf_dir.mkdir(parents=True, exist_ok=True)
         kf_path = kf_dir / f"{clip_id}.jpg"
@@ -355,7 +356,7 @@ class FakeAVCelebEvalDataset(Dataset):
                 
                 cap = cv2.VideoCapture(video_path)
                 total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                sample_indices = [int(i * total_f / 16) for i in range(16)] if total_f > 16 else list(range(max(total_f, 1)))
+                sample_indices = [int(i * total_f / 8) for i in range(8)] if total_f > 8 else list(range(max(total_f, 1)))
                 
                 frames = []
                 for f_idx in sample_indices:
@@ -368,7 +369,7 @@ class FakeAVCelebEvalDataset(Dataset):
                 if not frames:
                     raise ValueError("No frames read from video")
 
-                face_results = detect_and_align_faces(frames, detector="retinaface", confidence_threshold=0.5)
+                face_results = detect_and_align_faces(frames, detector="haar", confidence_threshold=0.5)
                 if not face_results:
                     face_results = [(f, sharpness_score(f)) for f in frames]
                     
@@ -410,8 +411,8 @@ def run_inference(
     no_cache: bool,
     force_features: bool = False,
     cached_only: bool = False,
-    batch_size: int = 16,
-    num_workers: int = 4,
+    batch_size: int = 32,
+    num_workers: int = 0,
 ) -> list[dict]:
     """
     For each clip: extract features (or load from cache) → run detector.
@@ -428,7 +429,6 @@ def run_inference(
             batch_size=batch_size,
             num_workers=num_workers,
             pin_memory=(device.startswith("cuda")),
-            persistent_workers=(num_workers > 0),
         )
         
         pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
@@ -745,10 +745,10 @@ def main():
                         help="Evaluate ONLY clips that have pre-extracted .pt feature tensors ready on disk (instant <2s run)")
     parser.add_argument("--force_features", action="store_true",
                         help="Force feature-based forward pass (forward_from_features), bypassing raw video decoding & face detector")
-    parser.add_argument("--batch_size", type=int, default=16,
-                        help="Inference batch size (default: 16, recommended 32 on A100)")
-    parser.add_argument("--workers", type=int, default=4,
-                        help="DataLoader worker subprocesses for parallel I/O and frame loading (default: 4)")
+    parser.add_argument("--batch_size", type=int, default=32,
+                        help="Inference batch size (default: 32 on A100)")
+    parser.add_argument("--workers", type=int, default=0,
+                        help="DataLoader worker subprocesses (default: 0 for direct CUDA)")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
