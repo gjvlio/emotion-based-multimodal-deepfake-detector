@@ -294,7 +294,10 @@ class FakeAVCelebEvalDataset(Dataset):
         try:
             if not txt_path.exists() and wav_path.exists():
                 from src.preprocessing.audio import transcribe
-                text = transcribe(wav_path, device="cuda" if torch.cuda.is_available() else "cpu")
+                try:
+                    text = transcribe(wav_path, device="cuda" if torch.cuda.is_available() else "cpu")
+                except Exception:
+                    text = transcribe(wav_path, device="cpu")
                 txt_path.parent.mkdir(parents=True, exist_ok=True)
                 txt_path.write_text(text, encoding="utf-8")
             elif txt_path.exists():
@@ -395,9 +398,9 @@ def run_inference(
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
     if model._backbones_loaded and not force_features and not cached_only:
-        n_workers = 0 if os.name == "nt" else 2
+        # Use num_workers=0 to prevent CUDA re-initialization error in forked subprocesses
         dataset = FakeAVCelebEvalDataset(clips, pipeline)
-        loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, pin_memory=(device != "cpu"))
+        loader = DataLoader(dataset, batch_size=8, num_workers=0, pin_memory=(device.startswith("cuda")))
         
         pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
         for batch in pbar:
