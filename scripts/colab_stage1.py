@@ -103,7 +103,19 @@ def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_d
             dest = extract_to
 
         dest.mkdir(parents=True, exist_ok=True)
-        zf.extractall(dest)
+        
+        # Fast system unzip on Linux/Colab
+        extracted = False
+        if os.name == "posix" and shutil.which("unzip"):
+            try:
+                ret = os.system(f"unzip -q -o '{zip_path}' -d '{dest}'")
+                if ret == 0:
+                    extracted = True
+            except Exception:
+                extracted = False
+
+        if not extracted:
+            zf.extractall(dest)
         
         # Flatten nested preprocessed/preprocessed/ if present
         nested = REPO_ROOT / "data/preprocessed/preprocessed"
@@ -258,13 +270,21 @@ def main():
     os.system("python scripts/validate_training_prep.py")
     os.system("python scripts/create_dataset_splits.py")
 
-    # Run Stage 1 Training (40 epochs)
+    import argparse
+    parser = argparse.ArgumentParser(description="Colab Stage 1 Training Runner")
+    parser.add_argument("--epochs", type=int, default=40, help="Number of Phase 1 epochs (default: 40)")
+    parser.add_argument("--patience", type=int, default=10, help="Early stopping patience (default: 10)")
+    parser.add_argument("--batch_size", type=int, default=64, help="Phase 1 batch size (default: 64)")
+    args, _ = parser.parse_known_args()
+
+    # Run Stage 1 Training
     print("\n" + "=" * 60)
-    print("  RUNNING PHASE 1 TRAINING (BOTTLENECK_MODE) - 40 EPOCHS")
+    print(f"  RUNNING PHASE 1 TRAINING (BOTTLENECK_MODE) - {args.epochs} EPOCHS (Patience={args.patience})")
     print("=" * 60)
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    cmd = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --no_phase2"
+    cmd = f"python scripts/train_full.py --device {dev} --epochs {args.epochs} --classifier_mode bottleneck --no_phase2 --batch_size {args.batch_size} --patience {args.patience}"
+    print(f"  Executing: {cmd}")
     ret = os.system(cmd)
     if ret != 0:
         print(f"\n[ERROR] Stage 1 training failed with exit code {ret}.")

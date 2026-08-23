@@ -112,7 +112,19 @@ def extract_zip(zip_name: str, extract_to: Path, optional: bool = False, check_d
             dest = extract_to
 
         dest.mkdir(parents=True, exist_ok=True)
-        zf.extractall(dest)
+        
+        # Fast system unzip on Linux/Colab
+        extracted = False
+        if os.name == "posix" and shutil.which("unzip"):
+            try:
+                ret = os.system(f"unzip -q -o '{zip_path}' -d '{dest}'")
+                if ret == 0:
+                    extracted = True
+            except Exception:
+                extracted = False
+
+        if not extracted:
+            zf.extractall(dest)
 
         # Flatten nested preprocessed/preprocessed/ if present
         nested = REPO_ROOT / "data/preprocessed/preprocessed"

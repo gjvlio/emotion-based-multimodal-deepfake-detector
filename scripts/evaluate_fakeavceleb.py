@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -61,12 +62,10 @@ _MED_FRAC  = 0.40   # 40% wav2lip
 _EASY_FRAC = 0.20   # 20% single-modality
 
 
-def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool = True, ignore_missing: bool = False) -> list[dict]:
+def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool = True, ignore_missing: bool = False, manifest_path: Optional[str] = None) -> list[dict]:
     """
-    Stratified random sample from meta_data.csv.
-    hard=True: over-samples compound fakes (hardest for audio-visual mismatch detector).
-      40% compound (faceswap-wav2lip + fsgan-wav2lip), 40% wav2lip, 20% other.
-    hard=False: uniform random sample from all fake methods.
+    Stratified random sample from manifest or meta_data.csv.
+    If a 500/500 paired manifest is supplied, loads exact paired benchmarks.
     """
     import random
     rng = random.Random(seed)
@@ -75,7 +74,13 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
     fake_by_tier: dict[str, list[dict]] = {"hard": [], "med": [], "easy": []}
     missing = 0
 
-    meta_candidates = [
+    meta_candidates = []
+    if manifest_path:
+        meta_candidates.extend([Path(manifest_path), REPO_ROOT / manifest_path])
+    
+    meta_candidates.extend([
+        REPO_ROOT / "data/manifests/fakeavceleb_eval_500_500.csv",
+        FAV_ROOT / "fakeavceleb_eval_500_500.csv",
         FAV_ROOT / "meta_data.csv",
         REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv",
         REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv",
@@ -84,7 +89,7 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
         REPO_ROOT / "data/raw/meta_data.csv",
         REPO_ROOT / "data/meta_data.csv",
         REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv",
-    ]
+    ])
     csv_file_to_use = None
     for c in meta_candidates:
         if c.exists():
@@ -92,10 +97,10 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
             break
 
     if csv_file_to_use is None or not csv_file_to_use.exists():
-        log.error("Neither meta_data.csv nor fakeavceleb_cached_manifest.csv found.")
+        log.error("Neither manifest nor meta_data.csv found.")
         return []
 
-    print(f"  [Dataset] Using metadata CSV: {csv_file_to_use}")
+    print(f"  [Dataset] Using benchmark manifest: {csv_file_to_use}")
 
     fav_data_dirs = [
         FAV_ROOT,
@@ -134,12 +139,11 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
             method   = row.get("method", "real").strip()
             clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem if filename else 'clip'}"
             race     = row.get("race",   "").strip()
-            gender   = row.get("gender", "").strip()
-            rel_v_path = row.get("video_path", "").strip()
+            rel_v_path = (row.get("rel_video_path") or row.get("video_path") or "").strip()
 
             video_path = None
             if rel_v_path:
-                for base in [REPO_ROOT, FAV_ROOT]:
+                for base in [REPO_ROOT, FAV_ROOT, REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw"]:
                     p = base / rel_v_path
                     if p.is_file():
                         video_path = p
@@ -731,6 +735,8 @@ def main():
                         choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
     parser.add_argument("--cached_only", action="store_true",
                         help="Evaluate ONLY clips that have pre-extracted .pt feature tensors ready on disk (instant <2s run)")
+    parser.add_argument("--manifest", type=str, default="data/manifests/fakeavceleb_eval_500_500.csv",
+                        help="Path to fixed evaluation manifest (default: data/manifests/fakeavceleb_eval_500_500.csv)")
     parser.add_argument("--force_features", action="store_true",
                         help="Force feature-based forward pass (forward_from_features), bypassing raw video decoding & face detector")
     args = parser.parse_args()
@@ -767,14 +773,15 @@ def main():
         print(f"ERROR: checkpoint not found: {ckpt_path}")
         return
     cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
-    if not META_CSV.exists() and not cached_manifest.exists():
-        print(f"ERROR: Neither FakeAVCeleb metadata ({META_CSV}) nor cached manifest ({cached_manifest}) found.")
+    if not META_CSV.exists() and not cached_manifest.exists() and not (REPO_ROOT / args.manifest).exists():
+        print(f"ERROR: Neither FakeAVCeleb metadata ({META_CSV}) nor manifest ({args.manifest}) found.")
         return
 
     _section("FakeAVCeleb v1.2 - Cross-Dataset Benchmark")
     hard = not args.no_hard
     print(f"  Checkpoint   : {ckpt_path}")
     print(f"  Device       : {args.device}")
+    print(f"  Manifest     : {args.manifest}")
     print(f"  Sample       : {args.n_real} real + {args.n_fake} fake = {args.n_real + args.n_fake} clips")
     print(f"  Fake ratio   : {args.n_fake / (args.n_real + args.n_fake):.0%}  (harder for detector)")
     print(f"  Hard mode    : {'ON - compound fakes over-sampled (hardest for Delta signal)' if hard else 'OFF - uniform random'}")
@@ -784,7 +791,7 @@ def main():
 
     # ── Load clips ─────────────────────────────────────────────────────────────
     _section("Sampling FakeAVCeleb clips")
-    clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard)
+    clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard, manifest_path=args.manifest)
     real_n = sum(1 for c in clips if c["fake_label"] == 0)
     fake_n = sum(1 for c in clips if c["fake_label"] == 1)
     print(f"  Sampled      : {len(clips)} clips")
