@@ -253,10 +253,14 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
 from torch.utils.data import Dataset, DataLoader
 
 class FakeAVCelebEvalDataset(Dataset):
-    def __init__(self, clips: list[dict], pipeline: PreprocessingPipeline):
+    """
+    High-performance batched evaluation dataset for FakeAVCeleb.
+    Synchronizes 0.0 - 5.0s audio & visual temporal windows with fast GPU batching.
+    """
+    def __init__(self, clips: list[dict], pipeline: PreprocessingPipeline, no_cache: bool = False):
         self.clips = clips
         self.pipeline = pipeline
-        self.drive_cache_dir = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/preprocessed")
+        self.no_cache = no_cache
         
         # Preload transformers processors outside processing loop
         from transformers import Wav2Vec2FeatureExtractor, BertTokenizer, ViTImageProcessor
@@ -267,14 +271,6 @@ class FakeAVCelebEvalDataset(Dataset):
     def __len__(self):
         return len(self.clips)
 
-    def _sync_from_drive(self, local_path: Path, drive_path: Path) -> bool:
-        if local_path.exists():
-            return True
-        if self.drive_cache_dir.exists() and drive_path.exists():
-            try:
-                import shutil
-                local_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(drive_path, local_path)
     def __getitem__(self, idx):
         import torchaudio
         import cv2
