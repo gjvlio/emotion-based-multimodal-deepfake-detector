@@ -27,6 +27,7 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -143,6 +144,9 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                         p = dp / fn
                         mp4_index[str(p).replace("\\", "/")] = p
                         parts = p.parts
+                        # Key by filename, parent/filename, and deeper paths
+                        mp4_index[p.name] = p
+                        parts = p.parts
                         if len(parts) >= 2:
                             mp4_index[f"{parts[-2]}/{parts[-1]}"] = p
                         if len(parts) >= 3:
@@ -158,17 +162,17 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
         for row in csv.DictReader(f):
             cat      = row.get("type",   "").strip()
             source   = row.get("source", row.get("speaker_id", "")).strip()
-            filename = row.get("path",   "").strip()
+            rel_v_path = (row.get("rel_video_path") or row.get("video_path") or "").replace("\\", "/").strip()
+            filename = row.get("path",   "").strip() or (Path(rel_v_path).name if rel_v_path else "")
             method   = row.get("method", "real").strip()
             clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem if filename else 'clip'}"
             race     = row.get("race",   "").strip()
             gender   = row.get("gender", "").strip()
-            rel_v_path = (row.get("rel_video_path") or row.get("video_path") or "").replace("\\", "/").strip()
 
             video_path = None
             if rel_v_path:
                 # Direct check across all root paths
-                for base in [REPO_ROOT, FAV_ROOT, REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw", Path("/content/thesis/data/raw/FakeAVCeleb_v1.2"), Path("/content/thesis/data/FakeAVCeleb_v1.2")]:
+                for base in [REPO_ROOT, FAV_ROOT, REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw", Path("/content/thesis/data/raw/FakeAVCeleb_v1.2"), Path("/content/thesis/data/FakeAVCeleb_v1.2"), Path("/content/thesis/data/raw"), Path("/content/thesis/data")]:
                     p = base / rel_v_path
                     if p.is_file():
                         video_path = p
@@ -176,7 +180,11 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                 if video_path is None:
                     video_path = mp4_index.get(rel_v_path)
 
-            # 1. Look up via active directory hierarchy
+            # 1. Fast speaker/filename hashmap index lookup
+            if video_path is None and source and filename:
+                video_path = mp4_index.get(f"{source}/{filename}")
+
+            # 2. Look up via active directory hierarchy
             if video_path is None and filename:
                 for root in active_fav_roots:
                     cand = root / cat / race / gender / source / filename
@@ -184,9 +192,9 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                         video_path = cand
                         break
 
-            # 2. Fast hashmap index lookup
+            # 3. Filename direct lookup
             if video_path is None and filename:
-                video_path = mp4_index.get(f"{source}/{filename}") or mp4_index.get(f"{cat}/{race}/{gender}/{source}/{filename}")
+                video_path = mp4_index.get(filename)
 
             # 3. Clip_id fallback extraction
             if video_path is None and clip_id:
