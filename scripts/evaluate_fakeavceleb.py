@@ -63,10 +63,12 @@ _MED_FRAC  = 0.40   # 40% wav2lip
 _EASY_FRAC = 0.20   # 20% single-modality
 
 
-def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool = True, ignore_missing: bool = False, manifest_path: Optional[str] = None) -> list[dict]:
+def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool = True, ignore_missing: bool = False) -> list[dict]:
     """
-    Stratified random sample from manifest or meta_data.csv.
-    If a 500/500 paired manifest is supplied, loads exact paired benchmarks.
+    Stratified random sample from meta_data.csv.
+    hard=True: over-samples compound fakes (hardest for audio-visual mismatch detector).
+      40% compound (faceswap-wav2lip + fsgan-wav2lip), 40% wav2lip, 20% other.
+    hard=False: uniform random sample from all fake methods.
     """
     import random
     rng = random.Random(seed)
@@ -75,13 +77,7 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
     fake_by_tier: dict[str, list[dict]] = {"hard": [], "med": [], "easy": []}
     missing = 0
 
-    meta_candidates = []
-    if manifest_path:
-        meta_candidates.extend([Path(manifest_path), REPO_ROOT / manifest_path])
-    
-    meta_candidates.extend([
-        REPO_ROOT / "data/manifests/fakeavceleb_eval_500_500.csv",
-        FAV_ROOT / "fakeavceleb_eval_500_500.csv",
+    meta_candidates = [
         FAV_ROOT / "meta_data.csv",
         REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv",
         REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv",
@@ -90,7 +86,7 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
         REPO_ROOT / "data/raw/meta_data.csv",
         REPO_ROOT / "data/meta_data.csv",
         REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv",
-    ])
+    ]
     csv_file_to_use = None
     for c in meta_candidates:
         if c.exists():
@@ -98,10 +94,10 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
             break
 
     if csv_file_to_use is None or not csv_file_to_use.exists():
-        log.error("Neither manifest nor meta_data.csv found.")
+        log.error("Neither meta_data.csv nor fakeavceleb_cached_manifest.csv found.")
         return []
 
-    print(f"  [Dataset] Using benchmark manifest: {csv_file_to_use}")
+    print(f"  [Dataset] Using metadata CSV: {csv_file_to_use}")
 
     fav_data_dirs = [
         FAV_ROOT,
@@ -127,64 +123,43 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
 
     print("  [Dataset] Building fast collision-free MP4 video index from local SSD...")
     mp4_index = {}
-    local_roots = [REPO_ROOT / "data", Path("/content/thesis/data"), Path("/content/thesis/data/raw")]
-    seen_roots = set()
-    for root_dir in local_roots:
-        resolved = root_dir.resolve()
-        if resolved.exists() and resolved not in seen_roots:
-            seen_roots.add(resolved)
-            for dirpath, dirnames, filenames in os.walk(resolved):
-                # Never traverse Google Drive or git folders
-                if "drive" in dirpath or ".git" in dirpath:
+    for base in [REPO_ROOT / "data/raw", REPO_ROOT / "data", Path("/content/thesis/data/raw"), Path("/content/thesis/data")]:
+        if base.exists():
+            for dp, dirnames, fns in os.walk(base):
+                if "drive" in dp.lower() or ".git" in dp.lower():
                     dirnames.clear()
                     continue
-                dp = Path(dirpath)
-                for fn in filenames:
+                for fn in fns:
                     if fn.lower().endswith(".mp4"):
-                        p = dp / fn
-                        mp4_index[str(p).replace("\\", "/")] = p
-                        parts = p.parts
-                        # Key by filename, parent/filename, and deeper paths
+                        p = Path(dp) / fn
                         mp4_index[p.name] = p
                         parts = p.parts
                         if len(parts) >= 2:
                             mp4_index[f"{parts[-2]}/{parts[-1]}"] = p
                         if len(parts) >= 3:
                             mp4_index[f"{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
-                        if len(parts) >= 4:
-                            mp4_index[f"{parts[-4]}/{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
-                        if len(parts) >= 5:
-                            mp4_index[f"{parts[-5]}/{parts[-4]}/{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
-
-    print(f"  [Dataset] Indexed {len(mp4_index):,} unique path permutations on local SSD.")
+    print(f"  [Dataset] Indexed {len(mp4_index):,} MP4 video files ready on local SSD.")
 
     with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
             cat      = row.get("type",   "").strip()
             source   = row.get("source", row.get("speaker_id", "")).strip()
-            rel_v_path = (row.get("rel_video_path") or row.get("video_path") or "").replace("\\", "/").strip()
-            filename = row.get("path",   "").strip() or (Path(rel_v_path).name if rel_v_path else "")
+            filename = row.get("path",   "").strip()
             method   = row.get("method", "real").strip()
             clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem if filename else 'clip'}"
             race     = row.get("race",   "").strip()
             gender   = row.get("gender", "").strip()
+            rel_v_path = row.get("video_path", "").strip()
 
             video_path = None
             if rel_v_path:
-                # Direct check across all root paths
-                for base in [REPO_ROOT, FAV_ROOT, REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw", Path("/content/thesis/data/raw/FakeAVCeleb_v1.2"), Path("/content/thesis/data/FakeAVCeleb_v1.2"), Path("/content/thesis/data/raw"), Path("/content/thesis/data")]:
+                for base in [REPO_ROOT, FAV_ROOT]:
                     p = base / rel_v_path
                     if p.is_file():
                         video_path = p
                         break
-                if video_path is None:
-                    video_path = mp4_index.get(rel_v_path)
 
-            # 1. Fast speaker/filename hashmap index lookup
-            if video_path is None and source and filename:
-                video_path = mp4_index.get(f"{source}/{filename}")
-
-            # 2. Look up via active directory hierarchy
+            # 1. Look up via active directory hierarchy
             if video_path is None and filename:
                 for root in active_fav_roots:
                     cand = root / cat / race / gender / source / filename
@@ -192,9 +167,9 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                         video_path = cand
                         break
 
-            # 3. Filename direct lookup
+            # 2. Fast hashmap index lookup
             if video_path is None and filename:
-                video_path = mp4_index.get(filename)
+                video_path = mp4_index.get(f"{source}/{filename}") or mp4_index.get(filename)
 
             # 3. Clip_id fallback extraction
             if video_path is None and clip_id:
@@ -202,7 +177,7 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                 if len(parts) >= 3:
                     spk = parts[1]
                     fname = f"{parts[2]}.mp4"
-                    video_path = mp4_index.get(f"{spk}/{fname}")
+                    video_path = mp4_index.get(f"{spk}/{fname}") or mp4_index.get(fname)
 
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
             z_v_p  = REPO_ROOT / "data/preprocessed/features/z_v"  / f"{clip_id}.pt"
@@ -215,13 +190,13 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
             entry = {
                 "clip_id":    clip_id,
                 "video_path": str(video_path) if video_path is not None else "",
-                "fake_label": 0 if (cat == REAL_TYPE or method == "real" or str(row.get("fake_label")) == "0") else 1,
+                "fake_label": 0 if cat == REAL_TYPE else 1,
                 "method":     method,
                 "type":       cat,
                 "speaker_id": source,
                 "cached":     features_cached,
             }
-            if entry["fake_label"] == 0:
+            if cat == REAL_TYPE:
                 real_pool.append(entry)
             elif method in _HARD_METHODS:
                 fake_by_tier["hard"].append(entry)
@@ -232,12 +207,6 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
 
     if missing:
         log.warning(f"{missing} metadata rows skipped — video not found on disk")
-
-    # If loading from a fixed paired evaluation manifest (500/500), return all valid clips directly
-    if "500_500" in str(csv_file_to_use) or "eval" in str(csv_file_to_use):
-        all_manifest_clips = real_pool + fake_by_tier["hard"] + fake_by_tier["med"] + fake_by_tier["easy"]
-        print(f"  [Dataset] Loaded exact paired benchmark manifest: {len(all_manifest_clips)} clips ({len(real_pool)} Real / {len(all_manifest_clips)-len(real_pool)} Fake)")
-        return all_manifest_clips
 
     for pool in [real_pool, *fake_by_tier.values()]:
         rng.shuffle(pool)
@@ -457,12 +426,6 @@ def run_inference(
             with torch.no_grad():
                 out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
                 scores = torch.sigmoid(out.logit).squeeze(1).cpu().tolist()
-                prob_a = F.softmax(out.emotion_a, dim=-1)
-                prob_b = F.softmax(out.emotion_b, dim=-1)
-                delta = torch.abs(prob_a - prob_b)
-                delta_norms = delta.norm(dim=-1).cpu().tolist()
-                emo_a_cls = out.emotion_a.argmax(dim=-1).cpu().tolist()
-                emo_b_cls = out.emotion_b.argmax(dim=-1).cpu().tolist()
                 
             for j in range(len(scores)):
                 score = scores[j]
@@ -474,9 +437,6 @@ def run_inference(
                     "type":       batch["type"][j],
                     "score":      score,
                     "pred":       pred,
-                    "delta_norm": delta_norms[j],
-                    "emo_a":      emo_a_cls[j],
-                    "emo_b":      emo_b_cls[j],
                 })
     else:
         # Load precomputed feature vectors from cache (runs in ~1 second)
@@ -500,11 +460,6 @@ def run_inference(
                 out   = model.forward_from_features(z_at, z_v)
                 score = torch.sigmoid(out.logit).item()     # P(fake) in [0, 1]
                 pred  = 1 if score >= 0.5 else 0
-                prob_a = F.softmax(out.emotion_a, dim=-1)
-                prob_b = F.softmax(out.emotion_b, dim=-1)
-                delta_norm = torch.abs(prob_a - prob_b).norm(dim=-1).item()
-                emo_a_cls = out.emotion_a.argmax(dim=-1).item()
-                emo_b_cls = out.emotion_b.argmax(dim=-1).item()
 
             results.append({
                 "clip_id":    c["clip_id"],
@@ -513,9 +468,6 @@ def run_inference(
                 "type":       c["type"],
                 "score":      score,
                 "pred":       pred,
-                "delta_norm": delta_norm,
-                "emo_a":      emo_a_cls,
-                "emo_b":      emo_b_cls,
             })
             pbar.set_postfix(score=f"{score:.3f}")
 
@@ -776,8 +728,6 @@ def main():
                         choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
     parser.add_argument("--cached_only", action="store_true",
                         help="Evaluate ONLY clips that have pre-extracted .pt feature tensors ready on disk (instant <2s run)")
-    parser.add_argument("--manifest", type=str, default="data/manifests/fakeavceleb_eval_500_500.csv",
-                        help="Path to fixed evaluation manifest (default: data/manifests/fakeavceleb_eval_500_500.csv)")
     parser.add_argument("--force_features", action="store_true",
                         help="Force feature-based forward pass (forward_from_features), bypassing raw video decoding & face detector")
     args = parser.parse_args()
@@ -814,15 +764,14 @@ def main():
         print(f"ERROR: checkpoint not found: {ckpt_path}")
         return
     cached_manifest = REPO_ROOT / "data/preprocessed/fakeavceleb_cached_manifest.csv"
-    if not META_CSV.exists() and not cached_manifest.exists() and not (REPO_ROOT / args.manifest).exists():
-        print(f"ERROR: Neither FakeAVCeleb metadata ({META_CSV}) nor manifest ({args.manifest}) found.")
+    if not META_CSV.exists() and not cached_manifest.exists():
+        print(f"ERROR: Neither FakeAVCeleb metadata ({META_CSV}) nor cached manifest ({cached_manifest}) found.")
         return
 
     _section("FakeAVCeleb v1.2 - Cross-Dataset Benchmark")
     hard = not args.no_hard
     print(f"  Checkpoint   : {ckpt_path}")
     print(f"  Device       : {args.device}")
-    print(f"  Manifest     : {args.manifest}")
     print(f"  Sample       : {args.n_real} real + {args.n_fake} fake = {args.n_real + args.n_fake} clips")
     print(f"  Fake ratio   : {args.n_fake / (args.n_real + args.n_fake):.0%}  (harder for detector)")
     print(f"  Hard mode    : {'ON - compound fakes over-sampled (hardest for Delta signal)' if hard else 'OFF - uniform random'}")
@@ -832,7 +781,7 @@ def main():
 
     # ── Load clips ─────────────────────────────────────────────────────────────
     _section("Sampling FakeAVCeleb clips")
-    clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard, manifest_path=args.manifest)
+    clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard)
     real_n = sum(1 for c in clips if c["fake_label"] == 0)
     fake_n = sum(1 for c in clips if c["fake_label"] == 1)
     print(f"  Sampled      : {len(clips)} clips")
@@ -913,9 +862,8 @@ def main():
     if args.save_csv:
         csv_path = Path(args.save_csv)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-        keys = list(results[0].keys()) if results else ["clip_id", "fake_label", "method", "type", "score", "pred"]
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
+            writer = csv.DictWriter(f, fieldnames=["clip_id", "fake_label", "method", "type", "score", "pred"])
             writer.writeheader()
             writer.writerows(results)
         print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
@@ -957,28 +905,6 @@ def main():
 
     _section("Per-method breakdown")
     per_method_breakdown(results)
-
-    # ── Affective Incongruency Analysis ────────────────────────────────────────
-    delta_reals = [r["delta_norm"] for r in results if r["fake_label"] == 0 and "delta_norm" in r]
-    delta_fakes = [r["delta_norm"] for r in results if r["fake_label"] == 1 and "delta_norm" in r]
-    
-    if delta_reals and delta_fakes:
-        _section("Affective Incongruency & Emotion Delta (||Δ||)")
-        m_real = float(np.mean(delta_reals))
-        m_fake = float(np.mean(delta_fakes))
-        ratio = (m_fake / m_real) if m_real > 0 else 1.0
-        print(f"  Mean ||Δ|| Disparity on Real Clips (Congruent)  : {m_real:.4f}")
-        print(f"  Mean ||Δ|| Disparity on Fake Clips (Incongruent): {m_fake:.4f}")
-        print(f"  Affective Mismatch Contrast Ratio (Fake / Real) : {ratio:.2f}x higher on fakes")
-
-        # Concordance Rate (Audio Emotion == Visual Emotion)
-        conc_reals = [r["emo_a"] == r["emo_b"] for r in results if r["fake_label"] == 0 and "emo_a" in r]
-        conc_fakes = [r["emo_a"] == r["emo_b"] for r in results if r["fake_label"] == 1 and "emo_a" in r]
-        if conc_reals and conc_fakes:
-            p_real = (sum(conc_reals) / len(conc_reals)) * 100
-            p_fake = (sum(conc_fakes) / len(conc_fakes)) * 100
-            print(f"  Audio-Visual Emotion Concordance (Real)         : {p_real:.1f}% match")
-            print(f"  Audio-Visual Emotion Concordance (Fake)         : {p_fake:.1f}% match (Incongruent)")
 
     print(f"\n  NOTE: Smoke checkpoint trained on ~1k clips. Full dataset will yield higher AUC.")
     print(f"  Rival comparison requires DeLong's test — run evaluation notebook for full stats.\n")
