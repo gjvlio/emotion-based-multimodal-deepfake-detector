@@ -1,9 +1,10 @@
 """
 generate_fakeavceleb_eval_manifest.py
 
-Scans local SSD for all physically available FakeAVCeleb MP4 videos,
-verifies their existence, applies Hard Mode stratification (40% Compound, 40% Wav2Lip, 20% Single-mod),
-and generates data/manifests/fakeavceleb_eval_500_500.csv with 100% guaranteed on-disk files.
+Scans local SSD for all physically available FakeAVCeleb MP4 videos directly from disk,
+parses categories from path hierarchy, applies Hard Mode stratification
+(40% Compound, 40% Wav2Lip, 20% Single-modality), and generates
+data/manifests/fakeavceleb_eval_500_500.csv with 100% guaranteed on-disk files.
 """
 from __future__ import annotations
 
@@ -16,6 +17,43 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _HARD_METHODS = {"faceswap-wav2lip", "fsgan-wav2lip"}
 _MED_METHODS  = {"wav2lip"}
+
+def parse_method_and_type(p: Path) -> tuple[str, str, int, str]:
+    """
+    Directly infers (type, method, fake_label, speaker_id) from physical file path.
+    """
+    path_str = str(p).replace("\\", "/")
+    
+    # Speaker extraction
+    speaker_id = p.parent.name if p.parent.name.startswith("id") else "fav_spk"
+    
+    # 1. Real Video Check
+    if "RealVideo-RealAudio" in path_str or "RealAudio-RealVideo" in path_str:
+        return "RealVideo-RealAudio", "real", 0, speaker_id
+
+    # 2. Compound Fakes (Faceswap + Wav2Lip or FSGAN + Wav2Lip)
+    fname_lower = p.name.lower()
+    if ("faceswap" in fname_lower or "fs" in fname_lower or "face" in fname_lower) and ("wav2lip" in fname_lower or "wavtolip" in fname_lower):
+        if "fsgan" in fname_lower:
+            return "FakeVideo-FakeAudio", "fsgan-wav2lip", 1, speaker_id
+        return "FakeVideo-FakeAudio", "faceswap-wav2lip", 1, speaker_id
+
+    # 3. Wav2Lip Fakes
+    if "wav2lip" in fname_lower or "wavtolip" in fname_lower:
+        cat = "FakeVideo-FakeAudio" if "FakeVideo-FakeAudio" in path_str else "FakeVideo-RealAudio"
+        return cat, "wav2lip", 1, speaker_id
+
+    # 4. RTVC Audio Fakes
+    if "rtvc" in fname_lower or "RealVideo-FakeAudio" in path_str:
+        return "RealVideo-FakeAudio", "rtvc", 1, speaker_id
+
+    # 5. FSGAN Video Fakes
+    if "fsgan" in fname_lower or "FakeVideo-RealAudio" in path_str:
+        return "FakeVideo-RealAudio", "fsgan", 1, speaker_id
+
+    # 6. Generic Faceswap Video Fakes
+    return "FakeVideo-RealAudio", "faceswap", 1, speaker_id
+
 
 def main(n_real: int = 500, n_fake: int = 500, seed: int = 42):
     random.seed(seed)
@@ -34,6 +72,7 @@ def main(n_real: int = 500, n_fake: int = 500, seed: int = 42):
         REPO_ROOT / "data/raw",
         REPO_ROOT / "data",
         Path("/content/thesis/data/raw/FakeAVCeleb_v1.2"),
+        Path("/content/thesis/data/FakeAVCeleb_v1.2"),
         Path("/content/thesis/data/raw"),
         Path("/content/thesis/data")
     ]
@@ -41,102 +80,66 @@ def main(n_real: int = 500, n_fake: int = 500, seed: int = 42):
     seen_paths = set()
     for root in scan_roots:
         if root.exists():
-            for dp, _, fns in os.walk(root):
+            for dp, dirnames, fns in os.walk(root):
                 if "drive" in dp or ".git" in dp:
+                    dirnames.clear()
                     continue
                 for fn in fns:
                     if fn.lower().endswith(".mp4"):
                         p = Path(dp) / fn
-                        rel_str = str(p.resolve())
-                        if rel_str not in seen_paths:
-                            seen_paths.add(rel_str)
+                        resolved = p.resolve()
+                        if str(resolved) not in seen_paths:
+                            seen_paths.add(str(resolved))
                             mp4_files.append(p)
                             
     print(f"  [Disk Scan] Discovered {len(mp4_files):,} physical MP4 video files.")
 
-    # 2. Build metadata mappings
-    meta_candidates = [
-        REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv",
-        REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv",
-        REPO_ROOT / "data/raw/meta_data.csv",
-        REPO_ROOT / "data/meta_data.csv",
-        Path("/content/thesis/data/raw/FakeAVCeleb_v1.2/meta_data.csv"),
-    ]
-    
-    meta_path = next((m for m in meta_candidates if m.exists()), None)
-    if not meta_path:
-        print("  [ERROR] meta_data.csv not found!")
-        return
-
-    print(f"  [Metadata] Reading: {meta_path}")
-
-    # Build fast lookup hashmap of available MP4 files
-    file_map = {}
-    for p in mp4_files:
-        file_map[p.name] = p
-        parts = p.parts
-        if len(parts) >= 2:
-            file_map[f"{parts[-2]}/{parts[-1]}"] = p
-        if len(parts) >= 3:
-            file_map[f"{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
-        if len(parts) >= 4:
-            file_map[f"{parts[-4]}/{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
-        if len(parts) >= 5:
-            file_map[f"{parts[-5]}/{parts[-4]}/{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
-
     real_pool = []
     fake_by_tier = {"hard": [], "med": [], "easy": []}
 
-    with open(meta_path, newline="", encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            cat      = row.get("type", "").strip()
-            source   = row.get("source", row.get("speaker_id", "")).strip()
-            fname    = row.get("path", "").strip()
-            method   = row.get("method", "real").strip().lower()
-            race     = row.get("race", "").strip()
-            gender   = row.get("gender", "").strip()
-            
-            # Find physical video file
-            v_path = file_map.get(fname) or file_map.get(f"{source}/{fname}") or file_map.get(f"{cat}/{race}/{gender}/{source}/{fname}")
-            if v_path is None or not v_path.is_file():
-                continue
-
-            # Format relative path
-            try:
-                rel_v = str(v_path.relative_to(REPO_ROOT / "data/raw/FakeAVCeleb_v1.2")).replace("\\", "/")
-            except Exception:
+    for p in mp4_files:
+        cat, method, label, spk = parse_method_and_type(p)
+        
+        # Build clean relative path
+        rel_v = ""
+        for base in [REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw", REPO_ROOT / "data", Path("/content/thesis/data/raw/FakeAVCeleb_v1.2"), Path("/content/thesis/data/raw"), Path("/content/thesis/data")]:
+            if base.exists():
                 try:
-                    rel_v = str(v_path.relative_to(REPO_ROOT / "data")).replace("\\", "/")
+                    rel_v = str(p.relative_to(base)).replace("\\", "/")
+                    break
                 except Exception:
-                    rel_v = f"{cat}/{race}/{gender}/{source}/{fname}"
+                    pass
+        if not rel_v:
+            rel_v = str(p).replace("\\", "/")
 
-            clip_id = f"fav_{source}_{Path(fname).stem}"
-            is_real = (cat == "RealVideo-RealAudio" or method == "real")
-            
-            entry = {
-                "clip_id": clip_id,
-                "fake_label": 0 if is_real else 1,
-                "method": method,
-                "type": cat,
-                "speaker_id": source,
-                "rel_video_path": rel_v,
-            }
+        clip_id = f"fav_{spk}_{p.stem}"
+        entry = {
+            "clip_id": clip_id,
+            "fake_label": label,
+            "method": method,
+            "type": cat,
+            "speaker_id": spk,
+            "rel_video_path": rel_v,
+        }
 
-            if is_real:
-                real_pool.append(entry)
-            elif method in _HARD_METHODS:
-                fake_by_tier["hard"].append(entry)
-            elif method in _MED_METHODS:
-                fake_by_tier["med"].append(entry)
-            else:
-                fake_by_tier["easy"].append(entry)
+        if label == 0:
+            real_pool.append(entry)
+        elif method in _HARD_METHODS:
+            fake_by_tier["hard"].append(entry)
+        elif method in _MED_METHODS:
+            fake_by_tier["med"].append(entry)
+        else:
+            fake_by_tier["easy"].append(entry)
 
-    print(f"\n  Verified On-Disk Media:")
+    print(f"\n  Verified On-Disk Inventory:")
     print(f"    Genuine Real Videos : {len(real_pool):,}")
     print(f"    Compound Fakes      : {len(fake_by_tier['hard']):,}")
     print(f"    Wav2Lip Fakes       : {len(fake_by_tier['med']):,}")
     print(f"    Single-Mod Fakes    : {len(fake_by_tier['easy']):,}")
+
+    if not real_pool:
+        print("  [ERROR] No real video files found on disk!")
+        return
 
     # Shuffle pools
     random.shuffle(real_pool)
