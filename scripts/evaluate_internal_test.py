@@ -183,21 +183,24 @@ def main():
                     det_labels.append(l)
 
             # 2. Emotion Head A (Audio-Text)
-            a_preds = out.emo_a.argmax(dim=-1).cpu().tolist()
+            a_preds = out.emotion_a.argmax(dim=-1).cpu().tolist()
             for p, l in zip(a_preds, aud_emos):
                 if l != -1 and 0 <= l <= 5:
                     emo_a_preds.append(p)
                     emo_a_labels.append(l)
 
             # 3. Emotion Head B (Visual)
-            b_preds = out.emo_b.argmax(dim=-1).cpu().tolist()
+            b_preds = out.emotion_b.argmax(dim=-1).cpu().tolist()
             for p, l in zip(b_preds, vis_emos):
                 if l != -1 and 0 <= l <= 5:
                     emo_b_preds.append(p)
                     emo_b_labels.append(l)
 
             # 4. Emotion Disparity Delta norm
-            delta_norms = out.delta.norm(dim=-1).cpu().tolist()
+            prob_a = F.softmax(out.emotion_a, dim=-1)
+            prob_b = F.softmax(out.emotion_b, dim=-1)
+            delta = torch.abs(prob_a - prob_b)
+            delta_norms = delta.norm(dim=-1).cpu().tolist()
             for d_val, l in zip(delta_norms, fake_labs):
                 if l == 0:
                     deltas_real.append(d_val)
@@ -205,7 +208,7 @@ def main():
                     deltas_fake.append(d_val)
 
             # 5. Sarcasm Head
-            s_probs = torch.sigmoid(out.sarc).squeeze(1).cpu().tolist()
+            s_probs = torch.sigmoid(out.sarcasm).squeeze(1).cpu().tolist()
             for sp, sl in zip(s_probs, sarcs):
                 if sl in (0, 1):
                     sarc_scores.append(sp)
