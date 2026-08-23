@@ -489,12 +489,12 @@ def run_inference(
     return results
 
 
-def compute_metrics(results: list[dict]) -> dict:
+def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
     import numpy as np
     labels = [r["fake_label"] for r in results]
     scores = [r["score"]      for r in results]
 
-    # Standard metrics at tau = 0.50
+    # 1. Standard metrics at tau = 0.50
     std_p = (np.array(scores) >= 0.5).astype(int)
     y_true = np.array(labels)
     tp_50 = int(((std_p == 1) & (y_true == 1)).sum())
@@ -511,6 +511,23 @@ def compute_metrics(results: list[dict]) -> dict:
     
     mcc_denom = np.sqrt(float((tp_50 + fp_50) * (tp_50 + fn_50) * (tn_50 + fp_50) * (tn_50 + fn_50)))
     mcc_50 = ((tp_50 * tn_50) - (fp_50 * fn_50)) / max(mcc_denom, 1e-8)
+
+    # 2. User calibrated threshold metrics (e.g. tau = 0.65)
+    cal_p = (np.array(scores) >= user_thresh).astype(int)
+    tp_cal = int(((cal_p == 1) & (y_true == 1)).sum())
+    fp_cal = int(((cal_p == 1) & (y_true == 0)).sum())
+    fn_cal = int(((cal_p == 0) & (y_true == 1)).sum())
+    tn_cal = int(((cal_p == 0) & (y_true == 0)).sum())
+    
+    acc_cal = (tp_cal + tn_cal) / max(len(results), 1)
+    prec_cal = tp_cal / max(tp_cal + fp_cal, 1)
+    rec_cal  = tp_cal / max(tp_cal + fn_cal, 1)
+    spec_cal = tn_cal / max(tn_cal + fp_cal, 1)
+    f1_cal   = 2 * prec_cal * rec_cal / max(prec_cal + rec_cal, 1e-8)
+    bal_acc_cal = (rec_cal + spec_cal) / 2.0
+    
+    mcc_denom_cal = np.sqrt(float((tp_cal + fp_cal) * (tp_cal + fn_cal) * (tn_cal + fp_cal) * (tn_cal + fn_cal)))
+    mcc_cal = ((tp_cal * tn_cal) - (fp_cal * fn_cal)) / max(mcc_denom_cal, 1e-8)
 
     # Threshold calibration sweep (find optimal F1 decision boundary)
     best_cal_f1   = -1.0
@@ -560,11 +577,11 @@ def compute_metrics(results: list[dict]) -> dict:
             youden_bal_acc = (sens + spec) / 2.0
             youden_tp, youden_fp, youden_fn, youden_tn = c_tp, c_fp, c_fn, c_tn
 
-    # Save dual predictions: standard (0.50) and calibrated (Youden)
+    # Save dual predictions: standard (0.50) and calibrated (user_thresh)
     for r in results:
         r["pred_50"] = 1 if r["score"] >= 0.50 else 0
-        r["pred_cal"] = 1 if r["score"] >= youden_thresh else 0
-        r["pred"] = r["pred_cal"]  # Default saved pred is calibrated
+        r["pred_cal"] = 1 if r["score"] >= user_thresh else 0
+        r["pred"] = r["pred_cal"]
 
     auc = None
     try:
@@ -597,6 +614,10 @@ def compute_metrics(results: list[dict]) -> dict:
         tp_50=tp_50, fp_50=fp_50, fn_50=fn_50, tn_50=tn_50,
         acc_50=acc_50, prec_50=prec_50, rec_50=rec_50, spec_50=spec_50,
         f1_50=f1_50, bal_acc_50=bal_acc_50, mcc_50=mcc_50,
+        user_thresh=user_thresh,
+        tp_cal=tp_cal, fp_cal=fp_cal, fn_cal=fn_cal, tn_cal=tn_cal,
+        acc_cal=acc_cal, prec_cal=prec_cal, rec_cal=rec_cal, spec_cal=spec_cal,
+        f1_cal=f1_cal, bal_acc_cal=bal_acc_cal, mcc_cal=mcc_cal,
         best_thresh=best_thresh, best_cal_f1=best_cal_f1, best_cal_acc=best_cal_acc,
         youden_thresh=youden_thresh, best_youden_j=best_youden_j, youden_acc=youden_acc,
         youden_sens=youden_sens, youden_spec=youden_spec, youden_bal_acc=youden_bal_acc,
@@ -606,19 +627,19 @@ def compute_metrics(results: list[dict]) -> dict:
     )
 
 
-def per_method_breakdown(results: list[dict], youden_thresh: float = 0.5) -> None:
+def per_method_breakdown(results: list[dict], cal_thresh: float = 0.65) -> None:
     from collections import defaultdict
     by_method: dict[str, list] = defaultdict(list)
     for r in results:
         by_method[r["method"]].append(r)
 
-    print(f"\n  {'Method':<22} {'N':>6}  {'Acc(0.50)':>10}  {'Acc(Cal)':>10}  {'AUC':>8}")
+    print(f"\n  {'Method':<22} {'N':>6}  {'Acc(0.50)':>10}  {f'Acc({cal_thresh:.2f})':>10}  {'AUC':>8}")
     print(f"  {'-'*62}")
     for method, recs in sorted(by_method.items()):
         labs      = [r["fake_label"] for r in recs]
         scrs      = [r["score"]      for r in recs]
         preds_50  = [1 if s >= 0.50 else 0 for s in scrs]
-        preds_cal = [1 if s >= youden_thresh else 0 for s in scrs]
+        preds_cal = [1 if s >= cal_thresh else 0 for s in scrs]
         
         acc_50  = sum(p == l for p, l in zip(preds_50, labs)) / max(len(recs), 1)
         acc_cal = sum(p == l for p, l in zip(preds_cal, labs)) / max(len(recs), 1)
@@ -755,6 +776,8 @@ def main():
                         help="Inference batch size (default: 32 on A100)")
     parser.add_argument("--workers", type=int, default=0,
                         help="DataLoader worker subprocesses (default: 0 for direct CUDA)")
+    parser.add_argument("--threshold", type=float, default=0.65,
+                        help="Classification decision threshold (default: 0.65 calibrated)")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -800,6 +823,7 @@ def main():
     print(f"  Sample       : {args.n_real} real + {args.n_fake} fake = {args.n_real + args.n_fake} clips")
     print(f"  Fake ratio   : {args.n_fake / (args.n_real + args.n_fake):.0%}  (harder for detector)")
     print(f"  Hard mode    : {'ON - compound fakes over-sampled (hardest for Delta signal)' if hard else 'OFF - uniform random'}")
+    print(f"  Threshold    : {args.threshold:.2f} (calibrated) / 0.50 (default baseline)")
     print(f"  Seed         : {args.seed}")
     print(f"  Cache        : {'disabled' if args.no_cache else 'enabled (fast on re-run)'}")
     print(f"  NOTE         : FakeAVCeleb is TEST-ONLY — model was never trained on it.")
@@ -876,7 +900,7 @@ def main():
 
     # ── Metrics ────────────────────────────────────────────────────────────────
     _section("Results")
-    m = compute_metrics(results)
+    m = compute_metrics(results, user_thresh=args.threshold)
 
     if args.save_csv:
         csv_path = Path(args.save_csv)
@@ -889,18 +913,28 @@ def main():
         print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
 
     print(f"  Clips evaluated        : {m['total']}")
-    print(f"  --- Standard Metrics (tau = 0.50) ---")
-    print(f"  Accuracy (0.5)         : {m['acc_50']:.4f}")
-    print(f"  Balanced Accuracy (0.5): {m['bal_acc_50']:.4f}")
-    print(f"  Precision (0.5)        : {m['prec_50']:.4f}")
-    print(f"  Recall (0.5)           : {m['rec_50']:.4f}")
-    print(f"  Specificity (0.5)      : {m['spec_50']:.4f}")
-    print(f"  F1-Score (0.5)         : {m['f1_50']:.4f}")
-    print(f"  MCC (0.5)              : {m['mcc_50']:.4f}")
-    print(f"  TP/FP/FN/TN (0.5)      : {m['tp_50']}/{m['fp_50']}/{m['fn_50']}/{m['tn_50']}")
+    print(f"\n  --- 1. Standard Policy (tau = 0.50) ---")
+    print(f"  Accuracy (0.50)        : {m['acc_50']:.4f}")
+    print(f"  Balanced Accuracy      : {m['bal_acc_50']:.4f}")
+    print(f"  Precision              : {m['prec_50']:.4f}")
+    print(f"  Recall (Sensitivity)   : {m['rec_50']:.4f}")
+    print(f"  Specificity            : {m['spec_50']:.4f}")
+    print(f"  F1-Score               : {m['f1_50']:.4f}")
+    print(f"  MCC                    : {m['mcc_50']:.4f}")
+    print(f"  TP/FP/FN/TN            : {m['tp_50']}/{m['fp_50']}/{m['fn_50']}/{m['tn_50']}")
+
+    print(f"\n  --- 2. Calibrated Policy (tau = {m['user_thresh']:.2f}) ---")
+    print(f"  Accuracy ({m['user_thresh']:.2f})        : {m['acc_cal']:.4f}")
+    print(f"  Balanced Accuracy      : {m['bal_acc_cal']:.4f}")
+    print(f"  Precision              : {m['prec_cal']:.4f}")
+    print(f"  Recall (Sensitivity)   : {m['rec_cal']:.4f}")
+    print(f"  Specificity            : {m['spec_cal']:.4f}")
+    print(f"  F1-Score               : {m['f1_cal']:.4f}")
+    print(f"  MCC                    : {m['mcc_cal']:.4f}")
+    print(f"  TP/FP/FN/TN            : {m['tp_cal']}/{m['fp_cal']}/{m['fn_cal']}/{m['tn_cal']}")
 
     if m.get("best_thresh") is not None:
-        print(f"\n  --- Calibrated Threshold Sweeps ---")
+        print(f"\n  --- 3. Optimal Threshold Sweeps ---")
         print(f"  Optimal F1 Threshold   : {m['best_thresh']:.2f}  (F1={m['best_cal_f1']:.4f}, Acc={m['best_cal_acc']:.4f})")
         print(f"  Youden's J Threshold   : {m['youden_thresh']:.2f}  (J={m['best_youden_j']:.4f}, BalAcc={m['youden_bal_acc']:.4f}, Sens={m['youden_sens']:.4f}, Spec={m['youden_spec']:.4f})")
         print(f"  Youden's TP/FP/FN/TN   : {m['youden_tp']}/{m['youden_fp']}/{m['youden_fn']}/{m['youden_tn']}")
@@ -910,17 +944,16 @@ def main():
     if m["auc"] is not None:
         ci_str = (f"  [95% CI: {m['auc_lo']:.4f} to {m['auc_hi']:.4f}]"
                   if m["auc_lo"] is not None else "")
-        print(f"  AUC-ROC          : {m['auc']:.4f}{ci_str}")
-        # Elpeltagy et al. (2023) — multimodal (whole videos) AUROC: 97.21%
+        print(f"\n  AUC-ROC                : {m['auc']:.4f}{ci_str}")
         ELPELTAGY_AUC = 0.9721
         delta = m["auc"] - ELPELTAGY_AUC
         sign  = "+" if delta >= 0 else ""
-        print(f"  vs Elpeltagy 2023: {ELPELTAGY_AUC:.4f}  (ours {sign}{delta:.4f})")
+        print(f"  vs Elpeltagy 2023      : {ELPELTAGY_AUC:.4f}  (ours {sign}{delta:.4f})")
     else:
-        print("  AUC-ROC          : N/A (need both classes in evaluated set)")
+        print("\n  AUC-ROC                : N/A (need both classes in evaluated set)")
 
     _section("Per-method breakdown")
-    per_method_breakdown(results, youden_thresh=m.get('youden_thresh', 0.5))
+    per_method_breakdown(results, cal_thresh=args.threshold)
 
     print(f"\n  NOTE: Smoke checkpoint trained on ~1k clips. Full dataset will yield higher AUC.")
     print(f"  Rival comparison requires DeLong's test — run evaluation notebook for full stats.\n")
