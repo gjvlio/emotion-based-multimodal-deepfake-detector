@@ -6,18 +6,61 @@ Usage:
 """
 
 import sys
+import csv
 import argparse
 from pathlib import Path
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_fscore_support
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.models.detection_model import DeepfakeDetector
-from src.training.dataset import Phase1Dataset
+
+
+class InternalTestDataset(Dataset):
+    """Loads precomputed (z_at, z_v) feature tensors from the internal test manifest."""
+    def __init__(self, manifest_csv: Path, prep_dir: Path):
+        self.records = []
+        if not manifest_csv.exists():
+            print(f"[WARNING] Manifest missing: {manifest_csv}")
+            return
+        
+        with open(manifest_csv, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                cid = str(row.get("output_stem") or row.get("clip_id") or "")
+                if not cid:
+                    continue
+                z_at_p = prep_dir / "features" / "z_at" / f"{cid}.pt"
+                z_v_p  = prep_dir / "features" / "z_v"  / f"{cid}.pt"
+                
+                if z_at_p.exists() and z_v_p.exists():
+                    fake_lab = int(row.get("fake_label", row.get("label", -1)))
+                    if fake_lab in (0, 1):
+                        self.records.append({
+                            "clip_id": cid,
+                            "z_at_path": z_at_p,
+                            "z_v_path": z_v_p,
+                            "fake_label": fake_lab,
+                            "source_pipeline": str(row.get("source_pipeline", "unknown")),
+                        })
+
+    def __len__(self):
+        return len(self.records)
+
+    def __getitem__(self, idx):
+        r = self.records[idx]
+        z_at = torch.load(r["z_at_path"], weights_only=True)
+        z_v  = torch.load(r["z_v_path"],  weights_only=True)
+        return {
+            "clip_id": r["clip_id"],
+            "z_at": z_at,
+            "z_v": z_v,
+            "fake_label": r["fake_label"],
+            "source_pipeline": r["source_pipeline"],
+        }
 
 
 def main():
@@ -61,15 +104,11 @@ def main():
     prep_path = Path(args.prep_dir)
     manifest_path = REPO_ROOT / args.manifest if not Path(args.manifest).is_absolute() else Path(args.manifest)
 
-    if not manifest_path.exists():
-        print(f"ERROR: Manifest not found: {manifest_path}")
-        return
-
-    ds = Phase1Dataset(manifest_path, prep_path)
-    print(f"  Total Test Samples: {len(ds)} clips")
+    ds = InternalTestDataset(manifest_path, prep_path)
+    print(f"  Loaded Valid Test Tensors: {len(ds)} clips")
 
     if len(ds) == 0:
-        print("ERROR: No valid preprocessed feature tensors found for internal test clips.")
+        print("ERROR: No valid preprocessed feature tensors found for internal test clips. Check data/preprocessed/features/.")
         return
 
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
