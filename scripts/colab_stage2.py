@@ -384,29 +384,52 @@ def main():
             print("Please run scripts/colab_stage1.py first to create the bottleneck baseline weights.")
             return
 
-    # 7. Run Stage 2 Training (40 epochs)
+    import argparse
+    parser = argparse.ArgumentParser(description="Colab Stage 2 Training Runner")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size (default: auto-detect from GPU VRAM)")
+    parser.add_argument("--workers", type=int, default=None, help="DataLoader workers (default: auto-detect)")
+    parser.add_argument("--epochs", type=int, default=15, help="Number of Phase 2 epochs (default: 15)")
+    parser.add_argument("--lr", type=float, default=3e-6, help="Phase 2 backbone learning rate (default: 3e-6)")
+    parser.add_argument("--patience", type=int, default=7, help="Early stopping patience (default: 7)")
+    args, _ = parser.parse_known_args()
+
+    # 7. Run Stage 2 Training
     print("\n" + "=" * 60)
-    print("  RUNNING PHASE 2 TRAINING (BOTTLENECK_MODE FINE-TUNING) - 40 EPOCHS")
+    print(f"  RUNNING PHASE 2 TRAINING (BOTTLENECK_MODE FINE-TUNING) - {args.epochs} EPOCHS")
     print("=" * 60)
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Colab Pro GPU detection (A100 / V100 High-RAM optimization)
-    p2_batch   = 4
-    p2_workers = 0
-    if dev == "cuda":
-        gpu_name = torch.cuda.get_device_name(0)
-        gpu_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        print(f"\n[GPU DETECTED] {gpu_name} ({gpu_vram:.1f} GB VRAM)")
-        if gpu_vram > 15.0 or "A100" in gpu_name or "V100" in gpu_name:
-            p2_batch   = 16
-            p2_workers = 2
-            print("  [COLAB PRO OPTIMIZATION] Enabling High-Performance Batching (Batch=16, Workers=2) for ~2.5 mins/epoch!")
+    p2_batch   = args.batch_size
+    p2_workers = args.workers
+
+    if p2_batch is None or p2_workers is None:
+        if dev == "cuda":
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            print(f"\n[GPU DETECTED] {gpu_name} ({gpu_vram:.1f} GB VRAM)")
+            if gpu_vram > 35.0 or "A100" in gpu_name:
+                auto_b, auto_w = 24, 4
+                print(f"  [A100 HIGH-RAM ACCELERATION] Auto-configured Turbo Mode (Batch={auto_b}, Workers={auto_w})!")
+                print(f"  Estimated Training Speed: ~1.5 - 2.0 mins / epoch! (~25-30 mins for {args.epochs} epochs)")
+            elif gpu_vram > 15.0 or "V100" in gpu_name:
+                auto_b, auto_w = 16, 2
+                print(f"  [COLAB PRO V100/T4 HIGH] Auto-configured High-Performance Batching (Batch={auto_b}, Workers={auto_w})!")
+            else:
+                auto_b, auto_w = 4, 0
+                print("  [COLAB STANDARD OPTIMIZATION] Auto-configured Safe Batching (Batch=4, Workers=0) to prevent OOM!")
+            
+            p2_batch   = p2_batch if p2_batch is not None else auto_b
+            p2_workers = p2_workers if p2_workers is not None else auto_w
         else:
-            print("  [COLAB STANDARD OPTIMIZATION] Enabling Safe Batching (Batch=4, Workers=0) to prevent OOM!")
+            p2_batch   = p2_batch if p2_batch is not None else 4
+            p2_workers = p2_workers if p2_workers is not None else 0
+
+    print(f"  Active Settings: Batch Size = {p2_batch} | Workers = {p2_workers} | LR = {args.lr} | Epochs = {args.epochs}")
 
     # Configured for Deep Adaptation & Margin Separation (Top-4 layers unfrozen, LR=3e-6, 15 Epochs with live E2E val & margin loss)
-    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs 15 --phase2_batch {p2_batch} --phase2_lr 3e-6 --phase2_freeze_layers 4 --skip_phase1 --workers {p2_workers} --patience 7"
+    cmd_p2 = f"python scripts/train_full.py --device {dev} --epochs 50 --classifier_mode bottleneck --phase2_epochs {args.epochs} --phase2_batch {p2_batch} --phase2_lr {args.lr} --phase2_freeze_layers 4 --skip_phase1 --workers {p2_workers} --patience {args.patience}"
     ret_p2 = os.system(cmd_p2)
     if ret_p2 != 0:
         print(f"\n[ERROR] Stage 2 training failed with exit code {ret_p2}.")

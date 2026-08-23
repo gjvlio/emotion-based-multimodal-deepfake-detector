@@ -463,5 +463,113 @@ Below are the 7 foundational architectural systems, mathematical innovations, an
 * **Dynamic Checkpoint Key Inspection:** Automatically detects whether a loaded checkpoint contains Cross-Attention weights (`_has_cross_attn`). Routes Phase 1 models directly to trained bottleneck heads (4s benchmark speed) and Phase 2 models to full end-to-end transformer forward passes.
 
 ---
+
+## 22. Two-Tier Evaluation Methodology & Scientific Generalizability Audit
+
+To ensure maximum academic integrity, transparency, and statistical validity for the manuscript and thesis panel defense, DeepSentinel implements a strict **two-tier evaluation methodology**:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                             DEEPSENTINEL TWO-TIER BENCHMARK SUITE                              │
+├───────────────────────────────┬────────────────────────────────┬───────────────────────────────┤
+│ Evaluation Tier               │ Dataset & Partition            │ Scientific Research Claim     │
+├───────────────────────────────┼────────────────────────────────┼───────────────────────────────┤
+│ Tier 1: In-Domain Evaluation  │ 1,469 Internal Test Clips      │ "Speaker-Independent          │
+│                               │ (CREMA-D, MELD, MOSEI, Tracks) │ In-Domain Generalization"     │
+├───────────────────────────────┼────────────────────────────────┼───────────────────────────────┤
+│ Tier 2: Out-of-Domain Transf. │ FakeAVCeleb v1.2 (1,000 Clips: │ "Zero-Shot Cross-Dataset      │
+│                               │ 500 Real / 500 Fake Balanced)  │ Generalization & Robustness"  │
+└───────────────────────────────┴────────────────────────────────┴───────────────────────────────┘
+```
+
+### 22.1 Tier 1: In-Domain Speaker-Disjoint Evaluation (Chapter 4, Table 4.1)
+* **Goal:** Verify that the 299D Hybrid Bottleneck and Compact Bilinear Pooling learn genuine affective incongruency dynamics rather than memorizing actor identities.
+* **Guarantee:** **0% speaker overlap** across the 80% Train, 10% Validation, and 10% Internal Test partitions.
+
+### 22.2 Tier 2: Zero-Shot Cross-Dataset Transfer Benchmark (Chapter 4, Table 4.2)
+* **Goal:** Benchmark DeepSentinel against rival state-of-the-art architectures (ACE-Net Electronics 2025, Elpeltagy 2023, Khalid 2021) in real-world deployment conditions.
+* **Zero-Shot Invariant:** DeepSentinel has **0% exposure** (zero frames, zero audio waveforms, zero transcripts, and zero metadata rows) to FakeAVCeleb during Stage 1 or Stage 2 training.
+* **Balanced 50/50 Prior:** 500 Real / 500 Fake clips stratified with 40% hard compound fakes (`faceswap-wav2lip`, `fsgan-wav2lip`), 40% lip-sync fakes (`wav2lip`), and 20% single-modality fakes.
+
+### 22.3 Academic Claim Boundaries & Threat-to-Validity Audit (Chapter 5)
+1. **Methodological Rigor (Strengths):**
+   * **Zero Identity/Data Leakage:** Strict actor-independent hashing.
+   * **Paired Statistical Significance:** Evaluates the exact same 1,000 video files on both DeepSentinel and ACE-Net, using DeLong’s paired ROC test ($p < 0.05$) and 10,000-iteration Bootstrap 95% Confidence Intervals.
+2. **Threats to Validity & Known Limitations (Honest Disclosure):**
+   * **Generative Algorithm Scope:** The model demonstrates cross-dataset transfer across known facial-vocal forgery mechanisms (Faceswap, FSGAN, Wav2Lip, RTVC), but does not claim zero-shot coverage over unobserved generative paradigms (e.g., 2026 Diffusion video synthesis).
+   * **Demographic Diversity:** Training data is predominantly North American English; cross-ethnicity accent variance on international benchmarks is mediated via the DANN Domain Classifier.
+   * **Cross-Dataset Logit Calibration:** Zero-shot transfer causes an expected logit offset, reported transparently via both standard uncalibrated ($\tau = 0.50$) and calibrated Youden’s $J$ operating points ($\tau_J = 0.19$).
+
+---
+
+## 23. Theoretical Defense: Affective Grounding vs. Pixel Artifact Hunting
+
+### 23.1 The Paradigm Shift (Why 1st-Gen Detectors Fail)
+* **First-Generation Detectors (MesoNet, Xception, EfficientNet):** Chase low-level visual synthesis artifacts (pixel warping, blending boundary noise, high-frequency residuals).
+  * *The Failure Mode:* Video re-compression (WhatsApp, YouTube, TikTok) smears high-frequency pixel noise ($\text{AUC} < 0.55$), and emerging diffusion/transformer models synthesize photorealistic frames with zero blending artifacts.
+* **DeepSentinel Paradigm:** Grounds detection in **human behavioral, psychological, and physiological affect consistency**.
+  * Even a 4K photorealistic deepfake cannot easily fake the natural synchrony between vocal pitch, spoken linguistic semantics, and facial Action Unit (AU) dynamics.
+
+### 23.2 Information Density: 6D Calibrated Emotion vs. 256D Bilinear Manifold
+A critical panel defense question is: *"Why is the model named Emotion-Based if the emotion disparity vector is 6D and CBP is 256D?"*
+
+1. **High Semantic Density of $\boldsymbol{\Delta}$ (6D):**
+   * The 6 dimensions of $\boldsymbol{\Delta} = |\mathbf{p}_A - \mathbf{p}_B|$ are explicit, calibrated probability differences derived from supervised softmax heads over universal basic emotions (Neutral, Happy, Sad, Angry, Fear, Disgust).
+   * When an audio is angry ($\mathbf{p}_A[\text{angry}]=0.80$) and the face is smiling ($\mathbf{p}_B[\text{happy}]=0.85$), $\boldsymbol{\Delta}$ provides an unequivocal, high-gradient discrepancy signal.
+2. **The Gradient Flow Shapes the 256D Bilinear Manifold:**
+   * Backpropagation from $\mathcal{L}_{\text{emo}}$ flows directly into $Z_{at}$ and $Z_v$, structuring their latent geometry around emotional prosody and facial Action Units.
+   * Consequently, the 256D Compact Bilinear Pooling layer computes the **quadratic tensor product of emotion-structured representations** ($Z_{at} \otimes Z_v$).
+   * The 256D space captures **micro-temporal cross-modal synchronization**, while the 6D space captures **macro-level affective contradiction**.
+
+---
+
+## 24. Scope, Threat Model & Delimitations (Chapter 1, Section 1.5)
+
+* **Target Threat Model (Tampered Human Media):**
+  * Strictly designed for conversational and talking-head deepfakes where real human media is altered via:
+    1. **Identity Swap:** Faceswap / SimSwap (Face Emotion $\ne$ Audio Emotion).
+    2. **Expression Reenactment:** FSGAN / LivePortrait (Head Motion $\ne$ Speech Cadence).
+    3. **Voice Cloning:** RTVC / ElevenLabs (Cloned Acoustics $\ne$ Muscle AUs).
+    4. **Lip-Sync Synthesis:** Wav2Lip / SadTalker / MuseTalk (Mouth Motion $\ne$ Phonemes).
+* **Delimitation (What is Out of Scope):**
+  * Pure Text-to-Video generation of inanimate scenes, background landscapes, or non-human silent media (e.g. Sora scenery) lacks communicative audio-visual streams and is explicitly bounded as out of scope.
+
+---
+
+## 25. Multi-Task Pareto Optimization & Loss Dynamics
+
+### 25.1 Multi-Task Loss Formulation
+$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{fake}} + \lambda_{\text{emo}}\mathcal{L}_{\text{emo}} + \lambda_{\text{sarc}}\mathcal{L}_{\text{sarc}} + \lambda_{\text{domain}}\mathcal{L}_{\text{DANN}} + \lambda_{\text{margin}}\mathcal{L}_{\text{margin}}$$
+
+* **The $\lambda_{\text{emo}} = 0.2 \sim 0.3$ Sweet Spot:**
+  * Ensures the emotion heads act as strong regularizing inductive biases without competing with binary deepfake detection.
+  * Human inter-annotator agreement on spontaneous multi-party dialogue (MELD) is naturally $\sim 65\%–70\%$; published SOTA models reach $55\%–64\%$.
+  * DeepSentinel utilizes **continuous probability vectors**, meaning even a $50\%–55\%$ discrete emotion accuracy produces a robust, continuous $1.55\times$ disparity contrast on deepfakes.
+
+---
+
+## 26. Empirical Benchmark Summary (Verified Experimental Logs)
+
+### 26.1 In-Domain Internal Test Split (1,418 Valid Manifest Clips)
+* **Binary Deepfake Detection:** $100.00\%$ Accuracy, $1.0000$ AUC-ROC on static cached features (Phase 1 & Phase 2).
+* **Emotion Head A (Audio-Text):** $41.27\%$ Accuracy, $\text{F1} = 0.3726$ ($2.5\times$ above random chance).
+* **Emotion Head B (Visual Face):** $40.76\%$ Accuracy, $\text{F1} = 0.4014$ ($2.4\times$ above random chance).
+* **Affective Disparity $||\boldsymbol{\Delta}||$ Contrast:**
+  * Real Videos (Congruent): $||\boldsymbol{\Delta}|| = 0.3474$
+  * Fake Videos (Incongruent): $||\boldsymbol{\Delta}|| = 0.5377$
+  * **Disparity Contrast Ratio: $1.55\times$ higher on deepfakes (Statistically Significant Separation).**
+* **Sarcasm Detection (MUStARD):** $62.75\%$ Accuracy, $\text{AUC} = 0.6332$.
+
+### 26.2 Zero-Shot Cross-Dataset Benchmark (FakeAVCeleb v1.2, 1,000 Live MP4 Clips)
+* **Live Ingestion Engine:** Evaluated end-to-end directly from raw `.mp4` video files via GPU-accelerated FFmpeg, Whisper-Base ASR, and 8-keyframe ViT.
+* **Fake Recall at $\tau = 0.50$:** **`72.60%`** ($363 / 500$ fakes caught at Epoch 5).
+* **Compound Forgery Accuracy:**
+  * `fsgan-wav2lip`: **`88.07%`** ($96 / 109$ caught)
+  * `faceswap-wav2lip`: **`86.81%`** ($79 / 91$ caught)
+  * `wav2lip`: **`81.50%`** ($163 / 200$ caught)
+
+---
 **End of Master Context Document**
+
+
 
