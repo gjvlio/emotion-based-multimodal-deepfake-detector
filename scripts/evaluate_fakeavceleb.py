@@ -632,14 +632,6 @@ def per_method_breakdown(results: list[dict], youden_thresh: float = 0.5) -> Non
                 pass
         auc_str = f"{auc_m:.4f}" if auc_m is not None else "N/A"
         print(f"  {method:<22} {len(recs):>6}  {acc_50*100:>9.2f}%  {acc_cal*100:>9.2f}%  {auc_str:>8}")
-        try:
-            from sklearn.metrics import roc_auc_score
-            if len(set(labs)) == 2:
-                auc_m = roc_auc_score(labs, scrs)
-        except Exception:
-            pass
-        auc_str = f"{auc_m:.4f}" if auc_m is not None else "  N/A"
-        print(f"  {method:<25} {len(recs):>6}  {a:.4f}  {auc_str}")
 
 
 def ensure_preprocessed_features():
