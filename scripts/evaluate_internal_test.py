@@ -127,22 +127,34 @@ def main():
             all_scores.extend(scores)
             all_labels.extend(labs)
 
+    real_cnt = sum(1 for l in all_labels if l == 0)
+    fake_cnt = sum(1 for l in all_labels if l == 1)
+
     preds_50 = [1 if s >= 0.5 else 0 for s in all_scores]
 
     acc_50 = accuracy_score(all_labels, preds_50)
     prec, rec, f1, _ = precision_recall_fscore_support(all_labels, preds_50, average="binary", zero_division=0)
     auc = roc_auc_score(all_labels, all_scores) if len(set(all_labels)) == 2 else None
 
+    tp = sum(1 for p, l in zip(preds_50, all_labels) if p == 1 and l == 1)
+    fp = sum(1 for p, l in zip(preds_50, all_labels) if p == 1 and l == 0)
+    fn = sum(1 for p, l in zip(preds_50, all_labels) if p == 0 and l == 1)
+    tn = sum(1 for p, l in zip(preds_50, all_labels) if p == 0 and l == 0)
+
     print("\n" + "=" * 60)
     print("  RESULTS ON IN-DOMAIN INTERNAL TEST SPLIT")
     print("=" * 60)
-    print(f"  Clips Evaluated : {len(all_labels)}")
+    print(f"  Clips Evaluated : {len(all_labels)} (Real={real_cnt}, Fake={fake_cnt})")
     print(f"  Accuracy (0.50) : {acc_50 * 100:.2f}%")
     print(f"  Precision (0.50): {prec * 100:.2f}%")
     print(f"  Recall (0.50)   : {rec * 100:.2f}%")
+    print(f"  Specificity(0.5): {(tn / max(real_cnt, 1)) * 100:.2f}%")
     print(f"  F1-Score (0.50) : {f1:.4f}")
+    print(f"  TP/FP/FN/TN     : {tp}/{fp}/{fn}/{tn}")
     if auc is not None:
         print(f"  AUC-ROC         : {auc:.4f}")
+    else:
+        print("  AUC-ROC         : N/A (single class present in evaluated set)")
     print("=" * 60 + "\n")
 
 
