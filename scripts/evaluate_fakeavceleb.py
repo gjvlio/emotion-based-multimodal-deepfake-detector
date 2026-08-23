@@ -27,6 +27,14 @@ import os
 import sys
 from pathlib import Path
 
+os.environ["OPENCV_LOG_LEVEL"] = "OFF"
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"
+try:
+    import cv2
+    cv2.setLogLevel(0)
+except Exception:
+    pass
+
 import numpy as np
 import torch
 import torch.nn.functional as F
