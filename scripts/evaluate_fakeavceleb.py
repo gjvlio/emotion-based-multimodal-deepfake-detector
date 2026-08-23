@@ -124,12 +124,28 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
     else:
         print(f"  [Dataset] Discovered active FakeAVCeleb video root: {active_fav_roots[0]}")
 
-    print("  [Dataset] Building fast MP4 video hashmap index from disk...")
+    print("  [Dataset] Building collision-free MP4 video index from disk...")
     mp4_index = {}
-    for p in REPO_ROOT.glob("data/**/*.mp4"):
-        mp4_index[p.name] = p
-        mp4_index[f"{p.parent.name}/{p.name}"] = p
-    print(f"  [Dataset] Indexed {len(mp4_index):,} MP4 video files ready on local SSD.")
+    for root_dir in [REPO_ROOT / "data", Path("/content/thesis/data"), Path("/content")]:
+        if root_dir.exists():
+            for dirpath, _, filenames in os.walk(root_dir):
+                dp = Path(dirpath)
+                for fn in filenames:
+                    if fn.lower().endswith(".mp4"):
+                        p = dp / fn
+                        # Key by full path, relative path parts, and unique speaker/name pairs
+                        mp4_index[str(p).replace("\\", "/")] = p
+                        parts = p.parts
+                        if len(parts) >= 2:
+                            mp4_index[f"{parts[-2]}/{parts[-1]}"] = p
+                        if len(parts) >= 3:
+                            mp4_index[f"{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
+                        if len(parts) >= 4:
+                            mp4_index[f"{parts[-4]}/{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
+                        if len(parts) >= 5:
+                            mp4_index[f"{parts[-5]}/{parts[-4]}/{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
+
+    print(f"  [Dataset] Indexed {len(mp4_index):,} unique path permutations on local SSD.")
 
     with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
@@ -139,15 +155,19 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
             method   = row.get("method", "real").strip()
             clip_id  = row.get("clip_id", "").strip() or f"fav_{source}_{Path(filename).stem if filename else 'clip'}"
             race     = row.get("race",   "").strip()
-            rel_v_path = (row.get("rel_video_path") or row.get("video_path") or "").strip()
+            gender   = row.get("gender", "").strip()
+            rel_v_path = (row.get("rel_video_path") or row.get("video_path") or "").replace("\\", "/").strip()
 
             video_path = None
             if rel_v_path:
-                for base in [REPO_ROOT, FAV_ROOT, REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw"]:
+                # Direct check across all root paths
+                for base in [REPO_ROOT, FAV_ROOT, REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", REPO_ROOT / "data/FakeAVCeleb_v1.2", REPO_ROOT / "data/raw", Path("/content/thesis/data/raw/FakeAVCeleb_v1.2"), Path("/content/thesis/data/FakeAVCeleb_v1.2")]:
                     p = base / rel_v_path
                     if p.is_file():
                         video_path = p
                         break
+                if video_path is None:
+                    video_path = mp4_index.get(rel_v_path)
 
             # 1. Look up via active directory hierarchy
             if video_path is None and filename:
@@ -159,7 +179,7 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
 
             # 2. Fast hashmap index lookup
             if video_path is None and filename:
-                video_path = mp4_index.get(f"{source}/{filename}") or mp4_index.get(filename)
+                video_path = mp4_index.get(f"{source}/{filename}") or mp4_index.get(f"{cat}/{race}/{gender}/{source}/{filename}")
 
             # 3. Clip_id fallback extraction
             if video_path is None and clip_id:
@@ -167,7 +187,7 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                 if len(parts) >= 3:
                     spk = parts[1]
                     fname = f"{parts[2]}.mp4"
-                    video_path = mp4_index.get(f"{spk}/{fname}") or mp4_index.get(fname)
+                    video_path = mp4_index.get(f"{spk}/{fname}")
 
             z_at_p = REPO_ROOT / "data/preprocessed/features/z_at" / f"{clip_id}.pt"
             z_v_p  = REPO_ROOT / "data/preprocessed/features/z_v"  / f"{clip_id}.pt"
@@ -180,13 +200,13 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
             entry = {
                 "clip_id":    clip_id,
                 "video_path": str(video_path) if video_path is not None else "",
-                "fake_label": 0 if cat == REAL_TYPE else 1,
+                "fake_label": 0 if (cat == REAL_TYPE or method == "real" or str(row.get("fake_label")) == "0") else 1,
                 "method":     method,
                 "type":       cat,
                 "speaker_id": source,
                 "cached":     features_cached,
             }
-            if cat == REAL_TYPE:
+            if entry["fake_label"] == 0:
                 real_pool.append(entry)
             elif method in _HARD_METHODS:
                 fake_by_tier["hard"].append(entry)
@@ -197,6 +217,12 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
 
     if missing:
         log.warning(f"{missing} metadata rows skipped — video not found on disk")
+
+    # If loading from a fixed paired evaluation manifest (500/500), return all valid clips directly
+    if "500_500" in str(csv_file_to_use) or "eval" in str(csv_file_to_use):
+        all_manifest_clips = real_pool + fake_by_tier["hard"] + fake_by_tier["med"] + fake_by_tier["easy"]
+        print(f"  [Dataset] Loaded exact paired benchmark manifest: {len(all_manifest_clips)} clips ({len(real_pool)} Real / {len(all_manifest_clips)-len(real_pool)} Fake)")
+        return all_manifest_clips
 
     for pool in [real_pool, *fake_by_tier.values()]:
         rng.shuffle(pool)
@@ -872,8 +898,9 @@ def main():
     if args.save_csv:
         csv_path = Path(args.save_csv)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
+        keys = list(results[0].keys()) if results else ["clip_id", "fake_label", "method", "type", "score", "pred"]
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["clip_id", "fake_label", "method", "type", "score", "pred"])
+            writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(results)
         print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
