@@ -61,7 +61,7 @@ _MED_FRAC  = 0.40   # 40% wav2lip
 _EASY_FRAC = 0.20   # 20% single-modality
 
 
-def load_clips(n_real: int = 200, n_fake: int = 800, seed: int = 42, hard: bool = True, ignore_missing: bool = False) -> list[dict]:
+def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool = True, ignore_missing: bool = False) -> list[dict]:
     """
     Stratified random sample from meta_data.csv.
     hard=True: over-samples compound fakes (hardest for audio-visual mismatch detector).
@@ -267,32 +267,41 @@ class FakeAVCelebEvalDataset(Dataset):
         clip_id = c["clip_id"]
         video_path = c["video_path"]
         
-        # 1. Audio (Fast resampled WAV extraction)
+        # 1. Audio (Robust FFmpeg extraction + Wav2Vec2)
         wav_path = self.pipeline._wav_path(clip_id)
         try:
-            if not wav_path.exists():
-                wav, sr = torchaudio.load(video_path)
-                if wav.shape[0] > 1:
-                    wav = wav.mean(0, keepdim=True)
-                if sr != 16000:
-                    wav = torchaudio.functional.resample(wav, sr, 16000)
+            if not wav_path.exists() or wav_path.stat().st_size < 1000:
+                from src.preprocessing.audio import extract_audio_to_wav
                 wav_path.parent.mkdir(parents=True, exist_ok=True)
-                torchaudio.save(str(wav_path), wav, 16000)
-            else:
-                wav, sr = torchaudio.load(str(wav_path))
+                extract_audio_to_wav(video_path, wav_path)
+            
+            wav, sr = torchaudio.load(str(wav_path))
+            if wav.shape[0] > 1:
+                wav = wav.mean(0, keepdim=True)
+            if sr != 16000:
+                wav = torchaudio.functional.resample(wav, sr, 16000)
             
             audio_enc = self.wav2vec_proc(
                 wav.squeeze(0).numpy(), sampling_rate=16000, return_tensors="pt",
                 padding="max_length", max_length=80000, truncation=True
             )
             audio_values = audio_enc.input_values.squeeze(0)
-        except Exception:
+        except Exception as e:
             audio_values = torch.zeros(80000)
             
-        # 2. Text (Fast transcript check)
+        # 2. Text (Whisper ASR transcript + BERT)
         txt_path = self.pipeline._txt_path(clip_id)
         try:
-            text = txt_path.read_text(encoding="utf-8").strip() if txt_path.exists() else ""
+            if not txt_path.exists() and wav_path.exists():
+                from src.preprocessing.audio import transcribe
+                text = transcribe(wav_path, device="cuda" if torch.cuda.is_available() else "cpu")
+                txt_path.parent.mkdir(parents=True, exist_ok=True)
+                txt_path.write_text(text, encoding="utf-8")
+            elif txt_path.exists():
+                text = txt_path.read_text(encoding="utf-8").strip()
+            else:
+                text = ""
+
             bert_enc = self.bert_tok(
                 text, return_tensors="pt",
                 padding="max_length", max_length=128, truncation=True
@@ -682,7 +691,7 @@ def ensure_preprocessed_features():
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate DeepSentinel on FakeAVCeleb dataset")
-    parser.add_argument("--checkpoint", type=str, default="checkpoints/full/best_phase2_emotion_bilinear.pt")
+    parser.add_argument("--checkpoint", type=str, default="checkpoints/full/best_phase2_bottleneck.pt")
     parser.add_argument("--config",     type=str, default="configs/config.yaml")
     _default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device",     default=_default_device)
@@ -698,7 +707,7 @@ def main():
                         help="Disable hard method stratification (uniform random sample)")
     parser.add_argument("--save_csv",   default=None,
                         help="Save per-clip results (clip_id,fake_label,method,type,score,pred) to this CSV path")
-    parser.add_argument("--classifier_mode", type=str, default="baseline",
+    parser.add_argument("--classifier_mode", type=str, default="bottleneck",
                         choices=["baseline", "mismatch_only", "emotion_bilinear", "bottleneck", "high_dropout"])
     parser.add_argument("--cached_only", action="store_true",
                         help="Evaluate ONLY clips that have pre-extracted .pt feature tensors ready on disk (instant <2s run)")
@@ -764,15 +773,27 @@ def main():
 
     # ── Load model ─────────────────────────────────────────────────────────────
     _section("Loading trained model")
-    model = DeepfakeDetector(classifier_mode=args.classifier_mode).to(args.device)
     ckpt  = torch.load(ckpt_path, map_location=args.device, weights_only=True)
+    state_keys = ckpt["model_state"].keys()
+
+    # Automatically detect classifier mode from checkpoint weights
+    detected_mode = args.classifier_mode
+    if "bilinear_proj.weight" in state_keys or "proj_ln.weight" in state_keys:
+        detected_mode = "bottleneck"
+    elif "high_dropout" in state_keys:
+        detected_mode = "high_dropout"
+
+    if detected_mode != args.classifier_mode:
+        print(f"  [AUTO-DETECT] Checkpoint requires '{detected_mode}' mode. Overriding '{args.classifier_mode}'.")
+
+    model = DeepfakeDetector(classifier_mode=detected_mode).to(args.device)
     
     # Phase 2 checkpoints contain un-frozen backbones. Detect and load them dynamically.
     has_backbones = any(
         k.startswith("vit.") or k.startswith("_vit.") or
         k.startswith("wav2vec.") or k.startswith("wav2vec2.") or k.startswith("_wav2vec.") or
         k.startswith("bert.") or k.startswith("_bert.")
-        for k in ckpt["model_state"].keys()
+        for k in state_keys
     )
     if has_backbones and not args.force_features and not args.cached_only:
         print("  [HuggingFace] Detected Stage 2 backbone weights in checkpoint.")
@@ -785,9 +806,9 @@ def main():
         ensure_preprocessed_features()
         
     model.load_state_dict(ckpt["model_state"], strict=False)
-    model._has_cross_attn = any(k.startswith("cross_attn_") for k in ckpt["model_state"].keys())
+    model._has_cross_attn = any(k.startswith("cross_attn_") for k in state_keys)
     model.eval()
-    print(f"  Loaded epoch {ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss', '?')}")
+    print(f"  Loaded epoch {ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss', '?')}  mode={detected_mode}")
 
     # ── Load preprocessing pipeline ────────────────────────────────────────────
     _section("Initializing preprocessing pipeline")
