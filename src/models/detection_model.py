@@ -87,8 +87,12 @@ class DeepfakeDetector(nn.Module):
         dropout_heads: float = 0.3,
         dropout_cls:   float = 0.4,
         classifier_mode: str = "baseline",
+        proj_dim:      Optional[int] = None,
+        **kwargs,
     ):
         super().__init__()
+        if proj_dim is not None:
+            cbp_dim = proj_dim
         self._wav2vec_name = wav2vec_model
         self._bert_name    = bert_model
         self._vit_name     = vit_model
@@ -104,11 +108,11 @@ class DeepfakeDetector(nn.Module):
             fused_dim = n_emotions + 1
         elif classifier_mode == "emotion_bilinear":
             fused_dim = 36 + n_emotions + 1
-        elif self.classifier_mode == "bottleneck":
+        elif classifier_mode == "bottleneck":
             self.bilinear_proj = nn.Linear(cbp_dim, 256)
             self.proj_ln = nn.LayerNorm(256)
             fused_dim = 256 + 36 + n_emotions + 1
-        elif self.classifier_mode == "high_dropout":
+        elif classifier_mode == "high_dropout":
             self.high_dropout = nn.Dropout(0.85)
             fused_dim = cbp_dim + n_emotions + 1
         else:  # baseline

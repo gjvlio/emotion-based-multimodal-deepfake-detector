@@ -96,7 +96,7 @@ class Trainer:
             margin=margin,
             pos_weight=pos_weight,
         )
-        self.scaler       = GradScaler("cuda", enabled=self.fp16)
+        self.scaler       = GradScaler(self._amp_device, enabled=self.fp16)
         self.ckpt_dir     = Path(checkpoint_dir)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.tb           = TBWriter(log_dir)
@@ -145,13 +145,13 @@ class Trainer:
         global_step = 0
 
         for epoch in range(1, max_epochs + 1):
-            train_loss, train_components = self._train_epoch_cached(optimizer, epoch, global_step)
-            val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
+            train_loss, train_components = self._train_epoch_cached(optimizer, epoch, global_step, max_epochs=max_epochs)
+            val_loss, val_acc, sarc_acc, emo_a_acc, emo_b_acc, val_components = self._val_epoch_cached(epoch)
             scheduler.step(val_loss)
             current_lr = optimizer.param_groups[0]["lr"]
 
             self.tb.scalars("loss",     {"train": train_loss, "val": val_loss},     epoch)
-            self.tb.scalars("accuracy", {"val": val_acc, "sarcasm": sarc_acc},       epoch)
+            self.tb.scalars("accuracy", {"val": val_acc, "sarcasm": sarc_acc, "emo_a": emo_a_acc, "emo_b": emo_b_acc}, epoch)
 
             print(
                 f"\n[P1 Epoch {epoch:3d}/{max_epochs}]  LR={current_lr:.2e}\n"
@@ -166,7 +166,8 @@ class Trainer:
                 f"emo_b={val_components['emo_b']:.4f}  "
                 f"sarc={val_components['sarc']:.4f}  "
                 f"acc={val_acc:.4f}  "
-                f"sarc_acc={sarc_acc:.4f} (thresh={SARCASM_THRESHOLD})"
+                f"sarc_acc={sarc_acc:.4f}  "
+                f"emo_a_acc={emo_a_acc:.4f}  emo_b_acc={emo_b_acc:.4f} (thresh={SARCASM_THRESHOLD})"
             )
             log.info(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
 
@@ -209,7 +210,7 @@ class Trainer:
         print(f"  {'-'*52}\n")
         return total_norm
 
-    def _train_epoch_cached(self, optimizer, epoch: int, global_step: int):
+    def _train_epoch_cached(self, optimizer, epoch: int, global_step: int, max_epochs: int = 10):
         self.model.train()
         total_loss = 0.0
         comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
@@ -217,7 +218,7 @@ class Trainer:
         first_batch = (epoch == 1)
 
         import numpy as np
-        p_val = float(epoch) / 10.0
+        p_val = float(epoch) / max(float(max_epochs), 1.0)
         grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
 
         pbar = tqdm(self.train_loader, desc=f"P1 Train Ep{epoch}", unit="batch",
@@ -308,6 +309,8 @@ class Trainer:
         self.model.eval()
         total_loss, correct, total = 0.0, 0, 0
         sarc_correct, sarc_total = 0, 0
+        emo_a_correct, emo_a_total = 0, 0
+        emo_b_correct, emo_b_total = 0, 0
         comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
         n_batches = len(self.val_loader)
 
@@ -348,6 +351,19 @@ class Trainer:
                 correct += (preds == fl[valid_mask]).sum().item()
                 total   += valid_mask.sum().item()
 
+            # Emotion accuracy tracking
+            ae_mask = ae != -1
+            if ae_mask.any():
+                ae_preds = out.emotion_a[ae_mask].argmax(dim=-1)
+                emo_a_correct += (ae_preds == ae[ae_mask]).sum().item()
+                emo_a_total   += ae_mask.sum().item()
+
+            ve_mask = ve != -1
+            if ve_mask.any():
+                ve_preds = out.emotion_b[ve_mask].argmax(dim=-1)
+                emo_b_correct += (ve_preds == ve[ve_mask]).sum().item()
+                emo_b_total   += ve_mask.sum().item()
+
             # Only count MUStARD clips for sarcasm accuracy
             sarc_mask = sl != -1
             if sarc_mask.any():
@@ -357,10 +373,14 @@ class Trainer:
 
         for k in comp:
             comp[k] /= max(n_batches, 1)
+        emo_a_acc = emo_a_correct / max(emo_a_total, 1)
+        emo_b_acc = emo_b_correct / max(emo_b_total, 1)
         return (
             total_loss / max(n_batches, 1),
             correct / max(total, 1),
             sarc_correct / max(sarc_total, 1),
+            emo_a_acc,
+            emo_b_acc,
             comp,
         )
 
@@ -414,7 +434,7 @@ class Trainer:
             torch.cuda.empty_cache()
 
         for epoch in range(1, max_epochs + 1):
-            train_loss = self._train_epoch_e2e(optimizer, epoch)
+            train_loss = self._train_epoch_e2e(optimizer, epoch, max_epochs=max_epochs)
             if hasattr(self, "val_loader_p2") and self.val_loader_p2 is not None:
                 val_loss, val_acc, sarc_acc, emo_a_acc, emo_b_acc, val_components = self._val_epoch_e2e(epoch)
             else:
@@ -442,13 +462,13 @@ class Trainer:
 
         print(f"\n  Phase 2 complete. Best val_loss={stopper.best:.4f}")
 
-    def _train_epoch_e2e(self, optimizer, epoch: int) -> float:
+    def _train_epoch_e2e(self, optimizer, epoch: int, max_epochs: int = 15) -> float:
         """End-to-end epoch — requires DataLoader returning raw audio/text/frames with DANN and Supervised Margin Loss."""
         self.model.train()
         total_loss = 0.0
 
         import numpy as np
-        p_val = float(epoch) / 15.0
+        p_val = float(epoch) / max(float(max_epochs), 1.0)
         grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
 
         pbar = tqdm(self.train_loader, desc=f"P2 Train Ep{epoch}", unit="batch",
@@ -624,14 +644,18 @@ class Trainer:
         local_ckpt = self.ckpt_dir / filename
         
         # Check Google Drive for latest / best checkpoint
-        drive_latest = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / filename
-        drive_base   = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / filename
+        drive_sources = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode") / filename,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / filename,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/bottleneck_mode") / filename,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / filename,
+        ]
 
         drive_source = None
-        if drive_latest.exists():
-            drive_source = drive_latest
-        elif drive_base.exists():
-            drive_source = drive_base
+        for cand in drive_sources:
+            if cand.exists():
+                drive_source = cand
+                break
 
         if drive_source is not None:
             try:

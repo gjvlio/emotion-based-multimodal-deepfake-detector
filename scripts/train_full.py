@@ -388,15 +388,17 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
             cid = r["clip_id"]
             vp  = r["video_path"]
             fake_label = r["fake_label"]
-            audio_cid = cid
-            audio_vp  = vp
+            audio_cid  = cid
+            audio_vp   = vp
+            aud_emo    = r["audio_emotion"]
 
             # Audio-Visual Swap Augmentation (40% probability for real clips)
             if fake_label == 0 and random.random() < 0.4:
-                other_idx = random.randint(0, len(self._recs) - 1)
-                other_r = self._recs[other_idx]
-                audio_cid = other_r["clip_id"]
-                audio_vp  = other_r["video_path"]
+                other_idx  = random.randint(0, len(self._recs) - 1)
+                other_r    = self._recs[other_idx]
+                audio_cid  = other_r["clip_id"]
+                audio_vp   = other_r["video_path"]
+                aud_emo    = other_r["audio_emotion"]  # Pass ground-truth emotion of swapped audio!
                 fake_label = 1.0  # Synthetic mismatch fake
 
             dom_idx = DOMAIN_MAP.get(r["source_pipeline"].lower(), 4)
@@ -406,7 +408,7 @@ def build_datasets(cfg: Config, seed: int = 42, no_sarcasm: bool = False):
                 "attention_mask": self._bert_inputs(audio_cid)[1],
                 "keyframe_pixels":self._keyframe_pixels(cid, vp),
                 "fake_label":     torch.tensor(fake_label,         dtype=torch.long),
-                "audio_emotion":  torch.tensor(r["audio_emotion"], dtype=torch.long),
+                "audio_emotion":  torch.tensor(aud_emo,            dtype=torch.long),
                 "visual_emotion": torch.tensor(r["visual_emotion"],dtype=torch.long),
                 "sarcasm_label":  torch.tensor(r["sarcasm_label"], dtype=torch.long),
                 "domain_label":   torch.tensor(dom_idx,            dtype=torch.long),

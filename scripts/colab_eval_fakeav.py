@@ -5,7 +5,7 @@ Standalone FakeAVCeleb Evaluation Script for Google Colab.
 Loads fine-tuned Phase 2 or Phase 1 checkpoints and runs end-to-end evaluation with:
 - Automatic extraction of fakeavceleb.zip from Google Drive to local SSD
 - Robust checkpoint validation
-- Temperature Scaling (T=0.5)
+- Unscaled calibrated sigmoid probabilities
 - Youden's J Threshold Calibration
 - Balanced 500 Real / 500 Fake sampling
 """

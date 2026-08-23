@@ -34,6 +34,19 @@ log = logging.getLogger(__name__)
 
 # ── Emotion label maps ────────────────────────────────────────────────────────
 
+DOMAIN_MAP: Dict[str, int] = {
+    "crema_d": 0,
+    "meld": 1,
+    "meld_real": 1,
+    "mosei": 2,
+    "mosei_real": 2,
+    "mustard": 3,
+    "track1": 4,
+    "track2": 4,
+    "track3": 4,
+    "synthetic": 4,
+}
+
 EMOTION_TO_IDX: Dict[str, int] = {
     # CREMA-D codes
     "NEU": 0, "neutral": 0,

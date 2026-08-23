@@ -89,7 +89,8 @@ def evaluate_model(model_mode: str, device: str, records: list[dict]) -> dict:
     # Initialize model in the correct mode
     model = DeepfakeDetector(classifier_mode=model_mode).to(device)
     state = torch.load(ckpt_path, map_location=device, weights_only=True)
-    model.load_state_dict(state["model_state"])
+    model.load_state_dict(state["model_state"], strict=False)
+    model._has_cross_attn = any(k.startswith("cross_attn_") for k in state["model_state"].keys())
     model.eval()
 
     ds = SimpleTestDataset(records)
