@@ -824,22 +824,11 @@ def main():
 
     model = DeepfakeDetector(classifier_mode=detected_mode).to(args.device)
     
-    # Phase 2 checkpoints contain un-frozen backbones. Detect and load them dynamically.
-    has_backbones = any(
-        k.startswith("vit.") or k.startswith("_vit.") or
-        k.startswith("wav2vec.") or k.startswith("wav2vec2.") or k.startswith("_wav2vec.") or
-        k.startswith("bert.") or k.startswith("_bert.")
-        for k in state_keys
-    )
-    if has_backbones and not args.force_features and not args.cached_only:
-        print("  [HuggingFace] Detected Stage 2 backbone weights in checkpoint.")
-        print("  [HuggingFace] Loading ViT, Wav2Vec2, and BERT backbones into GPU VRAM...")
+    if not args.force_features and not args.cached_only:
+        print("  [HuggingFace] Loading ViT, Wav2Vec2, and BERT backbones into GPU VRAM for fast batched evaluation...")
         model.load_backbones()
         model.to(args.device)
-        print("  [HuggingFace] Backbone weights loaded successfully.")
-    else:
-        # We need the feature cache for Phase 1 / offline cached evaluation
-        ensure_preprocessed_features()
+        print("  [HuggingFace] Backbone weights ready.")
         
     model.load_state_dict(ckpt["model_state"], strict=False)
     model._has_cross_attn = any(k.startswith("cross_attn_") for k in state_keys)
