@@ -890,7 +890,8 @@ def main():
         csv_path = Path(args.save_csv)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["clip_id", "fake_label", "method", "type", "score", "pred_50", "pred_cal"])
+            fieldnames = ["clip_id", "fake_label", "method", "type", "score", "pred", "pred_50", "pred_cal"]
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(results)
         print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
