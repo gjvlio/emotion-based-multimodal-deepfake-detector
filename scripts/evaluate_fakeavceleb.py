@@ -560,9 +560,11 @@ def compute_metrics(results: list[dict]) -> dict:
             youden_bal_acc = (sens + spec) / 2.0
             youden_tp, youden_fp, youden_fn, youden_tn = c_tp, c_fp, c_fn, c_tn
 
-    # Update predictions with optimal Youden's J calibrated threshold
+    # Save dual predictions: standard (0.50) and calibrated (Youden)
     for r in results:
-        r["pred"] = 1 if r["score"] >= youden_thresh else 0
+        r["pred_50"] = 1 if r["score"] >= 0.50 else 0
+        r["pred_cal"] = 1 if r["score"] >= youden_thresh else 0
+        r["pred"] = r["pred_cal"]  # Default saved pred is calibrated
 
     auc = None
     try:
@@ -604,20 +606,32 @@ def compute_metrics(results: list[dict]) -> dict:
     )
 
 
-def per_method_breakdown(results: list[dict]) -> None:
+def per_method_breakdown(results: list[dict], youden_thresh: float = 0.5) -> None:
     from collections import defaultdict
     by_method: dict[str, list] = defaultdict(list)
     for r in results:
         by_method[r["method"]].append(r)
 
-    print(f"\n  {'Method':<25} {'N':>6}  {'Acc':>6}  {'AUC':>6}")
-    print(f"  {'-'*50}")
+    print(f"\n  {'Method':<22} {'N':>6}  {'Acc(0.50)':>10}  {'Acc(Cal)':>10}  {'AUC':>8}")
+    print(f"  {'-'*62}")
     for method, recs in sorted(by_method.items()):
-        labs  = [r["fake_label"] for r in recs]
-        scrs  = [r["score"]      for r in recs]
-        preds = [r["pred"]       for r in recs]
-        a     = sum(p == l for p, l in zip(preds, labs)) / max(len(recs), 1)
+        labs      = [r["fake_label"] for r in recs]
+        scrs      = [r["score"]      for r in recs]
+        preds_50  = [1 if s >= 0.50 else 0 for s in scrs]
+        preds_cal = [1 if s >= youden_thresh else 0 for s in scrs]
+        
+        acc_50  = sum(p == l for p, l in zip(preds_50, labs)) / max(len(recs), 1)
+        acc_cal = sum(p == l for p, l in zip(preds_cal, labs)) / max(len(recs), 1)
+        
         auc_m = None
+        if len(set(labs)) == 2:
+            try:
+                from sklearn.metrics import roc_auc_score
+                auc_m = roc_auc_score(labs, scrs)
+            except Exception:
+                pass
+        auc_str = f"{auc_m:.4f}" if auc_m is not None else "N/A"
+        print(f"  {method:<22} {len(recs):>6}  {acc_50*100:>9.2f}%  {acc_cal*100:>9.2f}%  {auc_str:>8}")
         try:
             from sklearn.metrics import roc_auc_score
             if len(set(labs)) == 2:
@@ -868,18 +882,18 @@ def main():
         print("  No results - check video paths and checkpoint.")
         return
 
+    # ── Metrics ────────────────────────────────────────────────────────────────
+    _section("Results")
+    m = compute_metrics(results)
+
     if args.save_csv:
         csv_path = Path(args.save_csv)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["clip_id", "fake_label", "method", "type", "score", "pred"])
+            writer = csv.DictWriter(f, fieldnames=["clip_id", "fake_label", "method", "type", "score", "pred_50", "pred_cal"])
             writer.writeheader()
             writer.writerows(results)
         print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
-
-    # ── Metrics ────────────────────────────────────────────────────────────────
-    _section("Results")
-    m = compute_metrics(results)
 
     print(f"  Clips evaluated        : {m['total']}")
     print(f"  --- Standard Metrics (tau = 0.50) ---")
@@ -913,7 +927,7 @@ def main():
         print("  AUC-ROC          : N/A (need both classes in evaluated set)")
 
     _section("Per-method breakdown")
-    per_method_breakdown(results)
+    per_method_breakdown(results, youden_thresh=m.get('youden_thresh', 0.5))
 
     print(f"\n  NOTE: Smoke checkpoint trained on ~1k clips. Full dataset will yield higher AUC.")
     print(f"  Rival comparison requires DeLong's test — run evaluation notebook for full stats.\n")
