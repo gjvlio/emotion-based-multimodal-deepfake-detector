@@ -866,6 +866,8 @@ def main():
                         help="DataLoader worker subprocesses (default: 0 for direct CUDA)")
     parser.add_argument("--threshold", type=float, default=0.65,
                         help="Classification decision threshold (default: 0.65 calibrated)")
+    parser.add_argument("--manifest", type=str, default=None,
+                        help="Path to specific held-out CSV manifest (e.g. fakeavceleb_heldout_unseen_test.csv)")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -918,7 +920,16 @@ def main():
 
     # ── Load clips ─────────────────────────────────────────────────────────────
     _section("Sampling FakeAVCeleb clips")
-    clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard)
+    if args.manifest and Path(args.manifest).exists():
+        print(f"  [MANIFEST] Loading strictly held-out test manifest: {args.manifest}")
+        clips = []
+        with open(args.manifest, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row["fake_label"] = int(row["fake_label"])
+                clips.append(row)
+    else:
+        clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard)
     real_n = sum(1 for c in clips if c["fake_label"] == 0)
     fake_n = sum(1 for c in clips if c["fake_label"] == 1)
     print(f"  Sampled      : {len(clips)} clips")
