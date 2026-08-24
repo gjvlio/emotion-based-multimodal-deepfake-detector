@@ -912,6 +912,28 @@ def main():
             writer.writerows(results)
         print(f"  Per-clip results saved -> {csv_path}  ({len(results)} rows)")
 
+    # ── Automatic Google Drive Backup ──────────────────────────────────────────
+    drive_base_candidates = [
+        Path("/content/drive/MyDrive/THESIS_MOTHERFILE"),
+        Path("/content/drive/MyDrive"),
+    ]
+    for d_base in drive_base_candidates:
+        if d_base.exists():
+            for sub in ["eval_results", "logs", "checkpoints"]:
+                d_dir = d_base / sub
+                d_dir.mkdir(parents=True, exist_ok=True)
+                d_csv = d_dir / "fakeavceleb_eval_predictions.csv"
+                try:
+                    with open(d_csv, "w", newline="", encoding="utf-8") as f:
+                        fieldnames = ["clip_id", "fake_label", "method", "type", "score", "pred", "pred_50", "pred_cal"]
+                        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                        writer.writeheader()
+                        writer.writerows(results)
+                    print(f"  [GOOGLE DRIVE BACKUP] Saved per-video evaluation CSV -> {d_csv}")
+                except Exception as e:
+                    print(f"  [WARNING] Could not save to {d_csv}: {e}")
+            break
+
     print(f"  Clips evaluated        : {m['total']}")
     print(f"\n  --- 1. Standard Policy (tau = 0.50) ---")
     print(f"  Accuracy (0.50)        : {m['acc_50']:.4f}")
