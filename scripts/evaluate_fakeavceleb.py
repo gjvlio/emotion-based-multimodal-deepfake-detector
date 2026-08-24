@@ -426,16 +426,30 @@ class FakeAVCelebEvalDataset(Dataset):
                     raise ValueError("No frames read from video")
 
                 face_results = detect_and_align_faces(frames, detector="haar", confidence_threshold=0.5)
-                if not face_results:
-                    face_results = [(f, sharpness_score(f)) for f in frames]
-                    
-                crops = [r[0] for r in face_results]
-                scores = [r[1] for r in face_results]
-                keyframes = select_keyframes(crops, scores, k=8)
+                
+                # Robust human crop: if face detection misses, center-crop the actual frame (NEVER black zeros)
+                valid_crops = []
+                scores = []
+                for idx_f, f in enumerate(frames):
+                    if idx_f < len(face_results) and face_results[idx_f] is not None:
+                        valid_crops.append(face_results[idx_f][0])
+                        scores.append(face_results[idx_f][1])
+                    else:
+                        # Take high-quality center crop of the actual video frame
+                        h, w = f.shape[:2]
+                        side = min(h, w)
+                        y1 = max(0, (h - side) // 4)  # Bias slightly upper-center for human face
+                        x1 = max(0, (w - side) // 2)
+                        crop = cv2.resize(f[y1:y1+side, x1:x1+side], (224, 224), interpolation=cv2.INTER_AREA)
+                        valid_crops.append(crop)
+                        scores.append(sharpness_score(crop))
+
+                keyframes = select_keyframes(valid_crops, scores, k=8)
                 pils = frames_to_pil(keyframes, size=224)
                 
+                # Temporal forward-fill from previous valid frame
                 while len(pils) < 8:
-                    pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224)))
+                    pils.append(pils[-1].copy() if pils else Image.new('RGB', (224, 224), color=(128, 128, 128)))
                     
                 grid_img = Image.new('RGB', (224 * 8, 224))
                 for idx_kf, img in enumerate(pils):
@@ -445,7 +459,10 @@ class FakeAVCelebEvalDataset(Dataset):
             vit_enc = self.vit_proc(pils, return_tensors="pt")
             keyframe_pixels = vit_enc.pixel_values.squeeze(0)
         except Exception:
-            keyframe_pixels = torch.zeros(8, 3, 224, 224)
+            # Fallback: neutral mid-gray neutral image instead of black void to avoid artificial feature spike
+            pils = [Image.new('RGB', (224, 224), color=(128, 128, 128)) for _ in range(8)]
+            vit_enc = self.vit_proc(pils, return_tensors="pt")
+            keyframe_pixels = vit_enc.pixel_values.squeeze(0)
             
         return {
             "clip_id": clip_id,
