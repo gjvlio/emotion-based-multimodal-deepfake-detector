@@ -613,7 +613,9 @@ def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
     youden_acc, youden_sens, youden_spec, youden_bal_acc = acc_50, rec_50, spec_50, bal_acc_50
     youden_tp, youden_fp, youden_fn, youden_tn = tp_50, fp_50, fn_50, tn_50
 
-    zero_fp_thresh, zero_fp_sens = None, 0.0
+    best_eer_diff = float("inf")
+    eer_thresh    = 0.5
+    eer_acc, eer_sens, eer_spec, eer_prec, eer_f1 = acc_50, rec_50, spec_50, prec_50, f1_50
 
     for th in range(1, 100):
         th_val = th / 100.0
@@ -649,6 +651,16 @@ def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
             youden_spec   = spec
             youden_bal_acc = (sens + spec) / 2.0
             youden_tp, youden_fp, youden_fn, youden_tn = c_tp, c_fp, c_fn, c_tn
+
+        # Equal Sensitivity-Specificity (EER) calculation: |sens - spec| -> min
+        if abs(sens - spec) < best_eer_diff and (c_tp + c_tn) > 0:
+            best_eer_diff = abs(sens - spec)
+            eer_thresh    = th_val
+            eer_acc       = (c_tp + c_tn) / max(len(results), 1)
+            eer_sens      = sens
+            eer_spec      = spec
+            eer_prec      = c_prec
+            eer_f1        = c_f1
 
     # Save dual predictions: standard (0.50) and calibrated (user_thresh)
     for r in results:
@@ -695,6 +707,7 @@ def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
         youden_thresh=youden_thresh, best_youden_j=best_youden_j, youden_acc=youden_acc,
         youden_sens=youden_sens, youden_spec=youden_spec, youden_bal_acc=youden_bal_acc,
         youden_tp=youden_tp, youden_fp=youden_fp, youden_fn=youden_fn, youden_tn=youden_tn,
+        eer_thresh=eer_thresh, eer_acc=eer_acc, eer_sens=eer_sens, eer_spec=eer_spec, eer_prec=eer_prec, eer_f1=eer_f1,
         zero_fp_thresh=zero_fp_thresh, zero_fp_sens=zero_fp_sens,
         auc=auc, auc_lo=auc_lo, auc_hi=auc_hi,
     )

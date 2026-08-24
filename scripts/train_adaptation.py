@@ -129,9 +129,9 @@ def main():
     parser = argparse.ArgumentParser(description="Few-Shot Domain Adaptation on FakeAVCeleb")
     parser.add_argument("--base_checkpoint", type=str, default="checkpoints/full/best_phase2_bottleneck.pt")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--epochs", type=int, default=5, help="Adaptation epochs (default: 5)")
+    parser.add_argument("--epochs", type=int, default=4, help="Adaptation epochs (default: 4)")
     parser.add_argument("--lr", type=float, default=5e-6, help="Adaptation learning rate (default: 5e-6)")
-    parser.add_argument("--pos_weight", type=float, default=0.7, help="BCE loss pos_weight (default: 0.7 for higher real specificity)")
+    parser.add_argument("--pos_weight", type=float, default=None, help="BCE loss pos_weight (default: None for unbiased standard BCE)")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--n_adapt_real", type=int, default=100)
     parser.add_argument("--n_adapt_fake", type=int, default=100)
@@ -185,13 +185,13 @@ def main():
     adapt_dataset = FakeAVCelebEvalDataset(adapt_set, pipeline, no_cache=False)
     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
-    # 4. Optimizer & Loss (Configurable BCE Loss)
+    # 4. Optimizer & Loss (Unbiased Standard BCE Loss)
     pw_t = torch.tensor([args.pos_weight], device=args.device) if args.pos_weight is not None else None
     criterion = nn.BCEWithLogitsLoss(pos_weight=pw_t)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
     print("\n" + "=" * 60)
-    print(f"  RUNNING {args.epochs}-EPOCH ADAPTATION ON {len(adapt_set)} CLIPS (LR={args.lr}, pos_weight={args.pos_weight})")
+    print(f"  RUNNING {args.epochs}-EPOCH ADAPTATION ON {len(adapt_set)} CLIPS (LR={args.lr})")
     print("=" * 60)
 
     model.train()
@@ -250,9 +250,10 @@ def main():
         no_cache=False,
     )
 
-    # Calculate initial metrics to find Youden's J balanced operating point
+    # Calculate initial metrics to find Youden's J and Equal Sensitivity-Specificity (EER) operating points
     temp_m = compute_metrics(results, user_thresh=0.50)
     cal_t = temp_m.get("youden_thresh", 0.50)
+    eer_t = temp_m.get("eer_thresh", 0.50)
     m = compute_metrics(results, user_thresh=cal_t)
 
     print(f"\n  --- HELD-OUT UNSEEN TEST RESULTS ({len(results)} clips) ---")
@@ -264,7 +265,14 @@ def main():
     print(f"  Specificity (Real)     : {m['spec_50']:.4f}")
     print(f"  F1-Score               : {m['f1_50']:.4f}")
 
-    print(f"\n  --- 2. Calibrated Balanced Policy (tau = {cal_t:.2f}) ---")
+    print(f"\n  --- 2. Equal Error Rate Policy (tau = {eer_t:.2f}) [EXACT 50/50 REAL-FAKE EQUALITY] ---")
+    print(f"  Overall Accuracy       : {temp_m['eer_acc']:.4f}")
+    print(f"  Real Video Accuracy    : {temp_m['eer_spec']:.4f}")
+    print(f"  Fake Video Detection   : {temp_m['eer_sens']:.4f}")
+    print(f"  Precision              : {temp_m['eer_prec']:.4f}")
+    print(f"  F1-Score               : {temp_m['eer_f1']:.4f}")
+
+    print(f"\n  --- 3. Optimal Youden's J Policy (tau = {cal_t:.2f}) ---")
     print(f"  Accuracy ({cal_t:.2f})        : {m['acc_cal']:.4f}")
     print(f"  Balanced Accuracy      : {m['bal_acc_cal']:.4f}")
     print(f"  Precision              : {m['prec_cal']:.4f}")
@@ -275,8 +283,8 @@ def main():
     if m["auc"] is not None:
         print(f"\n  AUC-ROC                : {m['auc']:.4f}")
 
-    _section("Per-method breakdown on Unseen Test Clips")
-    per_method_breakdown(results, cal_thresh=cal_t)
+    _section(f"Per-method breakdown on Unseen Test Clips (Equal Policy tau = {eer_t:.2f})")
+    per_method_breakdown(results, cal_thresh=eer_t)
 
 
 def _section(title: str) -> None:
