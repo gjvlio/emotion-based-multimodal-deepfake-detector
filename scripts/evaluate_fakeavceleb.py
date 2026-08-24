@@ -85,7 +85,20 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
     fake_by_tier: dict[str, list[dict]] = {"hard": [], "med": [], "easy": []}
     missing = 0
 
+    drive_meta = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/datasets/meta_data.csv")
+    drive_fav_zip = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/datasets/fakeavceleb.zip")
+    
+    if drive_meta.exists():
+        dest_meta = REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv"
+        dest_meta.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            import shutil
+            shutil.copy2(drive_meta, dest_meta)
+        except Exception:
+            pass
+
     meta_candidates = [
+        drive_meta,
         FAV_ROOT / "meta_data.csv",
         REPO_ROOT / "data/raw/FakeAVCeleb_v1.2/meta_data.csv",
         REPO_ROOT / "data/FakeAVCeleb_v1.2/meta_data.csv",
@@ -149,16 +162,17 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
 
     # Auto-extract from Google Drive if 0 MP4 files found on local SSD
     if len(mp4_index) == 0:
-        print("  [Dataset] Local SSD has 0 MP4 files. Searching Google Drive for fakeavceleb.zip...")
+        print("  [Dataset] Local SSD has 0 MP4 files. Checking Google Drive THESIS_MOTHERFILE/datasets ...")
         import glob, subprocess
-        drive_zips = glob.glob("/content/drive/**/fakeavceleb.zip", recursive=True) + \
-                     glob.glob("/content/drive/**/FakeAVCeleb.zip", recursive=True)
+        drive_zips = ([drive_fav_zip] if drive_fav_zip.exists() else []) + \
+                     glob.glob("/content/drive/**/datasets/fakeavceleb.zip", recursive=True) + \
+                     glob.glob("/content/drive/**/fakeavceleb.zip", recursive=True)
         if drive_zips:
             zip_p = drive_zips[0]
             print(f"  [Dataset] Found {zip_p}. Extracting automatically to /content/thesis/data/raw ...")
             dest = Path("/content/thesis/data/raw")
             dest.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["unzip", "-q", "-o", zip_p, "-d", str(dest)], check=False)
+            subprocess.run(["unzip", "-q", "-o", str(zip_p), "-d", str(dest)], check=False)
             
             # Also copy meta_data.csv if available
             meta_csvs = glob.glob("/content/drive/**/meta_data.csv", recursive=True)
