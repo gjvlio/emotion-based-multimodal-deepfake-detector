@@ -58,8 +58,8 @@ def create_disjoint_splits(n_adapt_real: int = 100, n_adapt_fake: int = 100,
     """
     from scripts.evaluate_fakeavceleb import load_clips
     
-    # Load pool of all valid clips
-    all_clips = load_clips(n_real=2000, n_fake=4000, seed=seed, hard=True)
+    # Load pool of all valid clips across the entire FakeAVCeleb dataset
+    all_clips = load_clips(n_real=5000, n_fake=25000, seed=seed, hard=False)
     if not all_clips:
         raise RuntimeError("No FakeAVCeleb clips found. Check dataset paths.")
 
@@ -100,7 +100,11 @@ def create_disjoint_splits(n_adapt_real: int = 100, n_adapt_fake: int = 100,
     # Strictly enforce 1:1 balance in the adaptation training set to eliminate skew
     n_adapt = min(len(adapt_reals), len(adapt_fakes), n_adapt_real, n_adapt_fake)
     adapt_set = adapt_reals[:n_adapt] + adapt_fakes[:n_adapt]
-    test_set = test_reals[:n_test_real] + test_fakes[:n_test_fake]
+    
+    # Take all remaining unseen clips if n_test <= 0, else slice up to requested count
+    t_reals = test_reals[:n_test_real] if (n_test_real and n_test_real > 0) else test_reals
+    t_fakes = test_fakes[:n_test_fake] if (n_test_fake and n_test_fake > 0) else test_fakes
+    test_set = t_reals + t_fakes
 
     rng.shuffle(adapt_set)
     rng.shuffle(test_set)
@@ -151,15 +155,23 @@ def main():
         seed=args.seed
     )
 
-    # Save test manifest for evaluate_fakeavceleb.py
+    # Save test and adapt manifests for evaluate_fakeavceleb.py
     out_dir = REPO_ROOT / "data/eval_results"
     out_dir.mkdir(parents=True, exist_ok=True)
+    
     test_manifest_path = out_dir / "fakeavceleb_heldout_unseen_test.csv"
     with open(test_manifest_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["clip_id", "video_path", "fake_label", "method", "type", "speaker_id", "cached"])
         writer.writeheader()
         writer.writerows(test_set)
     print(f"  Saved held-out test manifest -> {test_manifest_path}")
+
+    adapt_manifest_path = out_dir / "fakeavceleb_adapt_set.csv"
+    with open(adapt_manifest_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["clip_id", "video_path", "fake_label", "method", "type", "speaker_id", "cached"])
+        writer.writeheader()
+        writer.writerows(adapt_set)
+    print(f"  Saved adaptation training manifest -> {adapt_manifest_path}")
 
     # 2. Load Base Model
     ckpt_path = Path(args.base_checkpoint)
@@ -185,13 +197,14 @@ def main():
     adapt_dataset = FakeAVCelebEvalDataset(adapt_set, pipeline, no_cache=False)
     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
-    # 4. Optimizer & Loss (Unbiased Standard BCE Loss)
+    # 4. Optimizer, Scheduler & Multi-Task Contrastive Loss
     pw_t = torch.tensor([args.pos_weight], device=args.device) if args.pos_weight is not None else None
     criterion = nn.BCEWithLogitsLoss(pos_weight=pw_t)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
     print("\n" + "=" * 60)
-    print(f"  RUNNING {args.epochs}-EPOCH ADAPTATION ON {len(adapt_set)} CLIPS (LR={args.lr})")
+    print(f"  RUNNING {args.epochs}-EPOCH ADAPTATION ON {len(adapt_set)} CLIPS (LR={args.lr} -> 1e-6, Margin Separation=1.5)")
     print("=" * 60)
 
     model.train()
@@ -207,15 +220,28 @@ def main():
 
             optimizer.zero_grad()
             out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
-            loss = criterion(out.logit.squeeze(1), labels)
+            bce_loss = criterion(out.logit.squeeze(1), labels)
+
+            # Supervised Margin Separation: actively push Real and Fake distributions apart
+            f_mask = (labels == 1)
+            r_mask = (labels == 0)
+            if f_mask.any() and r_mask.any():
+                mean_fake = out.logit.squeeze(1)[f_mask].mean()
+                mean_real = out.logit.squeeze(1)[r_mask].mean()
+                margin_loss = torch.clamp(1.5 - (mean_fake - mean_real), min=0.0)
+            else:
+                margin_loss = out.logit.new_zeros(1).squeeze()
+
+            loss = bce_loss + 0.20 * margin_loss
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item() * len(labels)
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            pbar.set_postfix({"loss": f"{loss.item():.4f}", "lr": f"{scheduler.get_last_lr()[0]:.2e}"})
 
+        scheduler.step()
         avg_loss = total_loss / len(adapt_set)
-        print(f"  Epoch {epoch:02d}/{args.epochs:02d} — Adaptation Loss: {avg_loss:.4f}")
+        print(f"  Epoch {epoch:02d}/{args.epochs:02d} — Adaptation Loss: {avg_loss:.4f} (LR: {scheduler.get_last_lr()[0]:.2e})")
 
     # 5. Save Adapted Checkpoint
     adapted_ckpt_path = REPO_ROOT / "checkpoints/full/best_phase2_adapted.pt"

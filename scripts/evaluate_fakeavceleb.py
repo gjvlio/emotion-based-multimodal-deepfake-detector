@@ -930,11 +930,22 @@ def main():
                 clips.append(row)
     else:
         clips = load_clips(args.n_real, args.n_fake, seed=args.seed, hard=hard)
+        # Automatic Data Leakage Shield: Filter out any clips used in adaptation training
+        adapt_manifest = REPO_ROOT / "data/eval_results/fakeavceleb_adapt_set.csv"
+        if adapt_manifest.exists():
+            with open(adapt_manifest, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                exclude_ids = {row["clip_id"] for row in reader}
+                exclude_spks = {row.get("speaker_id", "") for row in reader if row.get("speaker_id")}
+            orig_len = len(clips)
+            clips = [c for c in clips if c["clip_id"] not in exclude_ids and c.get("speaker_id") not in exclude_spks]
+            print(f"  [DATA LEAKAGE SHIELD] Automatically excluded {orig_len - len(clips)} adaptation clips/speakers!")
+
     real_n = sum(1 for c in clips if c["fake_label"] == 0)
     fake_n = sum(1 for c in clips if c["fake_label"] == 1)
-    print(f"  Sampled      : {len(clips)} clips")
-    print(f"    Real       : {real_n}")
-    print(f"    Fake       : {fake_n}")
+    print(f"  Strictly Unseen Clips: {len(clips)} clips")
+    print(f"    Real               : {real_n}")
+    print(f"    Fake               : {fake_n}")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     _section("Loading trained model")
