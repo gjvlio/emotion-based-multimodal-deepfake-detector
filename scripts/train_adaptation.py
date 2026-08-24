@@ -97,7 +97,9 @@ def create_disjoint_splits(n_adapt_real: int = 100, n_adapt_fake: int = 100,
     rng.shuffle(test_reals)
     rng.shuffle(test_fakes)
 
-    adapt_set = adapt_reals[:n_adapt_real] + adapt_fakes[:n_adapt_fake]
+    # Strictly enforce 1:1 balance in the adaptation training set to eliminate skew
+    n_adapt = min(len(adapt_reals), len(adapt_fakes), n_adapt_real, n_adapt_fake)
+    adapt_set = adapt_reals[:n_adapt] + adapt_fakes[:n_adapt]
     test_set = test_reals[:n_test_real] + test_fakes[:n_test_fake]
 
     rng.shuffle(adapt_set)
@@ -248,19 +250,33 @@ def main():
         no_cache=False,
     )
 
-    m = compute_metrics(results, user_thresh=0.50)
+    # Calculate initial metrics to find Youden's J balanced operating point
+    temp_m = compute_metrics(results, user_thresh=0.50)
+    cal_t = temp_m.get("youden_thresh", 0.50)
+    m = compute_metrics(results, user_thresh=cal_t)
+
     print(f"\n  --- HELD-OUT UNSEEN TEST RESULTS ({len(results)} clips) ---")
+    print(f"\n  --- 1. Standard Policy (tau = 0.50) ---")
     print(f"  Accuracy (0.50)        : {m['acc_50']:.4f}")
     print(f"  Balanced Accuracy      : {m['bal_acc_50']:.4f}")
     print(f"  Precision              : {m['prec_50']:.4f}")
     print(f"  Recall (Sensitivity)   : {m['rec_50']:.4f}")
-    print(f"  Specificity            : {m['spec_50']:.4f}")
+    print(f"  Specificity (Real)     : {m['spec_50']:.4f}")
     print(f"  F1-Score               : {m['f1_50']:.4f}")
+
+    print(f"\n  --- 2. Calibrated Balanced Policy (tau = {cal_t:.2f}) ---")
+    print(f"  Accuracy ({cal_t:.2f})        : {m['acc_cal']:.4f}")
+    print(f"  Balanced Accuracy      : {m['bal_acc_cal']:.4f}")
+    print(f"  Precision              : {m['prec_cal']:.4f}")
+    print(f"  Recall (Sensitivity)   : {m['rec_cal']:.4f}")
+    print(f"  Specificity (Real)     : {m['spec_cal']:.4f}")
+    print(f"  F1-Score               : {m['f1_cal']:.4f}")
+
     if m["auc"] is not None:
-        print(f"  AUC-ROC                : {m['auc']:.4f}")
+        print(f"\n  AUC-ROC                : {m['auc']:.4f}")
 
     _section("Per-method breakdown on Unseen Test Clips")
-    per_method_breakdown(results, cal_thresh=0.50)
+    per_method_breakdown(results, cal_thresh=cal_t)
 
 
 def _section(title: str) -> None:
