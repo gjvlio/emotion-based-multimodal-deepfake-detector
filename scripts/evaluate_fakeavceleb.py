@@ -250,16 +250,17 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                 missing += 1
                 continue
 
+            is_real = (cat == REAL_TYPE or "realvideo-realaudio" in cat.lower() or method.lower() == "real" or cat.lower() == "real")
             entry = {
                 "clip_id":    clip_id,
                 "video_path": str(video_path) if video_path is not None else "",
-                "fake_label": 0 if cat == REAL_TYPE else 1,
-                "method":     method,
+                "fake_label": 0 if is_real else 1,
+                "method":     method if not is_real else "real",
                 "type":       cat,
                 "speaker_id": source,
                 "cached":     features_cached,
             }
-            if cat == REAL_TYPE:
+            if is_real:
                 real_pool.append(entry)
             elif method in _HARD_METHODS:
                 fake_by_tier["hard"].append(entry)
