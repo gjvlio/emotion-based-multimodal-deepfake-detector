@@ -19,6 +19,14 @@ import os
 import sys
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"
+
+try:
+    import cv2
+    cv2.setLogLevel(0)
+except Exception:
+    pass
 
 import csv
 import logging

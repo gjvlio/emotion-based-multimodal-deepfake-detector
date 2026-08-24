@@ -19,6 +19,16 @@ import logging
 import os
 import random
 import sys
+
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"
+os.environ["OPENCV_VIDEOIO_DEBUG"] = "0"
+
+try:
+    import cv2
+    cv2.setLogLevel(0)
+except Exception:
+    pass
 from collections import defaultdict
 from pathlib import Path
 
@@ -117,8 +127,9 @@ def main():
     parser = argparse.ArgumentParser(description="Few-Shot Domain Adaptation on FakeAVCeleb")
     parser.add_argument("--base_checkpoint", type=str, default="checkpoints/full/best_phase2_bottleneck.pt")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--epochs", type=int, default=3, help="Adaptation epochs (default: 3)")
+    parser.add_argument("--epochs", type=int, default=5, help="Adaptation epochs (default: 5)")
     parser.add_argument("--lr", type=float, default=5e-6, help="Adaptation learning rate (default: 5e-6)")
+    parser.add_argument("--pos_weight", type=float, default=0.7, help="BCE loss pos_weight (default: 0.7 for higher real specificity)")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--n_adapt_real", type=int, default=100)
     parser.add_argument("--n_adapt_fake", type=int, default=100)
@@ -172,12 +183,13 @@ def main():
     adapt_dataset = FakeAVCelebEvalDataset(adapt_set, pipeline, no_cache=False)
     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
-    # 4. Optimizer & Loss (Balanced BCE + Contrastive Margin)
-    criterion = nn.BCEWithLogitsLoss()
+    # 4. Optimizer & Loss (Configurable BCE Loss)
+    pw_t = torch.tensor([args.pos_weight], device=args.device) if args.pos_weight is not None else None
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pw_t)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
     print("\n" + "=" * 60)
-    print(f"  RUNNING 3-EPOCH ADAPTATION ON {len(adapt_set)} CLIPS (LR={args.lr})")
+    print(f"  RUNNING {args.epochs}-EPOCH ADAPTATION ON {len(adapt_set)} CLIPS (LR={args.lr}, pos_weight={args.pos_weight})")
     print("=" * 60)
 
     model.train()
