@@ -146,6 +146,47 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
                             mp4_index[f"{parts[-2]}/{parts[-1]}"] = p
                         if len(parts) >= 3:
                             mp4_index[f"{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
+
+    # Auto-extract from Google Drive if 0 MP4 files found on local SSD
+    if len(mp4_index) == 0:
+        print("  [Dataset] Local SSD has 0 MP4 files. Searching Google Drive for fakeavceleb.zip...")
+        import glob, subprocess
+        drive_zips = glob.glob("/content/drive/**/fakeavceleb.zip", recursive=True) + \
+                     glob.glob("/content/drive/**/FakeAVCeleb.zip", recursive=True)
+        if drive_zips:
+            zip_p = drive_zips[0]
+            print(f"  [Dataset] Found {zip_p}. Extracting automatically to /content/thesis/data/raw ...")
+            dest = Path("/content/thesis/data/raw")
+            dest.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["unzip", "-q", "-o", zip_p, "-d", str(dest)], check=False)
+            
+            # Also copy meta_data.csv if available
+            meta_csvs = glob.glob("/content/drive/**/meta_data.csv", recursive=True)
+            if meta_csvs:
+                meta_dest = dest / "FakeAVCeleb_v1.2"
+                meta_dest.mkdir(parents=True, exist_ok=True)
+                import shutil
+                try:
+                    shutil.copy2(meta_csvs[0], meta_dest / "meta_data.csv")
+                except Exception:
+                    pass
+
+            for base in [REPO_ROOT / "data/raw", REPO_ROOT / "data", Path("/content/thesis/data/raw"), Path("/content/thesis/data")]:
+                if base.exists():
+                    for dp, dirnames, fns in os.walk(base):
+                        if "drive" in dp.lower() or ".git" in dp.lower():
+                            dirnames.clear()
+                            continue
+                        for fn in fns:
+                            if fn.lower().endswith(".mp4"):
+                                p = Path(dp) / fn
+                                mp4_index[p.name] = p
+                                parts = p.parts
+                                if len(parts) >= 2:
+                                    mp4_index[f"{parts[-2]}/{parts[-1]}"] = p
+                                if len(parts) >= 3:
+                                    mp4_index[f"{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
+
     print(f"  [Dataset] Indexed {len(mp4_index):,} MP4 video files ready on local SSD.")
 
     with open(csv_file_to_use, newline="", encoding="utf-8", errors="replace") as f:
@@ -839,7 +880,19 @@ def main():
 
     # ── Load model ─────────────────────────────────────────────────────────────
     _section("Loading trained model")
-    ckpt  = torch.load(ckpt_path, map_location=args.device, weights_only=True)
+    try:
+        ckpt = torch.load(ckpt_path, map_location=args.device, weights_only=True)
+    except Exception as err:
+        print(f"  [CKPT REPAIR] Checkpoint at {ckpt_path} read failed ({err}).")
+        if drive_source and drive_source.exists():
+            import shutil
+            print(f"  [CKPT REPAIR] Fetching fresh copy from Drive: {drive_source} -> {ckpt_path}")
+            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(drive_source, ckpt_path)
+            ckpt = torch.load(ckpt_path, map_location=args.device, weights_only=True)
+            print(f"  [CKPT REPAIR] Restored cleanly from Google Drive!")
+        else:
+            raise err
     state_keys = ckpt["model_state"].keys()
 
     # Automatically detect classifier mode from checkpoint weights
