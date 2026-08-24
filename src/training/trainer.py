@@ -75,7 +75,9 @@ class Trainer:
         lambda_domain:  float      = 0.1,
         lambda_margin:  float      = 0.2,
         margin:         float      = 1.5,
-        pos_weight:     float | None = 1.3835,
+        pos_weight:     float | None = 1.0,
+        use_focal:      bool       = True,
+        focal_gamma:    float      = 2.0,
         device:         str        = "cuda" if torch.cuda.is_available() else "cpu",
         ckpt_suffix:    str        = "",
     ):
@@ -95,6 +97,8 @@ class Trainer:
             lambda_margin=lambda_margin,
             margin=margin,
             pos_weight=pos_weight,
+            use_focal=use_focal,
+            focal_gamma=focal_gamma,
         )
         self.scaler       = GradScaler(self._amp_device, enabled=self.fp16)
         self.ckpt_dir     = Path(checkpoint_dir)

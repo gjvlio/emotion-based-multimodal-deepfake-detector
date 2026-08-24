@@ -39,7 +39,9 @@ class MultiTaskLoss(nn.Module):
         lambda_domain: float = 0.1,
         lambda_margin: float = 0.2,
         margin: float = 1.5,
-        pos_weight: float | None = 1.3835,
+        pos_weight: float | None = 1.0,
+        use_focal: bool = True,
+        focal_gamma: float = 2.0,
     ):
         super().__init__()
         self.lambda_a       = lambda_a
@@ -48,10 +50,12 @@ class MultiTaskLoss(nn.Module):
         self.lambda_domain  = lambda_domain
         self.lambda_margin  = lambda_margin
         self.margin         = margin
-        self._pw      = pos_weight
-        self._bce     = nn.BCEWithLogitsLoss()
-        self._ce      = nn.CrossEntropyLoss(ignore_index=-1)
-        self._bce_sum = nn.BCEWithLogitsLoss(reduction="sum")
+        self._pw            = pos_weight
+        self.use_focal      = use_focal
+        self.focal_gamma    = focal_gamma
+        self._bce           = nn.BCEWithLogitsLoss()
+        self._ce            = nn.CrossEntropyLoss(ignore_index=-1)
+        self._bce_sum       = nn.BCEWithLogitsLoss(reduction="sum")
 
     def forward(
         self,
@@ -66,12 +70,21 @@ class MultiTaskLoss(nn.Module):
         domain_logits:        torch.Tensor | None = None,# (B, 5)  dataset domain logits (DANN)
         domain_label:         torch.Tensor | None = None,# (B,)    0-4 dataset domain index
     ) -> LossOutput:
-        # Detection BCE — mask MUStARD clips (fake_label=-1, no ground truth)
+        # Detection Loss (Focal Loss or BCE) — mask MUStARD clips (fake_label=-1, no ground truth)
         fake_mask = fake_label != -1
         if fake_mask.any():
             logits = fake_logit.squeeze(1)[fake_mask]
             labels = fake_label[fake_mask].float()
-            if self._pw is not None:
+            if self.use_focal:
+                p = torch.sigmoid(logits)
+                p_t = p * labels + (1.0 - p) * (1.0 - labels)
+                ce = F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
+                focal_weight = (1.0 - p_t) ** self.focal_gamma
+                if self._pw is not None and self._pw != 1.0:
+                    pw_weight = labels * self._pw + (1.0 - labels)
+                    focal_weight = focal_weight * pw_weight
+                l_bce = (focal_weight * ce).mean()
+            elif self._pw is not None:
                 pw = torch.tensor([self._pw], device=logits.device, dtype=logits.dtype)
                 l_bce = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=pw)
             else:

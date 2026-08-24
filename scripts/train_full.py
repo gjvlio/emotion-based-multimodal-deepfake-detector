@@ -568,7 +568,9 @@ def main():
     parser.add_argument("--batch_size",           type=int,   default=32)
     parser.add_argument("--lr",                   type=float, default=1e-3)
     parser.add_argument("--patience",             type=int,   default=7)
-    parser.add_argument("--pos_weight",           type=float, default=None)
+    parser.add_argument("--pos_weight",           type=float, default=1.0)
+    parser.add_argument("--use_focal",            action="store_true", default=True)
+    parser.add_argument("--focal_gamma",          type=float, default=2.0)
     parser.add_argument("--no_sarcasm",           action="store_true")
     parser.add_argument("--no_phase2",            action="store_true")
     parser.add_argument("--skip_phase1",          action="store_true")
@@ -602,9 +604,9 @@ def main():
         no_sarcasm=args.no_sarcasm,
     )
 
-    effective_pw = args.pos_weight if args.pos_weight is not None else stats["auto_pos_weight"]
-    pw_src = "manual override" if args.pos_weight is not None else f"auto = {stats['real_train']}/{stats['fake_train']} = n_real/n_fake"
-    print(f"  pos_weight: {effective_pw:.4f}  ({pw_src})")
+    effective_pw = args.pos_weight if args.pos_weight is not None else 1.0
+    pw_src = "manual override" if args.pos_weight is not None else "balanced = 1.0"
+    print(f"  pos_weight: {effective_pw:.4f}  ({pw_src}) | Focal Loss: {args.use_focal} (gamma={args.focal_gamma})")
 
     _section("Dataset split summary")
     print(f"  Total clips          : {stats['total']}")
@@ -655,6 +657,8 @@ def main():
         lambda_b       = 0.1,
         lambda_sarcasm = 0.05,
         pos_weight     = effective_pw,
+        use_focal      = args.use_focal,
+        focal_gamma    = args.focal_gamma,
         device         = args.device,
         ckpt_suffix    = args.classifier_mode,
     )
