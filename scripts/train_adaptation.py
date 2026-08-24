@@ -167,8 +167,7 @@ def main():
 
     # 3. Setup Adaptation Dataset & Loader
     from scripts.evaluate_fakeavceleb import FakeAVCelebEvalDataset
-    cfg = Config()
-    pipeline = PreprocessingPipeline(cfg)
+    pipeline = PreprocessingPipeline(cache_dir="data/preprocessed")
 
     adapt_dataset = FakeAVCelebEvalDataset(adapt_set, pipeline, no_cache=False)
     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
