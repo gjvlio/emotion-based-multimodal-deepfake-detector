@@ -617,6 +617,8 @@ def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
     eer_thresh    = 0.5
     eer_acc, eer_sens, eer_spec, eer_prec, eer_f1 = acc_50, rec_50, spec_50, prec_50, f1_50
 
+    zero_fp_thresh, zero_fp_sens = None, 0.0
+
     for th in range(1, 100):
         th_val = th / 100.0
         p_th = (np.array(scores) >= th_val).astype(int)
