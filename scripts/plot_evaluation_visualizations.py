@@ -228,6 +228,20 @@ def plot_all(csv_path: Path, output_dir: Path):
             shutil.copy2(f, drive_eval / f.name)
         print(f"  [GOOGLE DRIVE BACKUP] Synced all 5 figures to {drive_eval}")
 
+    # Display directly in Google Colab / Jupyter notebook output if in IPython
+    try:
+        from IPython.display import display, Image as IPImage
+        print("\n" + "=" * 60)
+        print("  DISPLAYING MASTER EVALUATION FIGURES IN COLAB")
+        print("=" * 60)
+        display(IPImage(filename=str(dash_out)))
+        display(IPImage(filename=str(cm_out)))
+        display(IPImage(filename=str(bar_out)))
+        display(IPImage(filename=str(roc_out)))
+        display(IPImage(filename=str(dist_out)))
+    except Exception:
+        pass
+
 
 def main():
     parser = argparse.ArgumentParser(description="Generate visual evaluation figures from CSV")
