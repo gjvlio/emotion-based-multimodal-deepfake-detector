@@ -915,22 +915,20 @@ def main():
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
+    drive_base    = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / ckpt_path.name
+    drive_latest  = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / ckpt_path.name
     drive_mode_p2 = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase2_bottleneck.pt")
     drive_mode_p1 = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode/best_phase1_bottleneck.pt")
-    drive_latest  = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / ckpt_path.name
-    drive_base    = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / ckpt_path.name
     
     drive_source = None
-    if ckpt_path.name == "best_phase2_bottleneck.pt" and drive_mode_p2.exists():
+    if drive_base.exists():
+        drive_source = drive_base
+    elif drive_latest.exists():
+        drive_source = drive_latest
+    elif ckpt_path.name == "best_phase2_bottleneck.pt" and drive_mode_p2.exists():
         drive_source = drive_mode_p2
     elif ckpt_path.name == "best_phase1_bottleneck.pt" and drive_mode_p1.exists():
         drive_source = drive_mode_p1
-    elif drive_mode_p2.exists():
-        drive_source = drive_mode_p2
-    elif drive_latest.exists():
-        drive_source = drive_latest
-    elif drive_base.exists():
-        drive_source = drive_base
 
     # Only fetch from Drive if local checkpoint is missing or 0-byte corrupted
     if (not ckpt_path.exists() or ckpt_path.stat().st_size < 1000000) and drive_source is not None and drive_source.exists():
