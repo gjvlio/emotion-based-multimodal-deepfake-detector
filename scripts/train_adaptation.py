@@ -173,6 +173,13 @@ def main():
         writer.writerows(adapt_set)
     print(f"  Saved adaptation training manifest -> {adapt_manifest_path}")
 
+    drive_eval = Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results")
+    if drive_eval.exists():
+        import shutil
+        shutil.copy2(test_manifest_path, drive_eval / "fakeavceleb_heldout_unseen_test.csv")
+        shutil.copy2(adapt_manifest_path, drive_eval / "fakeavceleb_adapt_set.csv")
+        print(f"  [GOOGLE DRIVE BACKUP] Saved test & adapt manifests -> {drive_eval}")
+
     # 2. Load Base Model
     ckpt_path = Path(args.base_checkpoint)
     if not ckpt_path.exists():

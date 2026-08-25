@@ -272,6 +272,37 @@ def load_clips(n_real: int = 500, n_fake: int = 500, seed: int = 42, hard: bool 
     if missing:
         log.warning(f"{missing} metadata rows skipped — video not found on disk")
 
+    # ── Strict Data Leakage Shield: Filter out any adaptation training clips/speakers ──
+    adapt_manifest_candidates = [
+        REPO_ROOT / "data/eval_results/fakeavceleb_adapt_set.csv",
+        Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_adapt_set.csv"),
+        Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/fakeavceleb_adapt_set.csv"),
+        Path("/content/thesis/data/eval_results/fakeavceleb_adapt_set.csv"),
+    ]
+    exclude_ids = set()
+    exclude_spks = set()
+    for am in adapt_manifest_candidates:
+        if am.exists():
+            try:
+                with open(am, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row.get("clip_id"):
+                            exclude_ids.add(row["clip_id"])
+                        if row.get("speaker_id"):
+                            exclude_spks.add(row["speaker_id"])
+                print(f"  [DATA LEAKAGE SHIELD] Loaded {len(exclude_ids)} adaptation training clips to strictly EXCLUDE from evaluation.")
+                break
+            except Exception:
+                pass
+
+    if exclude_ids or exclude_spks:
+        orig_r = len(real_pool)
+        real_pool = [c for c in real_pool if c["clip_id"] not in exclude_ids and c.get("speaker_id") not in exclude_spks]
+        for k in fake_by_tier:
+            fake_by_tier[k] = [c for c in fake_by_tier[k] if c["clip_id"] not in exclude_ids and c.get("speaker_id") not in exclude_spks]
+        print(f"  [DATA LEAKAGE SHIELD] Filtered adaptation clips from pool. Unseen Reals pool: {len(real_pool)} (excluded {orig_r - len(real_pool)}).")
+
     for pool in [real_pool, *fake_by_tier.values()]:
         rng.shuffle(pool)
 
@@ -496,6 +527,13 @@ def run_inference(
 
     all_cached = all(c.get("cached", False) for c in clips) and not no_cache
     if model._backbones_loaded and not force_features and not cached_only:
+        # T4 GPU Auto-Optimization: prevent OOM on 15GB T4 GPUs
+        if device.startswith("cuda"):
+            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if total_vram_gb < 20 and batch_size > 16:
+                print(f"  [T4 GPU MEMORY GUARD] Total VRAM is {total_vram_gb:.1f} GB. Auto-scaling batch_size -> 16 to maximize throughput without OOM.")
+                batch_size = 16
+
         dataset = FakeAVCelebEvalDataset(clips, pipeline, no_cache=no_cache)
         loader = DataLoader(
             dataset,
@@ -505,13 +543,13 @@ def run_inference(
         )
         
         pbar = tqdm(loader, desc="Evaluating", unit="batch", dynamic_ncols=True)
-        for batch in pbar:
-            audio_values    = batch["audio_values"].to(device)
-            input_ids       = batch["input_ids"].to(device)
-            attention_mask  = batch["attention_mask"].to(device)
-            keyframe_pixels = batch["keyframe_pixels"].to(device)
+        for b_idx, batch in enumerate(pbar):
+            audio_values    = batch["audio_values"].to(device, non_blocking=True)
+            input_ids       = batch["input_ids"].to(device, non_blocking=True)
+            attention_mask  = batch["attention_mask"].to(device, non_blocking=True)
+            keyframe_pixels = batch["keyframe_pixels"].to(device, non_blocking=True)
             
-            with torch.no_grad():
+            with torch.inference_mode():
                 out = model(audio_values, input_ids, attention_mask, keyframe_pixels)
                 scores = torch.sigmoid(out.logit).squeeze(1).cpu().tolist()
                 
@@ -526,6 +564,12 @@ def run_inference(
                     "score":      score,
                     "pred":       pred,
                 })
+
+            # Periodic memory reclamation to prevent fragmentation
+            if (b_idx + 1) % 25 == 0 and device.startswith("cuda"):
+                torch.cuda.empty_cache()
+                import gc
+                gc.collect()
     else:
         # Load precomputed feature vectors from cache (runs in ~1 second)
         pbar = tqdm(clips, desc="Evaluating (from cached features)", unit="clip", dynamic_ncols=True)
