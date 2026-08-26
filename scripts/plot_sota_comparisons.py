@@ -247,12 +247,19 @@ def plot_comparative_figures(models_data: dict, out_dir: Path):
         color = COLORS.get(name, "#6b7280")
         offset = (i - n_models / 2 + 0.5) * width_m
         rects = ax.bar(x_m + offset, accs, width_m, label=name, color=color, edgecolor="black", linewidth=0.6, alpha=0.9)
+        for r, acc in zip(rects, accs):
+            h = r.get_height()
+            label_text = f"{acc:.0f}%" if acc > 0 else "0%"
+            y_pos = max(h, 2.0)
+            ax.annotate(label_text, xy=(r.get_x() + r.get_width() / 2, y_pos),
+                        xytext=(0, 2), textcoords="offset points", ha="center", va="bottom",
+                        fontsize=7, fontweight="bold", color="#1e293b" if acc > 0 else "#dc2626")
 
     ax.set_ylabel("Classification Accuracy (%)", fontweight="bold", fontsize=12)
     ax.set_title("Per-Manipulation Stress Breakdown Across All Detectors", fontweight="bold", fontsize=13, pad=12)
     ax.set_xticks(x_m)
     ax.set_xticklabels(sorted_methods, fontweight="bold", fontsize=10, rotation=15)
-    ax.set_ylim(0, 115)
+    ax.set_ylim(0, 120)
     ax.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#cbd5e1", fontsize=9)
 
     fig3_path = out_dir / "comparative_method_breakdown.png"
@@ -282,12 +289,15 @@ def plot_comparative_figures(models_data: dict, out_dir: Path):
         m = data["metrics"]
         vals = [m["bal_acc"], m["spec"], m["rec"], m["auc"] * 100.0]
         offset = (i - n_models / 2 + 0.5) * width
-        ax2.bar(x + offset, vals, width, label=name, color=COLORS.get(name, "#6b7280"), alpha=0.9)
+        rects2 = ax2.bar(x + offset, vals, width, label=name, color=COLORS.get(name, "#6b7280"), alpha=0.9)
+        for r, val in zip(rects2, vals):
+            ax2.annotate(f"{val:.0f}%", xy=(r.get_x() + r.get_width() / 2, max(val, 2.0)),
+                         xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=7, fontweight="bold")
     ax2.set_xticks(x)
     ax2.set_xticklabels(metrics_names, fontsize=9, fontweight="bold")
     ax2.set_title("(B) Key Performance Metrics", fontweight="bold")
     ax2.set_ylabel("Score (%)")
-    ax2.set_ylim(0, 110)
+    ax2.set_ylim(0, 120)
     ax2.legend(loc="upper left", fontsize=8)
 
     # Subplot 3: Method Breakdown
@@ -297,12 +307,16 @@ def plot_comparative_figures(models_data: dict, out_dir: Path):
             matching = [r for r in data["clips"].values() if r["method"] == meth]
             accs.append(sum(r["pred"] == r["fake_label"] for r in matching) / max(len(matching), 1) * 100.0)
         offset = (i - n_models / 2 + 0.5) * width_m
-        ax3.bar(x_m + offset, accs, width_m, label=name, color=COLORS.get(name, "#6b7280"), alpha=0.9)
+        rects3 = ax3.bar(x_m + offset, accs, width_m, label=name, color=COLORS.get(name, "#6b7280"), alpha=0.9)
+        for r, acc in zip(rects3, accs):
+            ax3.annotate(f"{acc:.0f}%", xy=(r.get_x() + r.get_width() / 2, max(acc, 2.0)),
+                         xytext=(0, 2), textcoords="offset points", ha="center", va="bottom",
+                         fontsize=6, fontweight="bold", color="#1e293b" if acc > 0 else "#dc2626")
     ax3.set_xticks(x_m)
     ax3.set_xticklabels(sorted_methods, fontsize=8, fontweight="bold", rotation=20)
     ax3.set_title("(C) Category-Wise Manipulation Accuracy", fontweight="bold")
     ax3.set_ylabel("Accuracy (%)")
-    ax3.set_ylim(0, 110)
+    ax3.set_ylim(0, 120)
 
     # Subplot 4: F1 & Matthews Correlation Comparison
     mcc_f1_names = ["F1-Score", "Matthews Correlation (MCC)"]
