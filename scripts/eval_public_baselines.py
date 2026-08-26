@@ -245,18 +245,59 @@ class BaselineEvalDataset(Dataset):
         }
 
 
+def resolve_manifest_path(manifest_arg: str, split_arg: str | None = None) -> Path:
+    target = split_arg if split_arg else manifest_arg
+    candidates = []
+    
+    if target in ["5000", "350+4650", "large"]:
+        candidates = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            Path("/content/drive/MyDrive/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+4650.csv",
+            REPO_ROOT / "data/manifests/fakeavceleb_eval_350_4650.csv",
+        ]
+    elif target in ["700", "350+350", "balanced"]:
+        candidates = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
+            Path("/content/drive/MyDrive/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
+            REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+350.csv",
+            REPO_ROOT / "data/manifests/fakeavceleb_eval_350_350.csv",
+        ]
+    else:
+        p = Path(target)
+        if p.exists():
+            return p
+        candidates = [
+            p,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results") / p.name,
+            Path("/content/drive/MyDrive/eval_results") / p.name,
+            REPO_ROOT / "data/eval_results" / p.name,
+            REPO_ROOT / "data/manifests" / p.name,
+        ]
+
+    for cand in candidates:
+        if cand.exists():
+            print(f"  [Auto-Resolve] Discovered manifest at: {cand}")
+            return cand
+
+    # If not found yet, return the original path
+    return Path(manifest_arg)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate open-source pre-trained baseline detectors on FakeAVCeleb")
     parser.add_argument("--model", type=str, required=True, choices=["mesonet", "xception", "resnet_av"],
                         help="Baseline architecture to evaluate")
-    parser.add_argument("--manifest", type=str, default="data/manifests/fakeavceleb_eval_500_500.csv",
-                        help="Path to the paired evaluation manifest")
+    parser.add_argument("--manifest", type=str, default="data/eval_results/fakeavceleb_eval_predictions_350+4650.csv",
+                        help="Path to the paired evaluation manifest or prediction CSV")
+    parser.add_argument("--split", type=str, default=None, choices=["5000", "700", "350+4650", "350+350"],
+                        help="Shorthand split selector (5000 or 700)")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--save_csv", type=str, default=None)
     args = parser.parse_args()
 
-    manifest_p = Path(args.manifest)
+    manifest_p = resolve_manifest_path(args.manifest, args.split)
     if not manifest_p.exists():
         print(f"ERROR: Manifest not found at {manifest_p}")
         return

@@ -355,10 +355,49 @@ def plot_comparative_figures(models_data: dict, out_dir: Path):
             pass
 
 
+def resolve_deepsentinel_path(ds_arg: str, split_arg: str | None = None) -> Path:
+    target = split_arg if split_arg else ds_arg
+    candidates = []
+    
+    if target in ["5000", "350+4650", "large"]:
+        candidates = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            Path("/content/drive/MyDrive/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+4650.csv",
+        ]
+    elif target in ["700", "350+350", "balanced"]:
+        candidates = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
+            Path("/content/drive/MyDrive/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
+            REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+350.csv",
+        ]
+    else:
+        p = Path(target)
+        if p.exists():
+            return p
+        candidates = [
+            p,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results") / p.name,
+            Path("/content/drive/MyDrive/eval_results") / p.name,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions.csv"),
+            REPO_ROOT / "data/eval_results" / p.name,
+        ]
+
+    for cand in candidates:
+        if cand.exists():
+            print(f"  [Auto-Resolve] Discovered DeepSentinel predictions at: {cand}")
+            return cand
+
+    return Path(ds_arg)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Master Comparative Evaluation & Visualizations")
-    parser.add_argument("--deepsentinel", type=str, default="/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions.csv",
+    parser.add_argument("--deepsentinel", type=str, default="fakeavceleb_eval_predictions_350+4650.csv",
                         help="DeepSentinel evaluation predictions CSV")
+    parser.add_argument("--split", type=str, default=None, choices=["5000", "700", "350+4650", "350+350"],
+                        help="Split selector: '5000' or '700'")
     parser.add_argument("--mesonet", type=str, default="data/eval_results/preds_mesonet.csv",
                         help="MesoNet-4 predictions CSV")
     parser.add_argument("--xception", type=str, default="data/eval_results/preds_xception.csv",
@@ -371,8 +410,10 @@ def main():
                         help="Directory to save publication figures")
     args = parser.parse_args()
 
+    ds_path = resolve_deepsentinel_path(args.deepsentinel, args.split)
+
     models_config = [
-        ("DeepSentinel (Ours)", Path(args.deepsentinel), "Affect-Bilinear"),
+        ("DeepSentinel (Ours)", ds_path, "Affect-Bilinear"),
         ("MesoNet-4", Path(args.mesonet), "Visual CNN"),
         ("XceptionNet", Path(args.xception), "Visual Spatial"),
         ("Multimodal ResNet-AV", Path(args.resnet_av), "Audio-Visual"),
