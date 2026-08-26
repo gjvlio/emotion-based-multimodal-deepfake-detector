@@ -137,7 +137,8 @@ class MultimodalAVBaseline(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Manifest Dataset Loader
+# ─────────────────────────────────────────────────────────────────────────────
+# Manifest Dataset Loader with Automatic Video Indexing
 # ─────────────────────────────────────────────────────────────────────────────
 class BaselineEvalDataset(Dataset):
     def __init__(self, manifest_csv: Path):
@@ -147,6 +148,27 @@ class BaselineEvalDataset(Dataset):
             for row in reader:
                 row["fake_label"] = int(row["fake_label"])
                 self.records.append(row)
+
+        print(f"  [Dataset] Loaded {len(self.records)} rows from {manifest_csv}")
+        print("  [Dataset] Building collision-free MP4 video index...")
+        self.mp4_index = {}
+        for base in [REPO_ROOT / "data/raw", REPO_ROOT / "data", Path("/content/thesis/data/raw"), Path("/content/thesis/data")]:
+            if base.exists():
+                for dp, dirnames, fns in os.walk(base):
+                    if "drive" in dp.lower() or ".git" in dp.lower():
+                        dirnames.clear()
+                        continue
+                    for fn in fns:
+                        if fn.lower().endswith(".mp4"):
+                            p = Path(dp) / fn
+                            self.mp4_index[p.name] = p
+                            parts = p.parts
+                            if len(parts) >= 2:
+                                self.mp4_index[f"{parts[-2]}/{parts[-1]}"] = p
+                            if len(parts) >= 3:
+                                self.mp4_index[f"{parts[-3]}/{parts[-2]}/{parts[-1]}"] = p
+
+        print(f"  [Dataset] Indexed {len(self.mp4_index)} MP4 videos successfully.")
 
     def __len__(self):
         return len(self.records)
@@ -163,15 +185,19 @@ class BaselineEvalDataset(Dataset):
         
         # Find video path
         video_p = None
-        for base in [REPO_ROOT / "data/raw", REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", Path("/content/thesis/data/raw"), Path("/content/thesis/data/raw/FakeAVCeleb_v1.2")]:
-            cand = base / rel_path
-            if cand.exists():
-                video_p = cand
-                break
+        if rel_path:
+            for base in [REPO_ROOT / "data/raw", REPO_ROOT / "data/raw/FakeAVCeleb_v1.2", Path("/content/thesis/data/raw"), Path("/content/thesis/data/raw/FakeAVCeleb_v1.2")]:
+                cand = base / rel_path
+                if cand.exists():
+                    video_p = cand
+                    break
         
-        # Fallback to local SSD video index if needed
-        if video_p is None and Path(rel_path).exists():
-            video_p = Path(rel_path)
+        # Fallback to index by clip_id or filename
+        if video_p is None:
+            clean_id = clip_id[4:] if clip_id.startswith("fav_") else clip_id
+            fname = clean_id if clean_id.endswith(".mp4") else f"{clean_id}.mp4"
+            if fname in self.mp4_index:
+                video_p = self.mp4_index[fname]
 
         # 1. Visual frame (center-cropped 256x256)
         transform = T.Compose([
