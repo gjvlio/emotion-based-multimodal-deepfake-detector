@@ -339,9 +339,10 @@ def plot_comparative_figures(models_data: dict, out_dir: Path):
     except Exception:
         pass
 
+    folder_name = out_dir.name
     drive_backup_dirs = [
-        Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/figures_comparative"),
-        Path("/content/drive/MyDrive/eval_results/figures_comparative"),
+        Path(f"/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/{folder_name}"),
+        Path(f"/content/drive/MyDrive/eval_results/{folder_name}"),
     ]
     for d_dir in drive_backup_dirs:
         try:
@@ -349,7 +350,7 @@ def plot_comparative_figures(models_data: dict, out_dir: Path):
             import shutil
             for f in [fig1_path, fig2_path, fig3_path, fig4_path]:
                 shutil.copy(f, d_dir / f.name)
-            print(f"  [GOOGLE DRIVE BACKUP] Synced comparative figures -> {d_dir}")
+            print(f"  [GOOGLE DRIVE BACKUP] Synced comparative figures directly -> {d_dir}")
             break
         except Exception:
             pass
