@@ -360,16 +360,21 @@ def resolve_deepsentinel_path(ds_arg: str, split_arg: str | None = None) -> Path
     target = split_arg if split_arg else ds_arg
     candidates = []
     
-    if target in ["5000", "350+4650", "large"]:
+    if str(target) in ["5000", "350+4650", "large"]:
         candidates = [
             Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
             Path("/content/drive/MyDrive/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            Path("/content/drive/MyDrive/fakeavceleb_eval_predictions_350+4650.csv"),
+            Path("data/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
             REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+4650.csv",
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions.csv"),
         ]
-    elif target in ["700", "350+350", "balanced"]:
+    elif str(target) in ["700", "350+350", "balanced"]:
         candidates = [
             Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
             Path("/content/drive/MyDrive/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
+            Path("/content/drive/MyDrive/fakeavceleb_eval_predictions_350+350.csv"),
+            Path("data/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
             REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+350.csv",
         ]
     else:
@@ -380,15 +385,28 @@ def resolve_deepsentinel_path(ds_arg: str, split_arg: str | None = None) -> Path
             p,
             Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results") / p.name,
             Path("/content/drive/MyDrive/eval_results") / p.name,
-            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
-            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions.csv"),
+            Path("/content/drive/MyDrive") / p.name,
+            Path("data/eval_results") / p.name,
             REPO_ROOT / "data/eval_results" / p.name,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+4650.csv"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions_350+350.csv"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results/fakeavceleb_eval_predictions.csv"),
         ]
 
     for cand in candidates:
         if cand.exists():
             print(f"  [Auto-Resolve] Discovered DeepSentinel predictions at: {cand}")
             return cand
+
+    # Search Drive and local recursively
+    for base in [Path("/content/drive/MyDrive"), Path("data/eval_results"), REPO_ROOT / "data"]:
+        if base.exists():
+            for root, _, files in os.walk(base):
+                for f in files:
+                    if ("350+350" in f if str(target) in ["700", "350+350"] else "350+4650" in f) and f.endswith(".csv"):
+                        found = Path(root) / f
+                        print(f"  [Auto-Resolve] Discovered DeepSentinel predictions at: {found}")
+                        return found
 
     return Path(ds_arg)
 
@@ -418,30 +436,60 @@ def main():
         ("MesoNet-4", Path(args.mesonet), "Visual CNN"),
         ("XceptionNet", Path(args.xception), "Visual Spatial"),
         ("Multimodal ResNet-AV", Path(args.resnet_av), "Audio-Visual"),
-        ("AceNet (Baseline)", Path(args.acenet), "Cross-Attention"),
     ]
+
+    # Optional AceNet (if exported by sister-team)
+    if args.acenet:
+        acenet_p = Path(args.acenet)
+        if acenet_p.exists():
+            models_config.append(("AceNet (Baseline)", acenet_p, "Cross-Attention"))
+
+    print("\n" + "=" * 70)
+    print(f"  [Model Ingestion] Ingesting evaluation predictions for split: {args.split or 'custom'}")
+    print("=" * 70)
 
     models_data = {}
     for name, p, modality in models_config:
-        clips = load_model_predictions(p)
-        if clips:
-            y_true = [r["fake_label"] for r in clips.values()]
-            y_score = [r["score"] for r in clips.values()]
-            y_pred = [r["pred"] for r in clips.values()]
-            metrics = compute_comprehensive_metrics(y_true, y_score, y_pred)
-            models_data[name] = {
-                "clips": clips,
-                "y_true": y_true,
-                "y_score": y_score,
-                "y_pred": y_pred,
-                "metrics": metrics,
-                "modality": modality,
-            }
+        p = Path(p)
+        if not p.exists():
+            # Auto-search fallbacks
+            for cand in [
+                REPO_ROOT / p,
+                Path("data/eval_results") / p.name,
+                REPO_ROOT / "data/eval_results" / p.name,
+                Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results") / p.name,
+                Path("/content/drive/MyDrive/eval_results") / p.name,
+            ]:
+                if cand.exists():
+                    p = cand
+                    break
+
+        if p.exists():
+            clips = load_model_predictions(p)
+            if clips:
+                y_true = [r["fake_label"] for r in clips.values()]
+                y_score = [r["score"] for r in clips.values()]
+                y_pred = [r["pred"] for r in clips.values()]
+                metrics = compute_comprehensive_metrics(y_true, y_score, y_pred)
+                models_data[name] = {
+                    "clips": clips,
+                    "y_true": y_true,
+                    "y_score": y_score,
+                    "y_pred": y_pred,
+                    "metrics": metrics,
+                    "modality": modality,
+                }
+                print(f"  ✅ {name:<22}: Ingested {len(clips):>5} clips from -> {p}")
+            else:
+                print(f"  ⚠️ {name:<22}: CSV is empty -> {p}")
+        else:
+            print(f"  ❌ {name:<22}: File not found (Path checked: {p})")
 
     if not models_data:
-        print("ERROR: No prediction CSV files found! Run eval_public_baselines.py first.")
+        print("\nERROR: No prediction CSV files found! Please run eval_public_baselines.py first.")
         return
 
+    print("=" * 70 + "\n")
     print_master_academic_table(models_data, ref_name="DeepSentinel (Ours)" if "DeepSentinel (Ours)" in models_data else list(models_data.keys())[0])
     plot_comparative_figures(models_data, Path(args.output_dir))
 
