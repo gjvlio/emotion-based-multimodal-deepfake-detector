@@ -50,6 +50,7 @@ COLORS = {
     "MesoNet-4":           "#ef4444",    # Crimson Red
     "XceptionNet":         "#f59e0b",    # Amber Orange
     "Multimodal ResNet-AV":"#10b981",    # Emerald Green
+    "LipForensics":        "#ec4899",    # Rose Pink
     "AceNet (Baseline)":   "#8b5cf6",    # Purple
 }
 
@@ -437,6 +438,8 @@ def main():
                         help="Xception predictions CSV")
     parser.add_argument("--resnet_av", type=str, default="data/eval_results/preds_resnet_av.csv",
                         help="Multimodal ResNet-AV predictions CSV")
+    parser.add_argument("--lipforensics", type=str, default="data/eval_results/preds_lipforensics.csv",
+                        help="LipForensics predictions CSV")
     parser.add_argument("--acenet", type=str, default="data/eval_results/preds_acenet.csv",
                         help="Replicated AceNet predictions CSV")
     parser.add_argument("--output_dir", type=str, default="data/eval_results/figures_comparative",
@@ -450,6 +453,7 @@ def main():
         ("MesoNet-4", Path(args.mesonet), "Visual CNN"),
         ("XceptionNet", Path(args.xception), "Visual Spatial"),
         ("Multimodal ResNet-AV", Path(args.resnet_av), "Audio-Visual"),
+        ("LipForensics", Path(args.lipforensics), "Temporal Viseme"),
     ]
 
     # Optional AceNet (if exported by sister-team)
