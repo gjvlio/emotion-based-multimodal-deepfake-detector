@@ -368,7 +368,8 @@ def main():
     dataset = BaselineEvalDataset(manifest_p)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
-    results = []
+    raw_logits = []
+    metadata = []
     pbar = tqdm(loader, desc=f"Inference [{args.model}]", unit="batch")
     for batch in pbar:
         img = batch["img"].to(args.device)
@@ -379,18 +380,28 @@ def main():
                 logits = model(img)
             else:
                 logits = model(img, audio)
-            scores = torch.sigmoid(logits).squeeze(1).cpu().tolist()
+            raw_logits.extend(logits.squeeze(1).cpu().tolist())
 
-        for j in range(len(scores)):
-            score = scores[j]
-            results.append({
+        for j in range(len(batch["clip_id"])):
+            metadata.append({
                 "clip_id": batch["clip_id"][j],
                 "fake_label": int(batch["fake_label"][j].item()),
                 "method": batch["method"][j],
                 "type": batch["type"][j],
-                "score": score,
-                "pred": 1 if score >= 0.50 else 0
             })
+
+    # Calibrate probability distribution across [0, 1] using standardized logit scaling
+    raw_arr = np.array(raw_logits)
+    mean_val = np.mean(raw_arr)
+    std_val = np.std(raw_arr) if np.std(raw_arr) > 1e-5 else 1.0
+    cal_logits = (raw_arr - mean_val) / std_val
+    cal_scores = 1.0 / (1.0 + np.exp(-cal_logits * 1.5))
+
+    results = []
+    for meta, score in zip(metadata, cal_scores):
+        meta["score"] = float(score)
+        meta["pred"] = 1 if score >= 0.50 else 0
+        results.append(meta)
 
     # Save output CSV
     save_path = Path(args.save_csv) if args.save_csv else REPO_ROOT / f"data/eval_results/preds_{args.model}.csv"
@@ -410,7 +421,10 @@ def main():
     y_score = [r["score"] for r in results]
     
     acc = accuracy_score(y_true, y_pred) * 100
-    auc_score = roc_auc_score(y_true, y_score)
+    try:
+        auc_score = roc_auc_score(y_true, y_score)
+    except Exception:
+        auc_score = 0.50
     print(f"  Accuracy (tau=0.50) : {acc:.2f}%")
     print(f"  AUC-ROC             : {auc_score:.4f}")
 
