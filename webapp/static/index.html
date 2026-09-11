@@ -97,9 +97,9 @@
 
     <!-- ── Upload ──────────────────────────────────────────────────────────── -->
     <section class="view" data-view="upload">
-      <div class="stage">
-        <p class="eyebrow center" data-reveal>// ANALYZE A CLIP</p>
-        <h2 class="stage-title" data-reveal>Upload a video to inspect</h2>
+      <div class="stage" id="upload-stage">
+        <p class="eyebrow center" id="upload-eyebrow" data-reveal>// ANALYZE A CLIP</p>
+        <h2 class="stage-title" id="upload-title" data-reveal>Upload a video to inspect</h2>
         <div id="dropzone" class="dropzone glass-card" tabindex="0" data-reveal>
           <div class="dz-sheen"></div>
           <div class="dz-empty">
@@ -108,7 +108,7 @@
             </span>
             <h3>Drop your video here</h3>
             <p class="muted">or click to browse files</p>
-            <p class="hint">Max 10 seconds · MP4, MOV, WEBM</p>
+            <p class="hint">Up to 10 minutes · MP4, MOV, WEBM</p>
           </div>
           <div class="dz-file" hidden>
             <span class="dz-icon">
@@ -118,8 +118,120 @@
           </div>
           <input id="file-input" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden />
         </div>
+
+        <!-- ── Interactive Playback & Clip Selector (Up to 10 min) ────────── -->
+        <div id="crop-panel" class="crop-panel glass-card" hidden data-reveal>
+          <div class="crop-header">
+            <div class="crop-header-left">
+              <span class="crop-chip mono-tag" id="crop-file-info">video.mp4 · 00:00</span>
+            </div>
+            <button id="change-video-btn" type="button" class="btn-text">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span>Change Video</span>
+            </button>
+          </div>
+
+          <!-- Sleek Cinematic Video Player Container -->
+          <div class="crop-video-container" id="video-wrapper">
+            <video id="crop-video" preload="metadata" playsinline></video>
+            <div id="video-center-indicator" class="video-center-indicator">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
+            </div>
+
+            <!-- Bottom Glass Player Controls -->
+            <div class="video-control-bar">
+              <button id="player-play-btn" type="button" class="player-btn" aria-label="Play/Pause">
+                <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              </button>
+              <div class="player-time-display">
+                <span id="player-curr-time">00:00.0</span> <span class="time-sep">/</span> <span id="player-total-time">00:00.0</span>
+              </div>
+              <div class="player-badge-clip">
+                <span class="badge-dot"></span>
+                <span>Clip: <strong id="player-clip-range">00:00.0 – 00:10.0</strong></span>
+              </div>
+              <div class="player-controls-right">
+                <button id="player-jump-start" type="button" class="player-pill-btn" title="Jump to start of selected clip">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+                  <span>To Clip</span>
+                </button>
+                <button id="player-mute-btn" type="button" class="player-btn player-btn-sm" aria-label="Toggle Mute">
+                  <svg class="icon-vol-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                  <svg class="icon-vol-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Interactive Timeline Scrubber & Filmstrip -->
+          <div class="crop-timeline-wrapper">
+            <div class="timeline-header-row">
+              <div class="timeline-time-col">
+                <span class="time-label">Start</span>
+                <strong class="time-value" id="start-time-val">00:00.0</strong>
+              </div>
+              <div class="timeline-status-col">
+                <span id="crop-duration-pill" class="pill pill-optimal">10.0s selected (3s – 20s optimal)</span>
+              </div>
+              <div class="timeline-time-col text-right">
+                <span class="time-label">End</span>
+                <strong class="time-value" id="end-time-val">00:10.0</strong>
+              </div>
+            </div>
+
+            <!-- Timeline track with filmstrip, stretch handles, and draggable window -->
+            <div id="timeline-track" class="timeline-track">
+              <canvas id="filmstrip-canvas" class="timeline-filmstrip"></canvas>
+              <div class="timeline-mask timeline-mask-left" id="timeline-mask-left"></div>
+              <div class="timeline-mask timeline-mask-right" id="timeline-mask-right"></div>
+              
+              <!-- Draggable / Pannable Selected Window -->
+              <div class="timeline-window" id="timeline-window" title="Drag horizontally to slide the 3–20s clip">
+                <span class="window-pan-hint">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg>
+                  <span>PAN CLIP</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg>
+                </span>
+              </div>
+
+              <!-- Independent Stretch Handles (Left & Right) -->
+              <div class="timeline-handle handle-left" id="handle-left" title="Drag to stretch start time (3s–20s)">
+                <span class="handle-grip"></span>
+              </div>
+              <div class="timeline-handle handle-right" id="handle-right" title="Drag to stretch end time (3s–20s)">
+                <span class="handle-grip"></span>
+              </div>
+
+              <div id="timeline-playhead" class="timeline-playhead"></div>
+
+              <!-- Floating hover & stretch preview tooltip -->
+              <div id="timeline-hover-card" class="timeline-hover-card">
+                <canvas id="hover-canvas" width="120" height="68"></canvas>
+                <div class="hover-time" id="hover-time-badge">00:00.0</div>
+              </div>
+            </div>
+
+            <!-- Timeline ticks & quick presets -->
+            <div class="crop-presets-row">
+              <div class="presets-left">
+                <span class="presets-caption">Quick presets:</span>
+                <button type="button" class="btn-pill" id="preset-10s">First 10s</button>
+                <button type="button" class="btn-pill" id="preset-20s">First 20s</button>
+                <button type="button" class="btn-pill" id="preset-middle">Middle 10s</button>
+              </div>
+              <div class="presets-right">
+                <button type="button" class="btn-preview-clip" id="preview-clip-btn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span>Preview Clip</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <button id="run-btn" class="btn btn-primary btn-block magnetic" hidden>
-          <span>Run Analysis</span>
+          <span id="run-btn-label">Run Analysis</span>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <p id="upload-error" class="error-text" hidden></p>
@@ -128,30 +240,101 @@
 
     <!-- ── Analyzing ───────────────────────────────────────────────────────── -->
     <section class="view" data-view="analyzing">
-      <div class="stage stage-center">
-        <div class="loader">
-          <svg class="loader-ring" viewBox="0 0 80 80">
-            <defs>
-              <linearGradient id="loaderGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#1EA896" /><stop offset="1" stop-color="#72A1E5" />
-              </linearGradient>
-            </defs>
-            <circle class="track" cx="40" cy="40" r="34" />
-            <circle class="arc" cx="40" cy="40" r="34" />
-          </svg>
-          <span class="loader-core"></span>
+      <div class="stage stage-wide stage-analyzing">
+        <div class="analyzing-grid">
+          <!-- Left side: Live Playback, Detection Box & Transcript -->
+          <div class="analyzing-left">
+            <div class="analyzing-player-card glass-card">
+              <div class="analyzing-player-header">
+                <span class="live-pill"><span class="live-dot"></span> LIVE INFERENCE</span>
+                <div class="analyzing-header-meta">
+                  <span class="analyzing-timer-badge mono-tag" id="analyzing-timer-badge" title="Elapsed / Estimated Evaluation Time">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    <span id="analyzing-elapsed-header">00:00.0</span> / <span id="analyzing-est-header">~00:07.5</span>
+                  </span>
+                  <span class="analyzing-chip mono-tag" id="analyzing-clip-badge">00:00.0 – 00:05.5</span>
+                </div>
+              </div>
+              <div class="analyzing-video-wrapper">
+                <video id="analyzing-video" playsinline muted autoplay loop></video>
+                <canvas id="analyzing-hud-canvas"></canvas>
+                <div class="analyzing-telemetry-badge" id="hud-telemetry-pill">
+                  <span class="hud-phase-label" id="hud-phase-label">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    <span>ViT Face Keyframe Analysis</span>
+                  </span>
+                  <span class="hud-emotion-stat" id="hud-emotion-stat">Neutral · 94.1%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live Transcript Below Playback -->
+            <div class="analyzing-transcript-card glass-card">
+              <div class="transcript-header">
+                <div class="live-audio-icon">
+                  <span class="bar b1"></span>
+                  <span class="bar b2"></span>
+                  <span class="bar b3"></span>
+                  <span class="bar b4"></span>
+                </div>
+                <strong>Live Speech &amp; Acoustic Stream</strong>
+                <span class="transcript-model-tag mono-tag">Wav2Vec 2.0 · Whisper</span>
+              </div>
+              <div class="transcript-body">
+                <p id="analyzing-transcript-text" class="analyzing-transcript-text">
+                  <span class="typing-cursor">Listening to speech audio stream...</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right side: Analyzing Steps & Pipeline Progress -->
+          <div class="analyzing-right">
+            <div class="analyzing-status-card glass-card">
+              <div class="loader">
+                <svg class="loader-ring" viewBox="0 0 80 80">
+                  <defs>
+                    <linearGradient id="loaderGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+                      <stop stop-color="#1EA896" /><stop offset="1" stop-color="#72A1E5" />
+                    </linearGradient>
+                  </defs>
+                  <circle class="track" cx="40" cy="40" r="34" />
+                  <circle class="arc" cx="40" cy="40" r="34" />
+                </svg>
+                <span class="loader-core"></span>
+              </div>
+              <h2 class="stage-title analyzing-title">Analyzing video</h2>
+              <p class="muted" id="analyzing-file">—</p>
+
+              <!-- Evaluation Timing Telemetry Bar -->
+              <div class="analyzing-timing-bar">
+                <div class="timing-col">
+                  <span class="timing-lbl">TIME ELAPSED</span>
+                  <span class="timing-num" id="timing-elapsed-val">00:00.0</span>
+                </div>
+                <div class="timing-divider"></div>
+                <div class="timing-col">
+                  <span class="timing-lbl">EST. RUNTIME</span>
+                  <span class="timing-num" id="timing-est-val">~00:07.5</span>
+                </div>
+                <div class="timing-divider"></div>
+                <div class="timing-col">
+                  <span class="timing-lbl">EST. REMAINING</span>
+                  <span class="timing-num highlight" id="timing-remaining-val">~00:07.5</span>
+                </div>
+              </div>
+              <ul class="steps analyzing-steps" id="steps">
+                <li data-step><span class="step-dot"></span>Listening to the voice</li>
+                <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">(Wav2Vec&nbsp;2.0 · BERT)</span></li>
+                <li data-step><span class="step-dot"></span>Picking the clearest face frames</li>
+                <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">(Vision Transformer)</span></li>
+                <li data-step><span class="step-dot"></span>Comparing voice emotion vs face emotion</li>
+                <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">(Δ)</span></li>
+                <li data-step><span class="step-dot"></span>Reaching a verdict</li>
+              </ul>
+            </div>
+          </div>
         </div>
-        <h2 class="stage-title">Analyzing video</h2>
-        <p class="muted" id="analyzing-file">—</p>
-        <ul class="steps glass-card" id="steps">
-          <li data-step><span class="step-dot"></span>Listening to the voice</li>
-          <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">(Wav2Vec&nbsp;2.0 · BERT)</span></li>
-          <li data-step><span class="step-dot"></span>Picking the clearest face frames</li>
-          <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">(Vision Transformer)</span></li>
-          <li data-step><span class="step-dot"></span>Comparing voice emotion vs face emotion</li>
-          <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">(Δ)</span></li>
-          <li data-step><span class="step-dot"></span>Reaching a verdict</li>
-        </ul>
       </div>
     </section>
 

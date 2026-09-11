@@ -19,17 +19,30 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(f"DEEPSENTINEL_{name}", default)
 
 
+def _default_device() -> str:
+    try:
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
 @dataclass
 class Settings:
-    # ── Checkpoint auto-equip ──────────────────────────────────────────────────
     # Directory the trainer writes checkpoints to.
     checkpoint_dir: Path = field(
-        default_factory=lambda: REPO_ROOT / _env("CHECKPOINT_DIR", "checkpoints/full")
+        default_factory=lambda: REPO_ROOT / _env("CHECKPOINT_DIR", "checkpoints")
     )
-    # Preference order — the FIRST file that exists is served. Phase 2 (fine-tuned)
-    # is preferred over Phase 1 whenever it becomes available.
+    # Preference order — the FIRST file that exists is served. Adapted Phase 2
+    # is preferred over Phase 2/1 whenever it becomes available.
     checkpoint_priority: List[str] = field(
-        default_factory=lambda: ["best_phase2.pt", "best_phase1.pt"]
+        default_factory=lambda: [
+            "best_phase2_adapted.pt",
+            "best_phase2_bottleneck.pt",
+            "best_phase2.pt",
+            "best_phase1_bottleneck.pt",
+            "best_phase1.pt",
+        ]
     )
     # Seconds between background checks for a newer checkpoint. The active
     # checkpoint is ALSO re-checked on every request, so traffic alone keeps the
@@ -37,7 +50,7 @@ class Settings:
     watch_interval_sec: float = float(_env("WATCH_INTERVAL_SEC", "15"))
 
     # ── Inference ──────────────────────────────────────────────────────────────
-    device: str = _env("DEVICE", "cpu")
+    device: str = _env("DEVICE", _default_device())
     # Preload all preprocessing models at startup so the first /detect pays only
     # inference cost (no cold weight-loading). Set to "0" to disable.
     warmup_on_start: bool = _env("WARMUP", "1") == "1"
@@ -57,6 +70,11 @@ class Settings:
     vit_model: str = "google/vit-base-patch16-224"
 
     decision_threshold: float = 0.5  # P(fake) > threshold ⇒ FAKE
+
+    # Video duration bounds for uploaded clips (in seconds)
+    max_upload_duration_sec: float = float(_env("MAX_UPLOAD_DURATION_SEC", "600.0"))  # up to 10 minutes
+    min_duration_sec: float = float(_env("MIN_DURATION_SEC", "3.0"))                  # crop slice min
+    max_duration_sec: float = float(_env("MAX_DURATION_SEC", "20.0"))                 # crop slice max
 
     # Post-hoc temperature scaling (Guo et al., 2017): logit /= T before sigmoid.
     # T=1.0 is the raw model output. T>1 softens overconfident probabilities WITHOUT

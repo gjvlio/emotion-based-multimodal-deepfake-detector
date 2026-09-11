@@ -21,8 +21,12 @@ import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+import json
+import subprocess
+from typing import Optional
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -128,7 +132,11 @@ def model_reload():
 
 
 @app.post("/detect", response_model=DetectionResult)
-async def detect(file: UploadFile = File(...)):
+async def detect(
+    file: UploadFile = File(...),
+    start_time: float = Form(0.0),
+    end_time: Optional[float] = Form(None),
+):
     svc = _service()
     if not svc:
         raise HTTPException(
@@ -137,6 +145,7 @@ async def detect(file: UploadFile = File(...)):
                    "checkout. Use Demo mode (/demo) for the hardcoded walkthrough.",
         )
 
+def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]) -> Path:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(
@@ -150,15 +159,121 @@ async def detect(file: UploadFile = File(...)):
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    # Pre-check overall video duration (limit to max_upload_duration_sec, default 10 minutes)
+    total_dur = None
+    if suffix in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+        try:
+            import cv2
+            cap = cv2.VideoCapture(str(dest))
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+                total_dur = frame_count / fps if fps > 0 else 0
+                cap.release()
+                if total_dur > settings.max_upload_duration_sec:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Video exceeds the 10-minute maximum limit ({total_dur / 60.0:.1f} min). Please upload a video under 10 minutes.",
+                    )
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.debug(f"Duration inspection bypassed: {e}")
+
+    # Clip extraction / trimming logic
+    clip_to_eval = dest
+    t_start = max(0.0, float(start_time or 0.0))
+    t_end = float(end_time) if end_time is not None and float(end_time) > 0 else None
+
+    # If a sub-clip is requested or video is longer than max_duration_sec (20s)
+    if (t_start > 0.05) or (t_end is not None) or (total_dur and total_dur > settings.max_duration_sec + 0.5):
+        if t_end is None:
+            t_end = t_start + settings.max_duration_sec
+
+        slice_dur = t_end - t_start
+        if slice_dur < settings.min_duration_sec - 0.2:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Selected clip duration is too short ({slice_dur:.1f}s). Evaluation clip must be at least {settings.min_duration_sec:.1f} seconds.",
+            )
+        if slice_dur > settings.max_duration_sec + 0.5:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Selected clip duration is too long ({slice_dur:.1f}s). Evaluation clip must be at most {settings.max_duration_sec:.1f} seconds.",
+            )
+
+        trimmed_name = f"trim_{int(t_start * 100)}_{int(t_end * 100)}_{file.filename}"
+        trimmed_dest = settings.upload_dir / trimmed_name
+
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{t_start:.3f}",
+            "-to", f"{t_end:.3f}",
+            "-i", str(dest),
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac",
+            "-avoid_negative_ts", "make_zero",
+            str(trimmed_dest),
+        ]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if r.returncode == 0 and trimmed_dest.exists() and trimmed_dest.stat().st_size > 1000:
+                clip_to_eval = trimmed_dest
+            else:
+                log.warning(f"ffmpeg trim notice: {r.stderr}; using source file")
+        except Exception as e:
+            log.warning(f"ffmpeg slicing exception ({e}); using source file")
+
+    return clip_to_eval
+
+
+@app.post("/detect", response_model=DetectionResult)
+async def detect(
+    file: UploadFile = File(...),
+    start_time: float = Form(0.0),
+    end_time: Optional[float] = Form(None),
+):
+    svc = _service()
+    if not svc:
+        raise HTTPException(
+            status_code=503,
+            detail="Live detection needs the ML stack (torch/transformers). Use Demo mode (/demo) for walkthrough.",
+        )
+    clip_to_eval = _prepare_clip(file, start_time, end_time)
     try:
-        return svc.predict(dest)
+        return svc.predict(clip_to_eval)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.exception("Detection failed")
         raise HTTPException(status_code=500, detail=f"Detection error: {e}")
+
+
+@app.post("/detect/stream")
+async def detect_stream(
+    file: UploadFile = File(...),
+    start_time: float = Form(0.0),
+    end_time: Optional[float] = Form(None),
+):
+    svc = _service()
+    if not svc:
+        raise HTTPException(
+            status_code=503,
+            detail="Live detection needs the ML stack (torch/transformers).",
+        )
+    clip_to_eval = _prepare_clip(file, start_time, end_time)
+
+    def event_generator():
+        try:
+            for event in svc.predict_stream(clip_to_eval):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            log.exception("Stream detection error")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ── Frontend (SPA) ─────────────────────────────────────────────────────────────
