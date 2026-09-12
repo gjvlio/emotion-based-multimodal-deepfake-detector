@@ -20,6 +20,8 @@ import csv
 import logging
 import os
 import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 
 import numpy as np
@@ -412,7 +414,7 @@ def main():
         writer.writeheader()
         writer.writerows(results)
 
-    print(f"\n✅ Saved baseline predictions -> {save_path} ({len(results)} rows)")
+    print(f"\n[SAVED] Saved baseline predictions -> {save_path} ({len(results)} rows)")
     
     # Compute accuracy & AUC
     from sklearn.metrics import accuracy_score, roc_auc_score

@@ -1,0 +1,546 @@
+{
+  "benchmark_metadata": {
+    "test_dataset": "FakeAVCeleb v1.2",
+    "test_split_size": 700,
+    "real_clips": 350,
+    "fake_clips": 350,
+    "evaluation_protocol": "Strict Cross-Dataset Zero-Shot Generalization (Zero Fine-Tuning)",
+    "published_literature_reference": {
+      "paper": "Elpeltagy & Sallam (2023), Expert Systems with Applications",
+      "approach": "Intra-dataset FakeAVCeleb training (In-domain)",
+      "reported_auc": 0.9721,
+      "reported_accuracy": 96.8
+    }
+  },
+  "models": [
+    {
+      "name": "DeepSentinel (Ours)",
+      "id": "deepsentinel",
+      "badge": "Proposed Method",
+      "modality": "Affect-Bilinear Cross-Attention (Audio + Video + Text)",
+      "color": "#0284c7",
+      "metrics": {
+        "accuracy": 82.14,
+        "balanced_accuracy": 82.14,
+        "precision": 79.22,
+        "recall_fake": 87.14,
+        "specificity_real": 77.14,
+        "f1_score": 0.8299,
+        "mcc": 0.6461,
+        "auc_roc": 0.902,
+        "auc_ci_lower": 0.877,
+        "auc_ci_upper": 0.924,
+        "tp": 305,
+        "fp": 80,
+        "tn": 270,
+        "fn": 45
+      },
+      "delong_test": {
+        "p_value": null,
+        "significance": "Reference"
+      }
+    },
+    {
+      "name": "MesoNet-4",
+      "id": "mesonet",
+      "badge": "Vision Baseline",
+      "modality": "Visual Spatial CNN",
+      "color": "#ef4444",
+      "metrics": {
+        "accuracy": 52.0,
+        "balanced_accuracy": 52.0,
+        "precision": 52.15,
+        "recall_fake": 48.57,
+        "specificity_real": 55.43,
+        "f1_score": 0.503,
+        "mcc": 0.0401,
+        "auc_roc": 0.5389,
+        "auc_ci_lower": 0.495,
+        "auc_ci_upper": 0.583,
+        "tp": 170,
+        "fp": 156,
+        "tn": 194,
+        "fn": 180
+      },
+      "delong_test": {
+        "p_value": 0.0,
+        "significance": "p < 0.001 (Statistically Significant)",
+        "z_score": null
+      }
+    },
+    {
+      "name": "XceptionNet",
+      "id": "xception",
+      "badge": "Vision Baseline",
+      "modality": "Visual Spatial Deep CNN",
+      "color": "#f59e0b",
+      "metrics": {
+        "accuracy": 50.57,
+        "balanced_accuracy": 50.57,
+        "precision": 50.56,
+        "recall_fake": 51.14,
+        "specificity_real": 50.0,
+        "f1_score": 0.5085,
+        "mcc": 0.0114,
+        "auc_roc": 0.5002,
+        "auc_ci_lower": 0.458,
+        "auc_ci_upper": 0.542,
+        "tp": 179,
+        "fp": 175,
+        "tn": 175,
+        "fn": 171
+      },
+      "delong_test": {
+        "p_value": 0.0,
+        "significance": "p < 0.001 (Statistically Significant)",
+        "z_score": null
+      }
+    },
+    {
+      "name": "Multimodal ResNet-AV",
+      "id": "resnet_av",
+      "badge": "Multimodal Baseline",
+      "modality": "Audio-Visual Concatenation (ResNet-18)",
+      "color": "#10b981",
+      "metrics": {
+        "accuracy": 46.14,
+        "balanced_accuracy": 46.14,
+        "precision": 46.06,
+        "recall_fake": 45.14,
+        "specificity_real": 47.14,
+        "f1_score": 0.456,
+        "mcc": -0.0772,
+        "auc_roc": 0.4629,
+        "auc_ci_lower": 0.419,
+        "auc_ci_upper": 0.506,
+        "tp": 158,
+        "fp": 185,
+        "tn": 165,
+        "fn": 192
+      },
+      "delong_test": {
+        "p_value": 0.0,
+        "significance": "p < 0.001 (Statistically Significant)",
+        "z_score": null
+      }
+    },
+    {
+      "name": "LipForensics",
+      "id": "lipforensics",
+      "badge": "Temporal Baseline",
+      "modality": "Spatiotemporal Viseme / Lip Sync",
+      "color": "#ec4899",
+      "metrics": {
+        "accuracy": 52.0,
+        "balanced_accuracy": 52.0,
+        "precision": 52.08,
+        "recall_fake": 50.0,
+        "specificity_real": 54.0,
+        "f1_score": 0.5102,
+        "mcc": 0.04,
+        "auc_roc": 0.5132,
+        "auc_ci_lower": 0.469,
+        "auc_ci_upper": 0.553,
+        "tp": 175,
+        "fp": 161,
+        "tn": 189,
+        "fn": 175
+      },
+      "delong_test": {
+        "p_value": 0.0,
+        "significance": "p < 0.001 (Statistically Significant)",
+        "z_score": null
+      }
+    },
+    {
+      "name": "AceNet (Baseline)",
+      "id": "acenet",
+      "badge": "Direct Competitor",
+      "modality": "Cross-Attention Multimodal Baseline",
+      "color": "#8b5cf6",
+      "metrics": {
+        "accuracy": 64.0,
+        "balanced_accuracy": 64.0,
+        "precision": 68.42,
+        "recall_fake": 52.0,
+        "specificity_real": 76.0,
+        "f1_score": 0.5909,
+        "mcc": 0.2884,
+        "auc_roc": 0.6425,
+        "auc_ci_lower": 0.6,
+        "auc_ci_upper": 0.682,
+        "tp": 182,
+        "fp": 84,
+        "tn": 266,
+        "fn": 168
+      },
+      "delong_test": {
+        "p_value": 0.000222,
+        "significance": "p < 0.001 (Statistically Significant)",
+        "z_score": null
+      }
+    }
+  ],
+  "per_manipulation_breakdown": {
+    "faceswap": {
+      "DeepSentinel (Ours)": {
+        "total": 13,
+        "correct": 11,
+        "accuracy": 84.62
+      },
+      "MesoNet-4": {
+        "total": 13,
+        "correct": 8,
+        "accuracy": 61.54
+      },
+      "XceptionNet": {
+        "total": 13,
+        "correct": 6,
+        "accuracy": 46.15
+      },
+      "Multimodal ResNet-AV": {
+        "total": 13,
+        "correct": 7,
+        "accuracy": 53.85
+      },
+      "LipForensics": {
+        "total": 13,
+        "correct": 5,
+        "accuracy": 38.46
+      },
+      "AceNet (Baseline)": {
+        "total": 9,
+        "correct": 3,
+        "accuracy": 33.33
+      }
+    },
+    "faceswap-wav2lip": {
+      "DeepSentinel (Ours)": {
+        "total": 58,
+        "correct": 57,
+        "accuracy": 98.28
+      },
+      "MesoNet-4": {
+        "total": 58,
+        "correct": 27,
+        "accuracy": 46.55
+      },
+      "XceptionNet": {
+        "total": 58,
+        "correct": 30,
+        "accuracy": 51.72
+      },
+      "Multimodal ResNet-AV": {
+        "total": 58,
+        "correct": 21,
+        "accuracy": 36.21
+      },
+      "LipForensics": {
+        "total": 58,
+        "correct": 32,
+        "accuracy": 55.17
+      },
+      "AceNet (Baseline)": {
+        "total": 66,
+        "correct": 43,
+        "accuracy": 65.15
+      }
+    },
+    "fsgan": {
+      "DeepSentinel (Ours)": {
+        "total": 40,
+        "correct": 25,
+        "accuracy": 62.5
+      },
+      "MesoNet-4": {
+        "total": 40,
+        "correct": 21,
+        "accuracy": 52.5
+      },
+      "XceptionNet": {
+        "total": 40,
+        "correct": 18,
+        "accuracy": 45.0
+      },
+      "Multimodal ResNet-AV": {
+        "total": 40,
+        "correct": 24,
+        "accuracy": 60.0
+      },
+      "LipForensics": {
+        "total": 40,
+        "correct": 24,
+        "accuracy": 60.0
+      },
+      "AceNet (Baseline)": {
+        "total": 56,
+        "correct": 24,
+        "accuracy": 42.86
+      }
+    },
+    "fsgan-wav2lip": {
+      "DeepSentinel (Ours)": {
+        "total": 69,
+        "correct": 68,
+        "accuracy": 98.55
+      },
+      "MesoNet-4": {
+        "total": 69,
+        "correct": 30,
+        "accuracy": 43.48
+      },
+      "XceptionNet": {
+        "total": 69,
+        "correct": 38,
+        "accuracy": 55.07
+      },
+      "Multimodal ResNet-AV": {
+        "total": 69,
+        "correct": 29,
+        "accuracy": 42.03
+      },
+      "LipForensics": {
+        "total": 69,
+        "correct": 36,
+        "accuracy": 52.17
+      },
+      "AceNet (Baseline)": {
+        "total": 74,
+        "correct": 45,
+        "accuracy": 60.81
+      }
+    },
+    "real": {
+      "DeepSentinel (Ours)": {
+        "total": 350,
+        "correct": 270,
+        "accuracy": 77.14
+      },
+      "MesoNet-4": {
+        "total": 350,
+        "correct": 194,
+        "accuracy": 55.43
+      },
+      "XceptionNet": {
+        "total": 350,
+        "correct": 175,
+        "accuracy": 50.0
+      },
+      "Multimodal ResNet-AV": {
+        "total": 350,
+        "correct": 165,
+        "accuracy": 47.14
+      },
+      "LipForensics": {
+        "total": 350,
+        "correct": 189,
+        "accuracy": 54.0
+      },
+      "AceNet (Baseline)": {
+        "total": 350,
+        "correct": 266,
+        "accuracy": 76.0
+      }
+    },
+    "rtvc": {
+      "DeepSentinel (Ours)": {
+        "total": 5,
+        "correct": 3,
+        "accuracy": 60.0
+      },
+      "MesoNet-4": {
+        "total": 5,
+        "correct": 1,
+        "accuracy": 20.0
+      },
+      "XceptionNet": {
+        "total": 5,
+        "correct": 2,
+        "accuracy": 40.0
+      },
+      "Multimodal ResNet-AV": {
+        "total": 5,
+        "correct": 4,
+        "accuracy": 80.0
+      },
+      "LipForensics": {
+        "total": 5,
+        "correct": 1,
+        "accuracy": 20.0
+      },
+      "AceNet (Baseline)": {
+        "total": 5,
+        "correct": 2,
+        "accuracy": 40.0
+      }
+    },
+    "wav2lip": {
+      "DeepSentinel (Ours)": {
+        "total": 165,
+        "correct": 141,
+        "accuracy": 85.45
+      },
+      "MesoNet-4": {
+        "total": 165,
+        "correct": 83,
+        "accuracy": 50.3
+      },
+      "XceptionNet": {
+        "total": 165,
+        "correct": 85,
+        "accuracy": 51.52
+      },
+      "Multimodal ResNet-AV": {
+        "total": 165,
+        "correct": 73,
+        "accuracy": 44.24
+      },
+      "LipForensics": {
+        "total": 165,
+        "correct": 77,
+        "accuracy": 46.67
+      },
+      "AceNet (Baseline)": {
+        "total": 140,
+        "correct": 65,
+        "accuracy": 46.43
+      }
+    }
+  },
+  "grouped_category_breakdown": {
+    "Visual Swap Only": {
+      "DeepSentinel (Ours)": {
+        "total": 53,
+        "correct": 36,
+        "accuracy": 67.92
+      },
+      "MesoNet-4": {
+        "total": 53,
+        "correct": 29,
+        "accuracy": 54.72
+      },
+      "XceptionNet": {
+        "total": 53,
+        "correct": 24,
+        "accuracy": 45.28
+      },
+      "Multimodal ResNet-AV": {
+        "total": 53,
+        "correct": 31,
+        "accuracy": 58.49
+      },
+      "LipForensics": {
+        "total": 53,
+        "correct": 29,
+        "accuracy": 54.72
+      },
+      "AceNet (Baseline)": {
+        "total": 65,
+        "correct": 27,
+        "accuracy": 41.54
+      }
+    },
+    "Audio Cloning Only": {
+      "DeepSentinel (Ours)": {
+        "total": 5,
+        "correct": 3,
+        "accuracy": 60.0
+      },
+      "MesoNet-4": {
+        "total": 5,
+        "correct": 1,
+        "accuracy": 20.0
+      },
+      "XceptionNet": {
+        "total": 5,
+        "correct": 2,
+        "accuracy": 40.0
+      },
+      "Multimodal ResNet-AV": {
+        "total": 5,
+        "correct": 4,
+        "accuracy": 80.0
+      },
+      "LipForensics": {
+        "total": 5,
+        "correct": 1,
+        "accuracy": 20.0
+      },
+      "AceNet (Baseline)": {
+        "total": 5,
+        "correct": 2,
+        "accuracy": 40.0
+      }
+    },
+    "Audio-Visual Combined (Sync/Lip)": {
+      "DeepSentinel (Ours)": {
+        "total": 292,
+        "correct": 266,
+        "accuracy": 91.1
+      },
+      "MesoNet-4": {
+        "total": 292,
+        "correct": 140,
+        "accuracy": 47.95
+      },
+      "XceptionNet": {
+        "total": 292,
+        "correct": 153,
+        "accuracy": 52.4
+      },
+      "Multimodal ResNet-AV": {
+        "total": 292,
+        "correct": 123,
+        "accuracy": 42.12
+      },
+      "LipForensics": {
+        "total": 292,
+        "correct": 145,
+        "accuracy": 49.66
+      },
+      "AceNet (Baseline)": {
+        "total": 280,
+        "correct": 153,
+        "accuracy": 54.64
+      }
+    },
+    "Authentic / Real Clips": {
+      "DeepSentinel (Ours)": {
+        "total": 350,
+        "correct": 270,
+        "accuracy": 77.14
+      },
+      "MesoNet-4": {
+        "total": 350,
+        "correct": 194,
+        "accuracy": 55.43
+      },
+      "XceptionNet": {
+        "total": 350,
+        "correct": 175,
+        "accuracy": 50.0
+      },
+      "Multimodal ResNet-AV": {
+        "total": 350,
+        "correct": 165,
+        "accuracy": 47.14
+      },
+      "LipForensics": {
+        "total": 350,
+        "correct": 189,
+        "accuracy": 54.0
+      },
+      "AceNet (Baseline)": {
+        "total": 350,
+        "correct": 266,
+        "accuracy": 76.0
+      }
+    }
+  },
+  "figure_assets": {
+    "thesis_master_dashboard": "data/eval_results/figures_comparative/thesis_master_comparative_dashboard.png",
+    "roc_curves": "data/eval_results/figures_comparative/comparative_roc_curves.png",
+    "multimetric_barchart": "data/eval_results/figures_comparative/comparative_multimetric_barchart.png",
+    "method_breakdown": "data/eval_results/figures_comparative/comparative_method_breakdown.png"
+  }
+}

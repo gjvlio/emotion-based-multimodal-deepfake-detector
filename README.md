@@ -643,8 +643,7 @@ Thesis_G10/
 │   ├── preprocess_all.py           ← run preprocessing on all clips → Z_at/Z_v cache
 │   ├── train.py                    ← training entry point (Phase 1 / Phase 2)
 │   ├── evaluate.py                 ← evaluation entry point (metrics + ablation + OOD)
-│   ├── validate_generation.py      ← health check for generated clips
-│   ├── migrate_stems.py            ← one-off: rename FAKE_T1_ → FAKE_T2_/T3_ (already run)
+│   ├── plot_sota_comparisons.py    ← SOTA benchmark comparison & publication figures
 │   └── preconvert_flv.py           ← pre-convert FLVs to VideoMP4/ for problem actors
 │
 ├── tools/

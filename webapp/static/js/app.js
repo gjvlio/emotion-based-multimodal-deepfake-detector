@@ -623,7 +623,17 @@
       cropStart = 0.0;
       cropEnd = Math.min(totalDuration, 10.0);
 
-      cropFileInfo.textContent = `${file.name} · ${fmtTime(totalDuration)} · ${fmtSize(file.size)}`;
+      cropFileInfo.replaceChildren();
+      const chipName = document.createElement("span");
+      chipName.className = "crop-chip-name";
+      chipName.title = file.name;
+      chipName.textContent = file.name;
+
+      const chipMeta = document.createElement("span");
+      chipMeta.className = "crop-chip-meta";
+      chipMeta.textContent = ` · ${fmtTime(totalDuration)} · ${fmtSize(file.size)}`;
+
+      cropFileInfo.append(chipName, chipMeta);
       playerTotalTime.textContent = fmtTime(totalDuration);
       playerCurrTime.textContent = "00:00.0";
 
@@ -1355,7 +1365,20 @@
   // ── Live Stream Execution Tied to Real Backend Architecture ────────────────
   async function runAnalysis() {
     if (!selectedFile) return;
-    document.getElementById("analyzing-file").textContent = `${selectedFile.name} · Clip: ${fmtTime(cropStart)} - ${fmtTime(cropEnd)} (${(cropEnd - cropStart).toFixed(1)}s)`;
+    const fileEl = document.getElementById("analyzing-file");
+    if (fileEl) {
+      fileEl.replaceChildren();
+      const fnSpan = document.createElement("span");
+      fnSpan.className = "analyzing-filename";
+      fnSpan.title = selectedFile.name;
+      fnSpan.textContent = selectedFile.name;
+
+      const metaSpan = document.createElement("span");
+      metaSpan.className = "analyzing-clip-meta";
+      metaSpan.textContent = `Clip: ${fmtTime(cropStart)} – ${fmtTime(cropEnd)} (${(cropEnd - cropStart).toFixed(1)}s)`;
+
+      fileEl.append(fnSpan, metaSpan);
+    }
     navigate(routePath("/analyzing"));
 
     // Reset detection state
@@ -1562,6 +1585,13 @@
       ? "The voice and the face show different emotions."
       : "The voice and the face agree on the emotion.";
     countUp(document.getElementById("verdict-pct"), pct);
+
+    // BERT / Whisper Spoken Transcript
+    const transcriptEl = document.getElementById("result-transcript-text");
+    if (transcriptEl) {
+      const txt = (r.transcript || "").trim();
+      transcriptEl.textContent = txt ? `“${txt}”` : "“No discernible speech detected in this clip selection.”";
+    }
 
     // sarcasm + plain-language interpretation
     const pSarc = r.p_sarcasm ?? 0;

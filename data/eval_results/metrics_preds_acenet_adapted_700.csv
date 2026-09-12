@@ -1,0 +1,3 @@
+model,auc,accuracy,balanced_acc,precision,recall_tpr,specificity_tnr,f1_score,tp,tn,fp,fn,fpr,fnr,delong_pval
+DeepSentinel,0.901780,0.825714,0.825714,0.816667,0.840000,0.811429,0.828169,294,284,66,56,0.188571,0.160000,reference
+ACE-Net Baseline,0.642465,0.640000,0.640000,0.684211,0.520000,0.760000,0.590909,182,266,84,168,0.240000,0.480000,0.000000
