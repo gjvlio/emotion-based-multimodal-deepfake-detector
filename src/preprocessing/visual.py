@@ -393,3 +393,46 @@ def get_z_v(
         out = model(**inputs)
     cls_tokens = out.last_hidden_state[:, 0, :]   # (K, 768)
     return cls_tokens.cpu()                       # (K, 768) keyframe sequence
+
+
+def get_keyframe_pixels(
+    video_path: str | Path,
+    vit_model_name:       str   = "google/vit-base-patch16-224",
+    detector:             str   = "retinaface",
+    n_keyframes:          int   = 8,
+    frame_size:           int   = 224,
+    target_fps:           float = 25.0,
+    motion_threshold:     float = 0.3,
+    confidence_threshold: float = 0.7,
+    device:               str   = "cpu",
+) -> torch.Tensor:
+    """
+    Extracts Top-K keyframes from video and processes them into pixel_values tensor.
+    Returns: (1, K, 3, 224, 224) float32 tensor ready for ViT / DeepfakeDetector.forward().
+    """
+    _, processor = _load_vit(vit_model_name, device=device)
+
+    frames = extract_frames(video_path, target_fps)
+    if not frames:
+        pils = [Image.new("RGB", (frame_size, frame_size), color=(128, 128, 128)) for _ in range(n_keyframes)]
+    else:
+        gated_frames = optical_flow_gate(frames, motion_threshold)
+        face_results = detect_and_align_faces(gated_frames, detector, confidence_threshold)
+        if not face_results:
+            face_results = detect_and_align_faces(gated_frames, detector, 0.0)
+        if not face_results:
+            face_results = detect_and_align_faces(frames, detector, 0.0)
+        if not face_results:
+            face_results = [(f, sharpness_score(f)) for f in frames]
+
+        crops = [r[0] for r in face_results]
+        scores = [r[1] for r in face_results]
+        keyframes = select_keyframes(crops, scores, k=n_keyframes)
+        pils = frames_to_pil(keyframes, size=frame_size)
+        while len(pils) < n_keyframes:
+            pils.append(pils[-1].copy() if pils else Image.new("RGB", (frame_size, frame_size), color=(128, 128, 128)))
+
+    inputs = processor(images=pils, return_tensors="pt")
+    # inputs["pixel_values"] has shape (K, 3, 224, 224)
+    return inputs["pixel_values"].unsqueeze(0).to(device)  # (1, K, 3, 224, 224)
+

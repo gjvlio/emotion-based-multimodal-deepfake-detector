@@ -81,8 +81,23 @@ class ModelService:
         self._warmed = threading.Event()
         self._warm_thread: Optional[threading.Thread] = None
 
+        self._wav2vec_proc = None
+        self._bert_tok = None
+
         # Try an initial load (fine if nothing exists yet — endpoints report it).
         self.maybe_reload(force=True)
+
+    def _get_wav2vec_processor(self):
+        if self._wav2vec_proc is None:
+            from transformers import AutoProcessor
+            self._wav2vec_proc = AutoProcessor.from_pretrained(self.pipeline.wav2vec_model)
+        return self._wav2vec_proc
+
+    def _get_bert_tokenizer(self):
+        if self._bert_tok is None:
+            from transformers import AutoTokenizer
+            self._bert_tok = AutoTokenizer.from_pretrained(self.pipeline.bert_model)
+        return self._bert_tok
 
     # ── Checkpoint resolution ──────────────────────────────────────────────────
 
@@ -144,8 +159,7 @@ class ModelService:
             self._active_sig = sig
             note = None
             if phase == 2:
-                note = ("Phase-2 checkpoint loaded. Feature-path inference uses "
-                        "vanilla backbones; wire _predict_e2e for full fidelity.")
+                note = "Phase-2 checkpoint loaded with fine-tuned end-to-end backbones."
             if unexpected:
                 log.warning(f"Unexpected keys in checkpoint: {list(unexpected)[:5]}…")
 
@@ -265,6 +279,9 @@ class ModelService:
                 log.debug(f"Duration check bypass: {e}")
 
         clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
+        if meta.phase == 2 and getattr(self.model, "_backbones_loaded", False):
+            return self._predict_e2e(video_path, clip_id=clip_id, meta=meta)
+
         feats = self.pipeline.process(clip_id, video_path)
         if feats is None:
             raise ValueError("Preprocessing failed — could not extract features "
@@ -394,10 +411,10 @@ class ModelService:
             "tech": "Wav2Vec 2.0 · BERT",
             "status": "active",
         }
-        from src.preprocessing.audio import transcribe, get_z_at
+        from src.preprocessing.audio import transcribe
         txt_file = self.pipeline._txt_path(clip_id)
         if not txt_file.exists():
-            transcript = transcribe(wav, self.pipeline.whisper_model, device=self.device) if wav.exists() else ""
+            transcript = transcribe(wav, self.pipeline.whisper_model, device=self.device) if (wav.exists() and wav.stat().st_size > 500) else ""
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
@@ -410,16 +427,59 @@ class ModelService:
             "msg": "Transcription ready",
         }
 
-        z_at_path = self.pipeline._z_at_path(clip_id)
-        if not z_at_path.exists():
-            z_at = get_z_at(
-                wav, transcript,
-                self.pipeline.wav2vec_model, self.pipeline.bert_model,
-                self.device, self.pipeline.max_audio_sec,
-            )
-            torch.save(z_at, z_at_path)
+        # Prepare audio & text representations
+        import torchaudio
+        max_samples = self.pipeline.max_audio_sec * 16000
+        if wav.exists() and wav.stat().st_size > 500:
+            try:
+                waveform, sr = torchaudio.load(str(wav))
+                if waveform.shape[0] > 1:
+                    waveform = waveform.mean(dim=0, keepdim=True)
+                if sr != 16000:
+                    waveform = torchaudio.functional.resample(waveform, sr, 16000)
+                waveform = waveform.squeeze(0)
+                if waveform.shape[0] > max_samples:
+                    waveform = waveform[:max_samples]
+                proc = self._get_wav2vec_processor()
+                audio_enc = proc(
+                    waveform.numpy(),
+                    sampling_rate=16000,
+                    return_tensors="pt",
+                    padding="max_length",
+                    max_length=max_samples,
+                    truncation=True,
+                )
+                audio_values = audio_enc.input_values.to(self.device)
+            except Exception as e:
+                log.warning(f"Audio processing failed in stream: {e}")
+                audio_values = torch.zeros(1, 80000, device=self.device)
         else:
-            z_at = torch.load(z_at_path, weights_only=True)
+            audio_values = torch.zeros(1, 80000, device=self.device)
+
+        tok = self._get_bert_tokenizer()
+        bert_enc = tok(
+            transcript or "",
+            return_tensors="pt",
+            padding="max_length",
+            max_length=128,
+            truncation=True,
+        )
+        input_ids = bert_enc.input_ids.to(self.device)
+        attention_mask = bert_enc.attention_mask.to(self.device)
+
+        is_e2e = meta.phase == 2 and getattr(self.model, "_backbones_loaded", False)
+        if not is_e2e:
+            from src.preprocessing.audio import get_z_at
+            z_at_path = self.pipeline._z_at_path(clip_id)
+            if not z_at_path.exists():
+                z_at = get_z_at(
+                    wav, transcript,
+                    self.pipeline.wav2vec_model, self.pipeline.bert_model,
+                    self.device, self.pipeline.max_audio_sec,
+                )
+                torch.save(z_at, z_at_path)
+            else:
+                z_at = torch.load(z_at_path, weights_only=True)
 
         yield {"step": 1, "status": "done", "transcript": transcript}
 
@@ -447,21 +507,35 @@ class ModelService:
             "tech": "Vision Transformer",
             "status": "active",
         }
-        from src.preprocessing.visual import get_z_v
-        z_v_path = self.pipeline._z_v_path(clip_id)
-        if not z_v_path.exists():
-            z_v = get_z_v(
+        if is_e2e:
+            from src.preprocessing.visual import get_keyframe_pixels
+            keyframe_pixels = get_keyframe_pixels(
                 video_path,
                 vit_model_name=self.pipeline.vit_model,
                 detector=self.pipeline.face_detector,
                 n_keyframes=self.pipeline.n_keyframes,
                 frame_size=self.pipeline.frame_size,
                 target_fps=self.pipeline.target_fps,
+                motion_threshold=self.pipeline.motion_threshold,
+                confidence_threshold=self.pipeline.confidence_threshold,
                 device=self.device,
             )
-            torch.save(z_v, z_v_path)
         else:
-            z_v = torch.load(z_v_path, weights_only=True)
+            from src.preprocessing.visual import get_z_v
+            z_v_path = self.pipeline._z_v_path(clip_id)
+            if not z_v_path.exists():
+                z_v = get_z_v(
+                    video_path,
+                    vit_model_name=self.pipeline.vit_model,
+                    detector=self.pipeline.face_detector,
+                    n_keyframes=self.pipeline.n_keyframes,
+                    frame_size=self.pipeline.frame_size,
+                    target_fps=self.pipeline.target_fps,
+                    device=self.device,
+                )
+                torch.save(z_v, z_v_path)
+            else:
+                z_v = torch.load(z_v_path, weights_only=True)
         yield {"step": 3, "status": "done"}
 
         # Step 4: Comparing voice emotion vs face emotion
@@ -472,9 +546,17 @@ class ModelService:
             "tech": "Bilinear Fusion",
             "status": "active",
         }
-        z_at_t = z_at.unsqueeze(0).float().to(self.device)
-        z_v_t = z_v.unsqueeze(0).float().to(self.device)
-        out = self.model.forward_from_features(z_at_t, z_v_t)
+        if is_e2e:
+            out = self.model(
+                audio_values=audio_values,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                keyframe_pixels=keyframe_pixels,
+            )
+        else:
+            z_at_t = z_at.unsqueeze(0).float().to(self.device)
+            z_v_t = z_v.unsqueeze(0).float().to(self.device)
+            out = self.model.forward_from_features(z_at_t, z_v_t)
 
         T = max(float(settings.temperature), 1e-3)
         p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
@@ -541,18 +623,125 @@ class ModelService:
             "result": det_result.dict(),
         }
 
-    @torch.no_grad()
-    def _predict_e2e(self, video_path: Path):  # pragma: no cover - Phase 2 seam
-        """End-to-end inference using the checkpoint's fine-tuned backbones.
+    def _prepare_e2e_inputs(self, video_path: Path, clip_id: str):
+        import torchaudio
+        from src.preprocessing.audio import extract_audio_to_wav, transcribe
+        from src.preprocessing.visual import get_keyframe_pixels
 
-        TODO (Phase 2): build raw model inputs and call self.model.forward():
-          - audio_values   : waveform tensor (use src.preprocessing.audio helpers)
-          - input_ids/mask : BERT tokenization of the Whisper transcript
-          - keyframe_pixels : (1, K, 3, 224, 224) from the visual keyframe selector
-        Until wired, Phase-2 checkpoints are served via the feature path with a
-        fidelity note. Kept as an explicit seam so the contract is visible.
-        """
-        raise NotImplementedError("Phase-2 end-to-end inference not yet wired.")
+        # 1. Audio
+        wav = self.pipeline._wav_path(clip_id)
+        if not wav.exists():
+            wav.parent.mkdir(parents=True, exist_ok=True)
+            extract_audio_to_wav(video_path, wav)
+
+        max_samples = self.pipeline.max_audio_sec * 16000
+        if wav.exists() and wav.stat().st_size > 500:
+            try:
+                waveform, sr = torchaudio.load(str(wav))
+                if waveform.shape[0] > 1:
+                    waveform = waveform.mean(dim=0, keepdim=True)
+                if sr != 16000:
+                    waveform = torchaudio.functional.resample(waveform, sr, 16000)
+                waveform = waveform.squeeze(0)
+                if waveform.shape[0] > max_samples:
+                    waveform = waveform[:max_samples]
+                proc = self._get_wav2vec_processor()
+                audio_enc = proc(
+                    waveform.numpy(),
+                    sampling_rate=16000,
+                    return_tensors="pt",
+                    padding="max_length",
+                    max_length=max_samples,
+                    truncation=True,
+                )
+                audio_values = audio_enc.input_values.to(self.device)
+            except Exception as e:
+                log.warning(f"Audio processing failed for {wav}: {e}")
+                audio_values = torch.zeros(1, 80000, device=self.device)
+        else:
+            audio_values = torch.zeros(1, 80000, device=self.device)
+
+        # 2. Transcript & BERT
+        txt_file = self.pipeline._txt_path(clip_id)
+        if not txt_file.exists():
+            transcript = transcribe(wav, self.pipeline.whisper_model, device=self.device) if (wav.exists() and wav.stat().st_size > 500) else ""
+            txt_file.write_text(transcript, encoding="utf-8")
+        else:
+            transcript = txt_file.read_text(encoding="utf-8").strip()
+
+        tok = self._get_bert_tokenizer()
+        bert_enc = tok(
+            transcript or "",
+            return_tensors="pt",
+            padding="max_length",
+            max_length=128,
+            truncation=True,
+        )
+        input_ids = bert_enc.input_ids.to(self.device)
+        attention_mask = bert_enc.attention_mask.to(self.device)
+
+        # 3. Keyframe pixels
+        keyframe_pixels = get_keyframe_pixels(
+            video_path,
+            vit_model_name=self.pipeline.vit_model,
+            detector=self.pipeline.face_detector,
+            n_keyframes=self.pipeline.n_keyframes,
+            frame_size=self.pipeline.frame_size,
+            target_fps=self.pipeline.target_fps,
+            motion_threshold=self.pipeline.motion_threshold,
+            confidence_threshold=self.pipeline.confidence_threshold,
+            device=self.device,
+        )
+
+        return audio_values, input_ids, attention_mask, keyframe_pixels, transcript
+
+    @torch.no_grad()
+    def _predict_e2e(
+        self, video_path: Path, clip_id: Optional[str] = None, meta: Optional[ModelInfo] = None
+    ) -> DetectionResult:
+        """End-to-end inference using the checkpoint's fine-tuned backbones."""
+        meta = meta or self._meta
+        clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
+        audio_values, input_ids, attention_mask, keyframe_pixels, transcript = self._prepare_e2e_inputs(video_path, clip_id)
+
+        out = self.model(
+            audio_values=audio_values,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            keyframe_pixels=keyframe_pixels,
+        )
+
+        T = max(float(settings.temperature), 1e-3)
+        p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
+        p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
+        pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+        pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
+        delta = torch.abs(pa - pb)
+
+        def _emo(probs) -> EmotionPrediction:
+            idx = int(torch.argmax(probs).item())
+            return EmotionPrediction(
+                label=EMOTIONS[idx],
+                confidence=float(probs[idx].item()),
+                distribution={EMOTIONS[i]: float(probs[i].item()) for i in range(len(EMOTIONS))},
+            )
+
+        audio_emo = _emo(pa)
+        visual_emo = _emo(pb)
+        delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
+        verdict = "FAKE" if p_fake > settings.decision_threshold else "REAL"
+
+        return DetectionResult(
+            verdict=verdict,
+            p_fake=p_fake,
+            threshold=settings.decision_threshold,
+            audio_text_emotion=audio_emo,
+            visual_emotion=visual_emo,
+            emotion_mismatch=delta_dict,
+            p_sarcasm=p_sarc,
+            transcript=transcript,
+            served_by=meta,
+        )
 
 
 # Module-level singleton, created by the app lifespan.

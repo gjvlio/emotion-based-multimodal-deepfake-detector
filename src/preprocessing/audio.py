@@ -128,12 +128,16 @@ def transcribe(
     wav_path: str | Path,
     model_name: str = "openai/whisper-base",
     device: str = "cpu",
+    language: str = "en",
 ) -> str:
     """Transcribe WAV file using Whisper. Returns text string."""
     try:
         wm = _load_whisper(model_name, device=device)
         use_fp16 = device.startswith("cuda")
-        result = wm.transcribe(str(wav_path), fp16=use_fp16)
+        kwargs = {"fp16": use_fp16, "task": "transcribe", "temperature": 0.0}
+        if language:
+            kwargs["language"] = language
+        result = wm.transcribe(str(wav_path), **kwargs)
         return result.get("text", "").strip()
     except Exception as e:
         log.warning(f"Whisper transcription failed for {wav_path}: {e}")
