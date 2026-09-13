@@ -323,6 +323,7 @@ class DeepfakeDetector(nn.Module):
         attention_mask:  torch.Tensor,            # (B, seq_len)
         keyframe_pixels: torch.Tensor,            # (B, K, 3, 224, 224)
         grl_alpha:       float = 1.0,
+        z_at_emo:        Optional[torch.Tensor] = None,
     ) -> DetectorOutput:
         """
         Phase 2 end-to-end forward pass.
@@ -350,7 +351,7 @@ class DeepfakeDetector(nn.Module):
         vit_out = self._vit(pixel_values=frames).last_hidden_state[:, 0, :]  # (B*K, 768)
         z_v_seq = vit_out.view(B, K, 768)                        # (B, K, 768)
 
-        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha)
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo)
 
     def _forward_impl(
         self,
@@ -358,6 +359,7 @@ class DeepfakeDetector(nn.Module):
         bert_emb: torch.Tensor,
         z_v_seq: torch.Tensor,
         grl_alpha: float = 1.0,
+        z_at_emo: Optional[torch.Tensor] = None,
     ) -> DetectorOutput:
         # Pure audio-text embedding before cross-attention visual contamination
         z_at_clean = torch.cat([w2v_emb, bert_emb], dim=-1)
@@ -383,7 +385,7 @@ class DeepfakeDetector(nn.Module):
         z_v = gru_out[:, -1, :]                                  # Take last hidden state (B, 768)
 
         # 3. Detect
-        return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_clean)
+        return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_emo if z_at_emo is not None else z_at_clean)
 
     # ── Convenience ───────────────────────────────────────────────────────────
 

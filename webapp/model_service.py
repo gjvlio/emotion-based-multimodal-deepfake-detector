@@ -549,15 +549,15 @@ class ModelService:
             "status": "active",
         }
         if is_e2e:
+            z_at_t = z_at.unsqueeze(0).float().to(self.device)
             out = self.model(
                 audio_values=audio_values,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 keyframe_pixels=keyframe_pixels,
+                z_at_emo=z_at_t,
             )
-            z_at_t = z_at.unsqueeze(0).float().to(self.device)
-            emo_a_logits = self.model.emotion_head_a(z_at_t)
-            pa = F.softmax(emo_a_logits, dim=-1).squeeze(0)
+            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
             pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         else:
             z_at_t = z_at.unsqueeze(0).float().to(self.device)
@@ -711,13 +711,6 @@ class ModelService:
         clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
         audio_values, input_ids, attention_mask, keyframe_pixels, transcript = self._prepare_e2e_inputs(video_path, clip_id)
 
-        out = self.model(
-            audio_values=audio_values,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            keyframe_pixels=keyframe_pixels,
-        )
-
         from src.preprocessing.audio import get_z_at
         z_at_path = self.pipeline._z_at_path(clip_id)
         if not z_at_path.exists():
@@ -732,12 +725,19 @@ class ModelService:
             z_at = torch.load(z_at_path, weights_only=True)
 
         z_at_t = z_at.unsqueeze(0).float().to(self.device)
-        emo_a_logits = self.model.emotion_head_a(z_at_t)
+
+        out = self.model(
+            audio_values=audio_values,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            keyframe_pixels=keyframe_pixels,
+            z_at_emo=z_at_t,
+        )
 
         T = max(float(settings.temperature), 1e-3)
         p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
         p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
-        pa = F.softmax(emo_a_logits, dim=-1).squeeze(0)
+        pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
         pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         delta = torch.abs(pa - pb)
 
