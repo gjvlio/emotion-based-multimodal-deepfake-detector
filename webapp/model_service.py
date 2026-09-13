@@ -429,7 +429,8 @@ class ModelService:
 
         # Prepare audio & text representations
         import torchaudio
-        max_samples = self.pipeline.max_audio_sec * 16000
+        # Standardize audio window to 80,000 samples (5.0s @ 16kHz) matching Phase 2 training MAX_AUDIO
+        max_samples = 80000
         if wav.exists() and wav.stat().st_size > 500:
             try:
                 waveform, sr = torchaudio.load(str(wav))
@@ -634,7 +635,8 @@ class ModelService:
             wav.parent.mkdir(parents=True, exist_ok=True)
             extract_audio_to_wav(video_path, wav)
 
-        max_samples = self.pipeline.max_audio_sec * 16000
+        # Standardize audio window to 80,000 samples (5.0s @ 16kHz) matching Phase 2 training MAX_AUDIO
+        max_samples = 80000
         if wav.exists() and wav.stat().st_size > 500:
             try:
                 waveform, sr = torchaudio.load(str(wav))
