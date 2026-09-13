@@ -388,6 +388,49 @@ class DeepfakeDetector(nn.Module):
         # 3. Detect
         return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_emo if z_at_emo is not None else z_at_clean)
 
+    # ── State Dict Loading ────────────────────────────────────────────────────
+
+    def load_state_dict(self, state_dict: dict, strict: bool = True, assign: bool = False):
+        """
+        Custom load_state_dict to handle legacy/alternative ViT layer naming conventions:
+        '_vit.layers.{i}.attention.q_proj...' -> '_vit.encoder.layer.{i}.attention.attention.query...'
+        Ensures 100% of fine-tuned ViT backbone weights are loaded into HuggingFace ViTModel.
+        """
+        remapped_state = {}
+        for k, v in state_dict.items():
+            new_k = k
+            for prefix in ["_vit.", "vit."]:
+                if new_k.startswith(prefix + "layers."):
+                    parts = new_k.split(".")
+                    i = parts[2]
+                    rest = ".".join(parts[3:])
+                    mapping = {
+                        "attention.q_proj.weight": f"{prefix}encoder.layer.{i}.attention.attention.query.weight",
+                        "attention.q_proj.bias":   f"{prefix}encoder.layer.{i}.attention.attention.query.bias",
+                        "attention.k_proj.weight": f"{prefix}encoder.layer.{i}.attention.attention.key.weight",
+                        "attention.k_proj.bias":   f"{prefix}encoder.layer.{i}.attention.attention.key.bias",
+                        "attention.v_proj.weight": f"{prefix}encoder.layer.{i}.attention.attention.value.weight",
+                        "attention.v_proj.bias":   f"{prefix}encoder.layer.{i}.attention.attention.value.bias",
+                        "attention.o_proj.weight": f"{prefix}encoder.layer.{i}.attention.output.dense.weight",
+                        "attention.o_proj.bias":   f"{prefix}encoder.layer.{i}.attention.output.dense.bias",
+                        "layernorm_before.weight": f"{prefix}encoder.layer.{i}.layernorm_before.weight",
+                        "layernorm_before.bias":   f"{prefix}encoder.layer.{i}.layernorm_before.bias",
+                        "layernorm_after.weight":  f"{prefix}encoder.layer.{i}.layernorm_after.weight",
+                        "layernorm_after.bias":    f"{prefix}encoder.layer.{i}.layernorm_after.bias",
+                        "mlp.fc1.weight":          f"{prefix}encoder.layer.{i}.intermediate.dense.weight",
+                        "mlp.fc1.bias":            f"{prefix}encoder.layer.{i}.intermediate.dense.bias",
+                        "mlp.fc2.weight":          f"{prefix}encoder.layer.{i}.output.dense.weight",
+                        "mlp.fc2.bias":            f"{prefix}encoder.layer.{i}.output.dense.bias",
+                    }
+                    if rest in mapping:
+                        new_k = mapping[rest]
+            remapped_state[new_k] = v
+
+        try:
+            return super().load_state_dict(remapped_state, strict=strict, assign=assign)
+        except TypeError:
+            return super().load_state_dict(remapped_state, strict=strict)
+
     # ── Convenience ───────────────────────────────────────────────────────────
 
     @staticmethod
