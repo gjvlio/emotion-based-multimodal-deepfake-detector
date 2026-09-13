@@ -260,9 +260,11 @@ def _load_insightface_app():
     global _insightface_app
     if _insightface_app is None:
         from insightface.app import FaceAnalysis
+        import torch
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
         _insightface_app = FaceAnalysis(
             name="buffalo_s",
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            providers=providers,
         )
         _insightface_app.prepare(ctx_id=0, det_size=(640, 640))
     return _insightface_app
@@ -276,6 +278,7 @@ def _insightface_detect(
     insightface (ONNX RetinaFace) detection with AU-saliency weighted scoring.
     score = conf × sharpness × AU_saliency
     Only keeps detections with conf >= confidence_threshold.
+    Preserves natural 1:1 aspect ratio with 20% context margin to avoid facial squashing/distortion.
     """
     if not _INSIGHTFACE_AVAILABLE:
         return _haar_fallback(frames)
@@ -295,7 +298,16 @@ def _insightface_detect(
             if best.det_score < confidence_threshold:
                 continue
             x1, y1, x2, y2 = best.bbox.astype(int)
-            crop = frame[max(0, y1):y2, max(0, x1):x2]
+            bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            # Expand to square bounding box with 20% context margin to preserve 1:1 facial aspect ratio
+            side = max(bw, bh) * 1.20
+            h, w = frame.shape[:2]
+            ny1 = max(0, int(round(cy - side / 2.0)))
+            ny2 = min(h, int(round(cy + side / 2.0)))
+            nx1 = max(0, int(round(cx - side / 2.0)))
+            nx2 = min(w, int(round(cx + side / 2.0)))
+            crop = frame[ny1:ny2, nx1:nx2]
             if crop.size == 0:
                 continue
             base = float(best.det_score) * sharpness_score(crop)
@@ -322,11 +334,19 @@ def _haar_fallback(frames: List[np.ndarray]) -> List[Tuple[np.ndarray, float]]:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = cascade.detectMultiScale(gray, 1.1, 4)
                 if len(faces) > 0:
-                    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-                    crop = cv2.resize(frame[y:y+h, x:x+w], (224, 224), interpolation=cv2.INTER_AREA)
-                    base = sharpness_score(crop)
-                    results.append((crop, base))
-                    continue
+                    x, y, w_box, h_box = max(faces, key=lambda f: f[2] * f[3])
+                    cx, cy = x + w_box / 2.0, y + h_box / 2.0
+                    side = max(w_box, h_box) * 1.20
+                    h_f, w_f = frame.shape[:2]
+                    ny1 = max(0, int(round(cy - side / 2.0)))
+                    ny2 = min(h_f, int(round(cy + side / 2.0)))
+                    nx1 = max(0, int(round(cx - side / 2.0)))
+                    nx2 = min(w_f, int(round(cx + side / 2.0)))
+                    crop = frame[ny1:ny2, nx1:nx2]
+                    if crop.size > 0:
+                        base = sharpness_score(crop)
+                        results.append((crop, base))
+                        continue
             except Exception:
                 pass
         # High-quality human center crop (biased upper-center for human head/face)
