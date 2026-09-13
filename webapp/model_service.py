@@ -468,19 +468,20 @@ class ModelService:
         input_ids = bert_enc.input_ids.to(self.device)
         attention_mask = bert_enc.attention_mask.to(self.device)
 
+        # Compute canonical Z_at for calibrated emotion prediction
+        from src.preprocessing.audio import get_z_at
+        z_at_path = self.pipeline._z_at_path(clip_id)
+        if not z_at_path.exists():
+            z_at = get_z_at(
+                wav, transcript,
+                self.pipeline.wav2vec_model, self.pipeline.bert_model,
+                self.device, self.pipeline.max_audio_sec,
+            )
+            torch.save(z_at, z_at_path)
+        else:
+            z_at = torch.load(z_at_path, weights_only=True)
+
         is_e2e = meta.phase == 2 and getattr(self.model, "_backbones_loaded", False)
-        if not is_e2e:
-            from src.preprocessing.audio import get_z_at
-            z_at_path = self.pipeline._z_at_path(clip_id)
-            if not z_at_path.exists():
-                z_at = get_z_at(
-                    wav, transcript,
-                    self.pipeline.wav2vec_model, self.pipeline.bert_model,
-                    self.device, self.pipeline.max_audio_sec,
-                )
-                torch.save(z_at, z_at_path)
-            else:
-                z_at = torch.load(z_at_path, weights_only=True)
 
         yield {"step": 1, "status": "done", "transcript": transcript}
 
@@ -554,16 +555,20 @@ class ModelService:
                 attention_mask=attention_mask,
                 keyframe_pixels=keyframe_pixels,
             )
+            z_at_t = z_at.unsqueeze(0).float().to(self.device)
+            emo_a_logits = self.model.emotion_head_a(z_at_t)
+            pa = F.softmax(emo_a_logits, dim=-1).squeeze(0)
+            pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         else:
             z_at_t = z_at.unsqueeze(0).float().to(self.device)
             z_v_t = z_v.unsqueeze(0).float().to(self.device)
             out = self.model.forward_from_features(z_at_t, z_v_t)
+            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+            pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
 
         T = max(float(settings.temperature), 1e-3)
         p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
         p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
-        pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
-        pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         delta = torch.abs(pa - pb)
 
         def _emo(probs) -> EmotionPrediction:
@@ -713,10 +718,26 @@ class ModelService:
             keyframe_pixels=keyframe_pixels,
         )
 
+        from src.preprocessing.audio import get_z_at
+        z_at_path = self.pipeline._z_at_path(clip_id)
+        if not z_at_path.exists():
+            wav = self.pipeline._wav_path(clip_id)
+            z_at = get_z_at(
+                wav, transcript,
+                self.pipeline.wav2vec_model, self.pipeline.bert_model,
+                self.device, self.pipeline.max_audio_sec,
+            )
+            torch.save(z_at, z_at_path)
+        else:
+            z_at = torch.load(z_at_path, weights_only=True)
+
+        z_at_t = z_at.unsqueeze(0).float().to(self.device)
+        emo_a_logits = self.model.emotion_head_a(z_at_t)
+
         T = max(float(settings.temperature), 1e-3)
         p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
         p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
-        pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+        pa = F.softmax(emo_a_logits, dim=-1).squeeze(0)
         pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         delta = torch.abs(pa - pb)
 

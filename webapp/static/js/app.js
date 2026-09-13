@@ -1575,15 +1575,26 @@
 
   function renderResults(r) {
     const isFake = r.verdict === "FAKE";
-    const pct = Math.round(r.p_fake * 100);
+    const pFake = r.p_fake ?? 0;
+    const pct = isFake ? Math.round(pFake * 100) : Math.round((1 - pFake) * 100);
     const card = document.getElementById("verdict-card");
     card.classList.toggle("fake", isFake);
     card.classList.toggle("real", !isFake);
     document.getElementById("verdict-tag").textContent = isFake ? "Fake" : "Real";
     document.getElementById("verdict-label").textContent = isFake ? "Likely deepfake" : "Likely authentic";
-    document.getElementById("verdict-sub").textContent = isFake
-      ? "The voice and the face show different emotions."
-      : "The voice and the face agree on the emotion.";
+
+    const emoA = (r.audio_text_emotion?.label || "").toLowerCase();
+    const emoB = (r.visual_emotion?.label || "").toLowerCase();
+    const emotionsMatch = Boolean(emoA && emoB && emoA === emoB);
+
+    if (isFake) {
+      document.getElementById("verdict-sub").textContent =
+        "The voice and the face show conflicting emotional cues.";
+    } else {
+      document.getElementById("verdict-sub").textContent = emotionsMatch
+        ? "The voice and the face express consistent emotion."
+        : "Multimodal emotional cues are consistent with authentic delivery.";
+    }
     countUp(document.getElementById("verdict-pct"), pct);
 
     // BERT / Whisper Spoken Transcript
@@ -1598,10 +1609,17 @@
     const sarcastic = pSarc >= 0.5;
     const auth = isFake ? "<b>manipulated</b>" : "<b class='ok'>genuine</b>";
     let sentence;
-    if (!isFake && !sarcastic) sentence = `This looks ${auth} and sincerely delivered — the voice and the face agree.`;
-    else if (!isFake && sarcastic) sentence = `This looks ${auth}, but it is delivered <b>sarcastically</b> — the words may not be meant literally.`;
-    else if (isFake && !sarcastic) sentence = `This looks ${auth} — the emotion in the voice and the face do not line up.`;
-    else sentence = `This looks ${auth}, and the speech also reads as <b>sarcastic</b>.`;
+    if (!isFake && !sarcastic) {
+      sentence = emotionsMatch
+        ? `This looks ${auth} and sincerely delivered — the voice and the face agree.`
+        : `This looks ${auth} — natural multimodal dynamics align with authentic human expression.`;
+    } else if (!isFake && sarcastic) {
+      sentence = `This looks ${auth}, but it is delivered <b>sarcastically</b> — the words may not be meant literally.`;
+    } else if (isFake && !sarcastic) {
+      sentence = `This looks ${auth} — the emotion in the voice and the face do not line up.`;
+    } else {
+      sentence = `This looks ${auth}, with sharp emotional divergence and sarcastic speech cues.`;
+    }
     document.getElementById("interpret").innerHTML = sentence;
     const marker = document.getElementById("sarc-marker");
     document.getElementById("sarc-val").textContent = Math.round(pSarc * 100) + "%";
@@ -1613,9 +1631,15 @@
     for (const k of EMO_ORDER) if ((delta[k] ?? 0) > domVal) { domVal = delta[k] ?? 0; domKey = k; }
     document.getElementById("dom-title").textContent = `Biggest emotion gap · ${EMO_LABEL[domKey]}`;
     document.getElementById("gap-val").textContent = Math.round(domVal * 100) + "%";
-    const sig = domVal > 0.5 ? "high" : domVal > 0.3 ? "moderate" : "low";
-    document.getElementById("dom-desc").textContent =
-      `the voice reads ${(r.audio_text_emotion?.label || "").toLowerCase()}, the face reads ${(r.visual_emotion?.label || "").toLowerCase()} · ${sig} fake signal`;
+    if (isFake) {
+      const sig = domVal > 0.5 ? "high" : domVal > 0.3 ? "moderate" : "low";
+      document.getElementById("dom-desc").textContent =
+        `the voice reads ${emoA}, the face reads ${emoB} · ${sig} fake signal`;
+    } else {
+      document.getElementById("dom-desc").textContent = emotionsMatch
+        ? `the voice and face both read ${emoA} · consistent across modalities`
+        : `the voice reads ${emoA}, the face reads ${emoB} · localized variance within authentic range`;
+    }
     const domBar = document.getElementById("dom-bar");
     domBar.style.width = "0%";
     setTimeout(() => (domBar.style.width = (domVal * 100).toFixed(1) + "%"), 140);

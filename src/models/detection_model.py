@@ -234,9 +234,16 @@ class DeepfakeDetector(nn.Module):
 
     # ── Core detection logic ───────────────────────────────────────────────────
 
-    def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor, grl_alpha: float = 1.0) -> DetectorOutput:
+    def _detect(
+        self,
+        z_at: torch.Tensor,
+        z_v: torch.Tensor,
+        grl_alpha: float = 1.0,
+        z_at_emo: Optional[torch.Tensor] = None,
+    ) -> DetectorOutput:
         """Shared logic after feature extraction."""
-        emo_a = self.emotion_head_a(z_at)  # (B, 6)
+        emo_source = z_at_emo if z_at_emo is not None else z_at
+        emo_a = self.emotion_head_a(emo_source)  # (B, 6)
         emo_b = self.emotion_head_b(z_v)   # (B, 6)
         sarc  = self.sarcasm_head(z_at)    # (B, 1)
 
@@ -352,6 +359,9 @@ class DeepfakeDetector(nn.Module):
         z_v_seq: torch.Tensor,
         grl_alpha: float = 1.0,
     ) -> DetectorOutput:
+        # Pure audio-text embedding before cross-attention visual contamination
+        z_at_clean = torch.cat([w2v_emb, bert_emb], dim=-1)
+
         # 1. Multi-Head Cross-Modal Attention
         audio_text_seq = torch.stack([w2v_emb, bert_emb], dim=1)  # (B, 2, 768)
 
@@ -364,16 +374,16 @@ class DeepfakeDetector(nn.Module):
         audio_text_seq = self.norm_at(audio_text_seq + at_attn)
 
         # Split back to acoustic and linguistic
-        w2v_emb = audio_text_seq[:, 0, :]
-        bert_emb = audio_text_seq[:, 1, :]
-        z_at = torch.cat([w2v_emb, bert_emb], dim=-1)            # (B, 1536)
+        w2v_emb_fused = audio_text_seq[:, 0, :]
+        bert_emb_fused = audio_text_seq[:, 1, :]
+        z_at_fused = torch.cat([w2v_emb_fused, bert_emb_fused], dim=-1)            # (B, 1536)
 
         # 2. Temporal GRU Aggregation on Visual Sequence
         gru_out, _ = self.vit_gru(z_v_seq)                       # (B, K, 768)
         z_v = gru_out[:, -1, :]                                  # Take last hidden state (B, 768)
 
         # 3. Detect
-        return self._detect(z_at, z_v, grl_alpha=grl_alpha)
+        return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_clean)
 
     # ── Convenience ───────────────────────────────────────────────────────────
 
