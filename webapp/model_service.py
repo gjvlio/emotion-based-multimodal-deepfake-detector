@@ -290,7 +290,7 @@ class ModelService:
         z_at = feats.z_at.unsqueeze(0).float().to(self.device)  # (1, 1536)
         z_v = feats.z_v.unsqueeze(0).float().to(self.device)    # (1, 768)
 
-        out = self.model.forward_from_features(z_at, z_v)
+        out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at)
 
         # Temperature scaling — softens overconfident (saturated) sigmoids.
         # Does not change the verdict: sign of the logit is preserved.
@@ -322,7 +322,7 @@ class ModelService:
             served_by=meta,
         )
 
-    def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16) -> List[dict]:
+    def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0) -> List[dict]:
         import cv2
         from src.preprocessing.visual import _load_insightface_app
         cap = cv2.VideoCapture(str(video_path))
@@ -330,13 +330,15 @@ class ModelService:
             return []
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        max_eval_frames = int(max_seconds * fps) if (max_seconds and max_seconds > 0) else total_frames
+        eval_frames = min(total_frames, max_eval_frames) if total_frames > 0 else max_eval_frames
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1)
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1)
-        if total_frames <= 0 or w <= 0 or h <= 0:
+        if eval_frames <= 0 or w <= 0 or h <= 0:
             cap.release()
             return []
 
-        indices = [int(i * (total_frames - 1) / max(1, max_samples - 1)) for i in range(max_samples)]
+        indices = [int(i * (eval_frames - 1) / max(1, max_samples - 1)) for i in range(max_samples)]
         faces_out = []
         try:
             app = _load_insightface_app()
@@ -562,7 +564,7 @@ class ModelService:
         else:
             z_at_t = z_at.unsqueeze(0).float().to(self.device)
             z_v_t = z_v.unsqueeze(0).float().to(self.device)
-            out = self.model.forward_from_features(z_at_t, z_v_t)
+            out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t)
             pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
             pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
 

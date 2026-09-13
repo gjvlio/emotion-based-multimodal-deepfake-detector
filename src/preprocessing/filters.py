@@ -9,19 +9,21 @@ from __future__ import annotations
 import logging
 from typing import List, Tuple
 
+import os
 import cv2
 import numpy as np
 from PIL import Image
 
 log = logging.getLogger(__name__)
 
-_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+_cascade_dir = getattr(cv2.data, "haarcascades", "")
+_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml") if _cascade_dir else ""
 _cascade: cv2.CascadeClassifier | None = None
 
 
 def _get_cascade():
     global _cascade
-    if _cascade is None:
+    if _cascade is None and _CASCADE_PATH and os.path.exists(_CASCADE_PATH):
         try:
             _cascade = cv2.CascadeClassifier(_CASCADE_PATH)
         except Exception:

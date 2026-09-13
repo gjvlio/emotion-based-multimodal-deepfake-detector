@@ -49,7 +49,7 @@ class PreprocessingPipeline:
         face_detector:        str   = "retinaface",
         n_keyframes:          int   = 8,
         frame_size:           int   = 224,
-        max_audio_sec:        int   = 20,
+        max_audio_sec:        int   = 5,
         target_fps:           float = 25.0,
         motion_threshold:     float = 0.3,
         confidence_threshold: float = 0.7,

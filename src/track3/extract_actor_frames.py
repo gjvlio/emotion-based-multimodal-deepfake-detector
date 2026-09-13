@@ -222,9 +222,9 @@ def main():
 
     # Each thread gets its own detector instance (not thread-safe to share)
     def worker(actor_id: str) -> dict | None:
-        detector = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
+        cascade_dir = getattr(cv2.data, "haarcascades", "")
+        cascade_path = os.path.join(cascade_dir, "haarcascade_frontalface_default.xml") if cascade_dir else ""
+        detector = cv2.CascadeClassifier(cascade_path) if (cascade_path and os.path.exists(cascade_path)) else None
         return extract_for_actor(
             actor_id, cremad_video_dir, out_dir, args.n_finetune, detector
         )

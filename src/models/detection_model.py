@@ -296,6 +296,7 @@ class DeepfakeDetector(nn.Module):
         z_at: torch.Tensor,
         z_v:  torch.Tensor,
         grl_alpha: float = 1.0,
+        z_at_emo: Optional[torch.Tensor] = None,
     ) -> DetectorOutput:
         """
         Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768) or (B,8,768).
@@ -304,7 +305,7 @@ class DeepfakeDetector(nn.Module):
         has_cross_attn = getattr(self, "_has_cross_attn", True)
         if not has_cross_attn or z_v.ndim == 2:
             z_v_vec = z_v if z_v.ndim == 2 else z_v.mean(dim=1)
-            return self._detect(z_at, z_v_vec, grl_alpha=grl_alpha)
+            return self._detect(z_at, z_v_vec, grl_alpha=grl_alpha, z_at_emo=z_at_emo)
 
         w2v_emb = z_at[:, :768]
         bert_emb = z_at[:, 768:]
@@ -312,7 +313,7 @@ class DeepfakeDetector(nn.Module):
             z_v_seq = z_v                               # Genuine keyframe sequence (B, K, 768)
         else:
             raise ValueError(f"Unexpected z_v shape: {z_v.shape}")
-        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha)
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo)
 
     # ── Phase 2 path (end-to-end) ─────────────────────────────────────────────
 

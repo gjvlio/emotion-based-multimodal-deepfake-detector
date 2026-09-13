@@ -93,7 +93,7 @@ def get_acoustic_embedding(
     wav_path: str | Path,
     model_name: str = "facebook/wav2vec2-base",
     device: str = "cpu",
-    max_seconds: int = 20,
+    max_seconds: int = 5,
 ) -> torch.Tensor:
     """
     Load WAV, run Wav2Vec2, mean-pool temporal dim.
@@ -180,7 +180,7 @@ def get_z_at(
     wav2vec_model: str = "facebook/wav2vec2-base",
     bert_model:    str = "bert-base-uncased",
     device:        str = "cpu",
-    max_seconds:   int = 20,
+    max_seconds:   int = 5,
 ) -> torch.Tensor:
     """
     Compute Z_at = concat(acoustic_emb, linguistic_emb) → (1536,).

@@ -69,7 +69,7 @@ class Settings:
     whisper_model: str = "openai/whisper-base"
     vit_model: str = "google/vit-base-patch16-224"
 
-    decision_threshold: float = 0.5  # P(fake) > threshold ⇒ FAKE
+    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.5"))  # P(fake) > threshold ⇒ FAKE
 
     # Video duration bounds for uploaded clips (in seconds)
     max_upload_duration_sec: float = float(_env("MAX_UPLOAD_DURATION_SEC", "600.0"))  # up to 10 minutes
