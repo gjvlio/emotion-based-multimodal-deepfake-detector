@@ -217,10 +217,10 @@ class ModelService:
 
         t0 = time.time()
         steps = [
-            ("wav2vec2", lambda: A._load_wav2vec(settings.wav2vec_model)),
-            ("bert",     lambda: A._load_bert(settings.bert_model)),
+            ("wav2vec2", lambda: A._load_wav2vec(settings.wav2vec_model, device=self.device)),
+            ("bert",     lambda: A._load_bert(settings.bert_model, device=self.device)),
             ("whisper",  lambda: A._load_whisper(settings.whisper_model, device=self.device)),
-            ("vit",      lambda: V._load_vit(settings.vit_model)),
+            ("vit",      lambda: V._load_vit(settings.vit_model, device=self.device)),
             ("insightface", V._load_insightface_app),
         ]
         if getattr(V, "_FEAT_AVAILABLE", False):

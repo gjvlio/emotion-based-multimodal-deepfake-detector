@@ -28,7 +28,10 @@ _bert_tokenizer = None
 _whisper_model  = None
 
 
-def _load_wav2vec(model_name: str = "facebook/wav2vec2-base", device: str = "cuda") -> Tuple:
+_DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_wav2vec(model_name: str = "facebook/wav2vec2-base", device: str = _DEFAULT_DEVICE) -> Tuple:
     global _wav2vec_model, _wav2vec_proc
     if _wav2vec_model is None:
         from transformers import Wav2Vec2Model, Wav2Vec2Processor
@@ -41,7 +44,7 @@ def _load_wav2vec(model_name: str = "facebook/wav2vec2-base", device: str = "cud
     return _wav2vec_model, _wav2vec_proc
 
 
-def _load_bert(model_name: str = "bert-base-uncased", device: str = "cuda") -> Tuple:
+def _load_bert(model_name: str = "bert-base-uncased", device: str = _DEFAULT_DEVICE) -> Tuple:
     global _bert_model, _bert_tokenizer
     if _bert_model is None:
         from transformers import BertModel, BertTokenizer
@@ -54,9 +57,9 @@ def _load_bert(model_name: str = "bert-base-uncased", device: str = "cuda") -> T
     return _bert_model, _bert_tokenizer
 
 
-_whisper_device: str = "cuda"
+_whisper_device: str = _DEFAULT_DEVICE
 
-def _load_whisper(model_name: str = "openai/whisper-base", device: str = "cuda") -> object:
+def _load_whisper(model_name: str = "openai/whisper-base", device: str = _DEFAULT_DEVICE) -> object:
     global _whisper_model, _whisper_device
     if _whisper_model is None or _whisper_device != device:
         import whisper

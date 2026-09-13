@@ -58,7 +58,10 @@ except ImportError:
     log.warning("insightface not installed — face detection will use Haar cascade fallback. Install: pip install insightface")
 
 
-def _load_vit(model_name: str = "google/vit-base-patch16-224", device: str = "cuda") -> Tuple:
+_DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_vit(model_name: str = "google/vit-base-patch16-224", device: str = _DEFAULT_DEVICE) -> Tuple:
     global _vit_model, _vit_processor
     if _vit_model is None:
         from transformers import ViTModel, ViTImageProcessor
