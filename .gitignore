@@ -57,7 +57,10 @@ tools/MuseTalk/
 *.mov
 
 *.txt
+!requirements*.txt
+!requirements/*.txt
 *.pdf
+*.log
 
 # =============================================================================
 # Large model / index binaries
@@ -103,3 +106,7 @@ data/processed/
 # Scratch (throwaway test scripts + install logs)
 .venv-feat*.log
 scripts/_au_*.py
+scratch/
+.tempmediaStorage/
+.user_uploaded/
+*.tmp
