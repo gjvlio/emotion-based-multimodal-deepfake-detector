@@ -583,11 +583,21 @@ class ModelService:
             p_sarc = torch.sigmoid(out.sarcasm.squeeze()).item()
             delta = torch.abs(pa - pb)
 
-        # Calibrated probability
+        # Calibrated probability with multimodal emotional harmony prior
+        logit = out.logit.squeeze()
+        if has_speech:
+            top_a = int(torch.argmax(pa).item())
+            top_b = int(torch.argmax(pb).item())
+            max_delta = float(torch.max(delta).item())
+            conf_a = float(pa[top_a].item())
+            # Authentic biological coordination: voice and face emotions align with low mismatch
+            if top_a == top_b and max_delta < 0.30 and conf_a >= 0.65:
+                logit = logit - 0.60  # Authenticity prior for clear harmonious emotional expression
+
         tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
         logit_0 = math.log(tau_0 / (1.0 - tau_0))
         T = max(float(settings.temperature), 1e-3)
-        calibrated_logit = (out.logit.squeeze() - logit_0) / T
+        calibrated_logit = (logit - logit_0) / T
         p_fake = torch.sigmoid(calibrated_logit).item()
         verdict = "FAKE" if p_fake > 0.50 else "REAL"
 
@@ -749,13 +759,6 @@ class ModelService:
             has_speech=has_speech,
         )
 
-        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
-        logit_0 = math.log(tau_0 / (1.0 - tau_0))
-        T = max(float(settings.temperature), 1e-3)
-        calibrated_logit = (out.logit.squeeze() - logit_0) / T
-        p_fake = torch.sigmoid(calibrated_logit).item()
-        verdict = "FAKE" if p_fake > 0.50 else "REAL"
-
         pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         if not has_speech:
             pa = torch.zeros(6, device=self.device)
@@ -764,8 +767,26 @@ class ModelService:
             delta = torch.zeros(6, device=self.device)
         else:
             pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
-            p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
+            p_sarc = torch.sigmoid(out.sarcasm.squeeze()).item()
             delta = torch.abs(pa - pb)
+
+        # Calibrated probability with multimodal emotional harmony prior
+        logit = out.logit.squeeze()
+        if has_speech:
+            top_a = int(torch.argmax(pa).item())
+            top_b = int(torch.argmax(pb).item())
+            max_delta = float(torch.max(delta).item())
+            conf_a = float(pa[top_a].item())
+            # Authentic biological coordination: voice and face emotions align with low mismatch
+            if top_a == top_b and max_delta < 0.30 and conf_a >= 0.65:
+                logit = logit - 0.60  # Authenticity prior for clear harmonious emotional expression
+
+        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
+        logit_0 = math.log(tau_0 / (1.0 - tau_0))
+        T = max(float(settings.temperature), 1e-3)
+        calibrated_logit = (logit - logit_0) / T
+        p_fake = torch.sigmoid(calibrated_logit).item()
+        verdict = "FAKE" if p_fake > 0.50 else "REAL"
 
         def _emo(probs) -> EmotionPrediction:
             idx = int(torch.argmax(probs).item())

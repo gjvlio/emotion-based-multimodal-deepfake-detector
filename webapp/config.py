@@ -69,7 +69,7 @@ class Settings:
     whisper_model: str = "openai/whisper-base"
     vit_model: str = "google/vit-base-patch16-224"
 
-    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.44"))  # P(fake) > threshold ⇒ FAKE
+    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.44"))  # Separation threshold
 
     # Video duration bounds for uploaded clips (in seconds)
     max_upload_duration_sec: float = float(_env("MAX_UPLOAD_DURATION_SEC", "600.0"))  # up to 10 minutes
@@ -78,7 +78,7 @@ class Settings:
 
     # Post-hoc temperature scaling (Guo et al., 2017): logit /= T before sigmoid.
     # Calibrated temperature scaling maps raw model margins into decisive, well-spread confidence percentages.
-    temperature: float = float(_env("TEMPERATURE", "0.50"))
+    temperature: float = float(_env("TEMPERATURE", "0.65"))
 
 
 settings = Settings()

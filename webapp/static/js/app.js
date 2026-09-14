@@ -1588,8 +1588,9 @@
     const emotionsMatch = Boolean(emoA && emoB && emoA === emoB);
 
     if (isFake) {
-      document.getElementById("verdict-sub").textContent =
-        "The voice and the face show conflicting emotional cues.";
+      document.getElementById("verdict-sub").textContent = emotionsMatch
+        ? "Multimodal synthesis artifacts detected despite similar emotional tone."
+        : "The voice and the face show conflicting emotional cues.";
     } else {
       document.getElementById("verdict-sub").textContent = emotionsMatch
         ? "The voice and the face express consistent emotion."
@@ -1616,7 +1617,9 @@
     } else if (!isFake && sarcastic) {
       sentence = `This looks ${auth}, but it is delivered <b>sarcastically</b> — the words may not be meant literally.`;
     } else if (isFake && !sarcastic) {
-      sentence = `This looks ${auth} — the emotion in the voice and the face do not line up.`;
+      sentence = emotionsMatch
+        ? `This looks ${auth} — synthetic facial or acoustic generation cues detected despite matching emotion.`
+        : `This looks ${auth} — the emotion in the voice and the face do not line up.`;
     } else {
       sentence = `This looks ${auth}, with sharp emotional divergence and sarcastic speech cues.`;
     }
