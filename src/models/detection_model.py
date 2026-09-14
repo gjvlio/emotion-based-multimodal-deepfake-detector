@@ -240,6 +240,7 @@ class DeepfakeDetector(nn.Module):
         z_v: torch.Tensor,
         grl_alpha: float = 1.0,
         z_at_emo: Optional[torch.Tensor] = None,
+        has_speech: bool = True,
     ) -> DetectorOutput:
         """Shared logic after feature extraction."""
         emo_source = z_at_emo if z_at_emo is not None else z_at
@@ -249,9 +250,18 @@ class DeepfakeDetector(nn.Module):
 
         fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192)
 
-        prob_a = F.softmax(emo_a, dim=-1)
         prob_b = F.softmax(emo_b, dim=-1)
-        delta = torch.abs(prob_a - prob_b)  # (B, 6)
+        if not has_speech:
+            B = z_at.size(0)
+            # When speech is absent (silent/quiet video), vocal emotion is neutral, sarcasm is 0,
+            # and there is no voice-face incongruence (delta=0)
+            prob_a = torch.zeros(B, 6, device=z_at.device)
+            prob_a[:, 0] = 1.0  # 100% neutral voice
+            sarc = torch.zeros(B, 1, device=z_at.device)
+            delta = torch.zeros(B, 6, device=z_at.device)
+        else:
+            prob_a = F.softmax(emo_a, dim=-1)
+            delta = torch.abs(prob_a - prob_b)  # (B, 6)
 
         if self.classifier_mode == "mismatch_only":
             combined = torch.cat([delta, sarc], dim=-1)
@@ -297,6 +307,7 @@ class DeepfakeDetector(nn.Module):
         z_v:  torch.Tensor,
         grl_alpha: float = 1.0,
         z_at_emo: Optional[torch.Tensor] = None,
+        has_speech: bool = True,
     ) -> DetectorOutput:
         """
         Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768) or (B,8,768).
@@ -305,7 +316,7 @@ class DeepfakeDetector(nn.Module):
         has_cross_attn = getattr(self, "_has_cross_attn", True)
         if not has_cross_attn or z_v.ndim == 2:
             z_v_vec = z_v if z_v.ndim == 2 else z_v.mean(dim=1)
-            return self._detect(z_at, z_v_vec, grl_alpha=grl_alpha, z_at_emo=z_at_emo)
+            return self._detect(z_at, z_v_vec, grl_alpha=grl_alpha, z_at_emo=z_at_emo, has_speech=has_speech)
 
         w2v_emb = z_at[:, :768]
         bert_emb = z_at[:, 768:]
@@ -313,7 +324,7 @@ class DeepfakeDetector(nn.Module):
             z_v_seq = z_v                               # Genuine keyframe sequence (B, K, 768)
         else:
             raise ValueError(f"Unexpected z_v shape: {z_v.shape}")
-        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo)
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo, has_speech=has_speech)
 
     # ── Phase 2 path (end-to-end) ─────────────────────────────────────────────
 
@@ -325,6 +336,7 @@ class DeepfakeDetector(nn.Module):
         keyframe_pixels: torch.Tensor,            # (B, K, 3, 224, 224)
         grl_alpha:       float = 1.0,
         z_at_emo:        Optional[torch.Tensor] = None,
+        has_speech:      bool = True,
     ) -> DetectorOutput:
         """
         Phase 2 end-to-end forward pass.
@@ -352,7 +364,7 @@ class DeepfakeDetector(nn.Module):
         vit_out = self._vit(pixel_values=frames).last_hidden_state[:, 0, :]  # (B*K, 768)
         z_v_seq = vit_out.view(B, K, 768)                        # (B, K, 768)
 
-        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo)
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo, has_speech=has_speech)
 
     def _forward_impl(
         self,
@@ -361,7 +373,15 @@ class DeepfakeDetector(nn.Module):
         z_v_seq: torch.Tensor,
         grl_alpha: float = 1.0,
         z_at_emo: Optional[torch.Tensor] = None,
+        has_speech: bool = True,
     ) -> DetectorOutput:
+        if not has_speech:
+            # Genuine silence: visual sequence is purely visual, no cross-modal noise contamination
+            gru_out, _ = self.vit_gru(z_v_seq)
+            z_v = gru_out[:, -1, :]
+            z_at_clean = torch.zeros(z_v.size(0), self.Z_AT_DIM, device=z_v.device)
+            return self._detect(z_at_clean, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_clean, has_speech=False)
+
         # Pure audio-text embedding before cross-attention visual contamination
         z_at_clean = torch.cat([w2v_emb, bert_emb], dim=-1)
 
@@ -386,21 +406,25 @@ class DeepfakeDetector(nn.Module):
         z_v = gru_out[:, -1, :]                                  # Take last hidden state (B, 768)
 
         # 3. Detect
-        return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_emo if z_at_emo is not None else z_at_clean)
+        return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_emo if z_at_emo is not None else z_at_clean, has_speech=has_speech)
 
     # ── State Dict Loading ────────────────────────────────────────────────────
 
     def load_state_dict(self, state_dict: dict, strict: bool = True, assign: bool = False):
         """
-        Custom load_state_dict to handle legacy/alternative ViT layer naming conventions:
-        '_vit.layers.{i}.attention.q_proj...' -> '_vit.encoder.layer.{i}.attention.attention.query...'
-        Ensures 100% of fine-tuned ViT backbone weights are loaded into HuggingFace ViTModel.
+        Custom load_state_dict to handle ViT layer naming conventions across transformers versions:
+        - If current ViTModel uses `encoder.layer` and state_dict uses `layers`: remap to `encoder.layer`.
+        - If current ViTModel uses `layers` and state_dict uses `encoder.layer`: remap to `layers`.
         """
         remapped_state = {}
+        vit_has_encoder = False
+        if hasattr(self, "_vit") and self._vit is not None:
+            vit_has_encoder = hasattr(self._vit, "encoder") or (hasattr(self._vit, "vit") and hasattr(self._vit.vit, "encoder"))
+
         for k, v in state_dict.items():
             new_k = k
             for prefix in ["_vit.", "vit."]:
-                if new_k.startswith(prefix + "layers."):
+                if vit_has_encoder and new_k.startswith(prefix + "layers."):
                     parts = new_k.split(".")
                     i = parts[2]
                     rest = ".".join(parts[3:])
@@ -424,6 +448,30 @@ class DeepfakeDetector(nn.Module):
                     }
                     if rest in mapping:
                         new_k = mapping[rest]
+                elif (not vit_has_encoder) and new_k.startswith(prefix + "encoder.layer."):
+                    parts = new_k.split(".")
+                    i = parts[3]
+                    rest = ".".join(parts[4:])
+                    inv_mapping = {
+                        "attention.attention.query.weight": f"{prefix}layers.{i}.attention.q_proj.weight",
+                        "attention.attention.query.bias":   f"{prefix}layers.{i}.attention.q_proj.bias",
+                        "attention.attention.key.weight":   f"{prefix}layers.{i}.attention.k_proj.weight",
+                        "attention.attention.key.bias":     f"{prefix}layers.{i}.attention.k_proj.bias",
+                        "attention.attention.value.weight": f"{prefix}layers.{i}.attention.v_proj.weight",
+                        "attention.attention.value.bias":   f"{prefix}layers.{i}.attention.v_proj.bias",
+                        "attention.output.dense.weight":    f"{prefix}layers.{i}.attention.o_proj.weight",
+                        "attention.output.dense.bias":      f"{prefix}layers.{i}.attention.o_proj.bias",
+                        "layernorm_before.weight":          f"{prefix}layers.{i}.layernorm_before.weight",
+                        "layernorm_before.bias":            f"{prefix}layers.{i}.layernorm_before.bias",
+                        "layernorm_after.weight":           f"{prefix}layers.{i}.layernorm_after.weight",
+                        "layernorm_after.bias":             f"{prefix}layers.{i}.layernorm_after.bias",
+                        "intermediate.dense.weight":        f"{prefix}layers.{i}.mlp.fc1.weight",
+                        "intermediate.dense.bias":          f"{prefix}layers.{i}.mlp.fc1.bias",
+                        "output.dense.weight":              f"{prefix}layers.{i}.mlp.fc2.weight",
+                        "output.dense.bias":                f"{prefix}layers.{i}.mlp.fc2.bias",
+                    }
+                    if rest in inv_mapping:
+                        new_k = inv_mapping[rest]
             remapped_state[new_k] = v
 
         try:

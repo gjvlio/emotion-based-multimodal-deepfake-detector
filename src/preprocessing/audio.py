@@ -90,6 +90,36 @@ def extract_audio_to_wav(
     return result.returncode == 0
 
 
+def load_audio_waveform(wav_path: str | Path, target_sr: int = 16000) -> Tuple[torch.Tensor, int]:
+    """
+    Robust audio loader using soundfile first, falling back to torchaudio.
+    Always returns mono float32 (waveform_1d_tensor, target_sr).
+    """
+    try:
+        import soundfile as sf
+        data, sr = sf.read(str(wav_path), dtype="float32")
+        waveform = torch.from_numpy(data)
+        if waveform.ndim > 1:
+            waveform = waveform.mean(dim=-1)
+        if sr != target_sr:
+            import torchaudio
+            waveform = torchaudio.functional.resample(waveform, sr, target_sr)
+            sr = target_sr
+        return waveform, sr
+    except Exception as e:
+        log.debug(f"soundfile.read failed ({e}), falling back to torchaudio")
+        import torchaudio
+        waveform, sr = torchaudio.load(str(wav_path))
+        if waveform.ndim > 1 and waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0)
+        else:
+            waveform = waveform.squeeze(0)
+        if sr != target_sr:
+            waveform = torchaudio.functional.resample(waveform, sr, target_sr)
+            sr = target_sr
+        return waveform, sr
+
+
 # ── Acoustic embedding (Wav2Vec2) ──────────────────────────────────────────────
 
 def get_acoustic_embedding(
@@ -102,14 +132,9 @@ def get_acoustic_embedding(
     Load WAV, run Wav2Vec2, mean-pool temporal dim.
     Returns (768,) float32 tensor.
     """
-    import torchaudio
     model, processor = _load_wav2vec(model_name, device=device)
 
-    waveform, sr = torchaudio.load(str(wav_path))
-    if sr != 16000:
-        waveform = torchaudio.functional.resample(waveform, sr, 16000)
-    waveform = waveform.mean(dim=0)  # mono
-
+    waveform, sr = load_audio_waveform(wav_path, target_sr=16000)
     max_samples = max_seconds * 16000
     if waveform.shape[0] > max_samples:
         waveform = waveform[:max_samples]

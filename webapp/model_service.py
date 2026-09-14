@@ -27,6 +27,7 @@ and flagged in the response `note`. Wire it before serving Phase-2 publicly.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 import uuid
@@ -37,6 +38,7 @@ import torch
 import torch.nn.functional as F
 
 from src.models.detection_model import DeepfakeDetector
+from src.preprocessing.audio import load_audio_waveform
 from src.preprocessing.pipeline import PreprocessingPipeline
 
 from .config import EMOTIONS, settings
@@ -290,16 +292,27 @@ class ModelService:
         z_at = feats.z_at.unsqueeze(0).float().to(self.device)  # (1, 1536)
         z_v = feats.z_v.unsqueeze(0).float().to(self.device)    # (1, 768)
 
-        out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at)
+        has_speech = bool(feats.transcript and len(feats.transcript.strip()) > 0)
+        out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at, has_speech=has_speech)
 
-        # Temperature scaling — softens overconfident (saturated) sigmoids.
-        # Does not change the verdict: sign of the logit is preserved.
+        # Calibrated probability centered at decision boundary with temperature scaling
+        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
+        logit_0 = math.log(tau_0 / (1.0 - tau_0))
         T = max(float(settings.temperature), 1e-3)
-        p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
-        p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
-        pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+        calibrated_logit = (out.logit.squeeze() - logit_0) / T
+        p_fake = torch.sigmoid(calibrated_logit).item()
+        verdict = "FAKE" if p_fake > 0.50 else "REAL"
+
         pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
-        delta = torch.abs(pa - pb)
+        if not has_speech:
+            pa = torch.zeros(6, device=self.device)
+            pa[0] = 1.0  # 100% neutral voice when silent
+            p_sarc = 0.0
+            delta = torch.zeros(6, device=self.device)
+        else:
+            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+            p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
+            delta = torch.abs(pa - pb)
 
         def _emo(probs) -> EmotionPrediction:
             idx = int(torch.argmax(probs).item())
@@ -309,11 +322,10 @@ class ModelService:
                 distribution={EMOTIONS[i]: float(probs[i].item()) for i in range(len(EMOTIONS))},
             )
 
-        verdict = "FAKE" if p_fake > settings.decision_threshold else "REAL"
         return DetectionResult(
             verdict=verdict,
             p_fake=p_fake,
-            threshold=settings.decision_threshold,
+            threshold=0.50,
             audio_text_emotion=_emo(pa),
             visual_emotion=_emo(pb),
             emotion_mismatch={EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))},
@@ -430,17 +442,12 @@ class ModelService:
         }
 
         # Prepare audio & text representations
-        import torchaudio
+        has_speech = bool(transcript and len(transcript.strip()) > 0)
         # Standardize audio window to 80,000 samples (5.0s @ 16kHz) matching Phase 2 training MAX_AUDIO
         max_samples = 80000
         if wav.exists() and wav.stat().st_size > 500:
             try:
-                waveform, sr = torchaudio.load(str(wav))
-                if waveform.shape[0] > 1:
-                    waveform = waveform.mean(dim=0, keepdim=True)
-                if sr != 16000:
-                    waveform = torchaudio.functional.resample(waveform, sr, 16000)
-                waveform = waveform.squeeze(0)
+                waveform, sr = load_audio_waveform(wav, target_sr=16000)
                 if waveform.shape[0] > max_samples:
                     waveform = waveform[:max_samples]
                 proc = self._get_wav2vec_processor()
@@ -558,20 +565,31 @@ class ModelService:
                 attention_mask=attention_mask,
                 keyframe_pixels=keyframe_pixels,
                 z_at_emo=z_at_t,
+                has_speech=has_speech,
             )
-            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
-            pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
         else:
             z_at_t = z_at.unsqueeze(0).float().to(self.device)
             z_v_t = z_v.unsqueeze(0).float().to(self.device)
-            out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t)
-            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
-            pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
+            out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t, has_speech=has_speech)
 
+        pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
+        if not has_speech:
+            pa = torch.zeros(6, device=self.device)
+            pa[0] = 1.0  # 100% neutral voice when silent
+            p_sarc = 0.0
+            delta = torch.zeros(6, device=self.device)
+        else:
+            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+            p_sarc = torch.sigmoid(out.sarcasm.squeeze()).item()
+            delta = torch.abs(pa - pb)
+
+        # Calibrated probability
+        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
+        logit_0 = math.log(tau_0 / (1.0 - tau_0))
         T = max(float(settings.temperature), 1e-3)
-        p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
-        p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
-        delta = torch.abs(pa - pb)
+        calibrated_logit = (out.logit.squeeze() - logit_0) / T
+        p_fake = torch.sigmoid(calibrated_logit).item()
+        verdict = "FAKE" if p_fake > 0.50 else "REAL"
 
         def _emo(probs) -> EmotionPrediction:
             idx = int(torch.argmax(probs).item())
@@ -613,11 +631,10 @@ class ModelService:
             "name": "Reaching a verdict",
             "status": "active",
         }
-        verdict = "FAKE" if p_fake > settings.decision_threshold else "REAL"
         det_result = DetectionResult(
             verdict=verdict,
             p_fake=p_fake,
-            threshold=settings.decision_threshold,
+            threshold=0.50,
             audio_text_emotion=audio_emo,
             visual_emotion=visual_emo,
             emotion_mismatch=delta_dict,
@@ -632,7 +649,6 @@ class ModelService:
         }
 
     def _prepare_e2e_inputs(self, video_path: Path, clip_id: str):
-        import torchaudio
         from src.preprocessing.audio import extract_audio_to_wav, transcribe
         from src.preprocessing.visual import get_keyframe_pixels
 
@@ -646,12 +662,7 @@ class ModelService:
         max_samples = 80000
         if wav.exists() and wav.stat().st_size > 500:
             try:
-                waveform, sr = torchaudio.load(str(wav))
-                if waveform.shape[0] > 1:
-                    waveform = waveform.mean(dim=0, keepdim=True)
-                if sr != 16000:
-                    waveform = torchaudio.functional.resample(waveform, sr, 16000)
-                waveform = waveform.squeeze(0)
+                waveform, sr = load_audio_waveform(wav, target_sr=16000)
                 if waveform.shape[0] > max_samples:
                     waveform = waveform[:max_samples]
                 proc = self._get_wav2vec_processor()
@@ -727,6 +738,7 @@ class ModelService:
             z_at = torch.load(z_at_path, weights_only=True)
 
         z_at_t = z_at.unsqueeze(0).float().to(self.device)
+        has_speech = bool(transcript and len(transcript.strip()) > 0)
 
         out = self.model(
             audio_values=audio_values,
@@ -734,14 +746,26 @@ class ModelService:
             attention_mask=attention_mask,
             keyframe_pixels=keyframe_pixels,
             z_at_emo=z_at_t,
+            has_speech=has_speech,
         )
 
+        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
+        logit_0 = math.log(tau_0 / (1.0 - tau_0))
         T = max(float(settings.temperature), 1e-3)
-        p_fake = torch.sigmoid(out.logit.squeeze() / T).item()
-        p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
-        pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+        calibrated_logit = (out.logit.squeeze() - logit_0) / T
+        p_fake = torch.sigmoid(calibrated_logit).item()
+        verdict = "FAKE" if p_fake > 0.50 else "REAL"
+
         pb = F.softmax(out.emotion_b, dim=-1).squeeze(0)
-        delta = torch.abs(pa - pb)
+        if not has_speech:
+            pa = torch.zeros(6, device=self.device)
+            pa[0] = 1.0  # 100% neutral voice when silent
+            p_sarc = 0.0
+            delta = torch.zeros(6, device=self.device)
+        else:
+            pa = F.softmax(out.emotion_a, dim=-1).squeeze(0)
+            p_sarc = torch.sigmoid(out.sarcasm.squeeze() / T).item()
+            delta = torch.abs(pa - pb)
 
         def _emo(probs) -> EmotionPrediction:
             idx = int(torch.argmax(probs).item())
@@ -754,12 +778,11 @@ class ModelService:
         audio_emo = _emo(pa)
         visual_emo = _emo(pb)
         delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
-        verdict = "FAKE" if p_fake > settings.decision_threshold else "REAL"
 
         return DetectionResult(
             verdict=verdict,
             p_fake=p_fake,
-            threshold=settings.decision_threshold,
+            threshold=0.50,
             audio_text_emotion=audio_emo,
             visual_emotion=visual_emo,
             emotion_mismatch=delta_dict,

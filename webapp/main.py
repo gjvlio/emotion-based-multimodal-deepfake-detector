@@ -131,20 +131,6 @@ def model_reload():
     return meta
 
 
-@app.post("/detect", response_model=DetectionResult)
-async def detect(
-    file: UploadFile = File(...),
-    start_time: float = Form(0.0),
-    end_time: Optional[float] = Form(None),
-):
-    svc = _service()
-    if not svc:
-        raise HTTPException(
-            status_code=503,
-            detail="Live detection needs the ML stack (torch/transformers), not installed on this "
-                   "checkout. Use Demo mode (/demo) for the hardcoded walkthrough.",
-        )
-
 def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]) -> Path:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
