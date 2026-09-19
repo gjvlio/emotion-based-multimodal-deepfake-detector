@@ -1576,7 +1576,7 @@
   function renderResults(r) {
     const isFake = r.verdict === "FAKE";
     const pFake = r.p_fake ?? 0;
-    const pct = isFake ? Math.round(pFake * 100) : Math.round((1 - pFake) * 100);
+    const pct = Math.round(pFake * 100);
     const card = document.getElementById("verdict-card");
     card.classList.toggle("fake", isFake);
     card.classList.toggle("real", !isFake);

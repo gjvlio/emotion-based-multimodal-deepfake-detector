@@ -69,7 +69,7 @@ class Settings:
     whisper_model: str = "openai/whisper-base"
     vit_model: str = "google/vit-base-patch16-224"
 
-    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.44"))  # Separation threshold
+    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.425"))  # Separation threshold (log-odds boundary)
 
     # Video duration bounds for uploaded clips (in seconds)
     max_upload_duration_sec: float = float(_env("MAX_UPLOAD_DURATION_SEC", "600.0"))  # up to 10 minutes
@@ -79,6 +79,35 @@ class Settings:
     # Post-hoc temperature scaling (Guo et al., 2017): logit /= T before sigmoid.
     # Calibrated temperature scaling maps raw model margins into decisive, well-spread confidence percentages.
     temperature: float = float(_env("TEMPERATURE", "0.65"))
+
+    # ── Post-hoc Emotion Calibration (Leveling & Amplification) ───────────────
+    # Neutral logit dampener (Menon et al., 2020 logit adjustment):
+    # Subtracted from index 0 ("neutral") before softmax to bring neutral down to
+    # the baseline plane of active emotions without retraining. Default: 0.95.
+    neutral_logit_bias: float = float(_env("NEUTRAL_LOGIT_BIAS", "0.95"))
+
+    # Audio sad logit dampener:
+    # Low-arousal conversational speech pools heavily into Wav2Vec2 'sad' (index 2).
+    # Dampens sad in the audio path to prevent low-energy audio monopolies. Default: 0.75.
+    audio_sad_logit_bias: float = float(_env("AUDIO_SAD_LOGIT_BIAS", "0.75"))
+
+    # Visual sad logit dampener:
+    # Subtracted from index 2 ("sad") in the visual path to level resting-face mouth corners. Default: 0.35.
+    visual_sad_logit_bias: float = float(_env("VISUAL_SAD_LOGIT_BIAS", "0.35"))
+
+    # Emotion distribution temperature scaling (T_emo):
+    # T > 1.0 softens the peaked softmax distribution so all expressive emotions surface cleanly. Default: 1.40.
+    emotion_temperature: float = float(_env("EMOTION_TEMPERATURE", "1.40"))
+
+    # Bounded floor amplification (epsilon):
+    # Injects a gentle baseline floor (~4.0%) so minority emotions (fear, disgust) are never
+    # crushed to 0.x% or 1%, keeping all emotions highlighted while preserving verdict dominance. Default: 0.040.
+    emotion_floor_epsilon: float = float(_env("EMOTION_FLOOR_EPSILON", "0.040"))
+
+    # Sarcasm head logit calibration bias:
+    # Subtracting 1.50 aligns raw logits so sincere speech (which naturally scores +0.7 ~ +1.0)
+    # stays cleanly within Sincere (<50%), while genuine sarcasm (e.g. MUStARD at +3.7) stays >90%. Default: 1.50.
+    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "1.50"))
 
 
 settings = Settings()

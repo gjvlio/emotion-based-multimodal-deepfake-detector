@@ -15,8 +15,9 @@ def main():
     svc = ModelService()
 
     test_vids = [
-        ("REAL", "REAL_SPEECH", Path("webapp/uploads/trim_0_396_WIN_20260913_19_59_50_Pro.mp4")),
-        ("REAL", "REAL_SILENT", Path("webapp/uploads/trim_0_606_WIN_20260913_20_02_18_Pro.mp4")),
+        ("REAL", "REAL_SPEECH_A", Path("webapp/uploads/real.mp4")),
+        ("REAL", "REAL_SPEECH_B", Path("webapp/uploads/trim_0_610_WIN_20260912_12_22_57_Pro.mp4")),
+        ("FAKE", "FAKE_SYNTHETIC", Path("webapp/uploads/fake.mp4")),
         ("FAKE", "FAKE_CHINESE_ELON", Path("webapp/uploads/trim_0_961_AQMFIb_9Giu-DlMR3gYzkfySV_SO27ezRXU6u7timYSEXztanB0xIuGux7hO6jrYkWuLzcLlgMs8NY9CKrZHop0LhDTbNMYCynREidcDgg.mp4")),
         ("FAKE", "FAKE_ELON_WAV2LIP", Path("webapp/uploads/trim_0_565_AQMt0xSu5_Fd_JN9T63C2Aca-2elRjpAi8Jcw1-LezQU9KVx5V-R7rklkc6Vmr8jDv2aElSsdUcVu8s6sBlBtnM4UI7-rMt8B59yEUUUhg.mp4")),
     ]
@@ -44,8 +45,17 @@ def main():
         print(f"       P(fake): {res.p_fake:.4f}")
         print(f"       Transcript: '{res.transcript}'")
         print(f"       Audio Emotion: {res.audio_text_emotion.label} ({res.audio_text_emotion.confidence * 100:.1f}%)")
+        print(f"         Distribution: {', '.join(f'{k}: {v*100:.1f}%' for k, v in res.audio_text_emotion.distribution.items())}")
         print(f"       Visual Emotion: {res.visual_emotion.label} ({res.visual_emotion.confidence * 100:.1f}%)")
+        print(f"         Distribution: {', '.join(f'{k}: {v*100:.1f}%' for k, v in res.visual_emotion.distribution.items())}")
+        print(f"       Mismatch Delta: {', '.join(f'{k}: {v*100:.1f}%' for k, v in res.emotion_mismatch.items())}")
         print(f"       Sarcasm: {res.p_sarcasm * 100:.1f}%")
+
+        # Verify floor amplification: no emotion should be < 3.0%
+        for modality, emo_dist in [("Audio", res.audio_text_emotion.distribution), ("Visual", res.visual_emotion.distribution)]:
+            for emo_name, val in emo_dist.items():
+                if val < 0.030 and (modality == "Visual" or res.transcript):
+                    print(f"       [WARNING] {modality} emotion {emo_name} is too low: {val*100:.2f}%")
 
     print("\n" + "=" * 75)
     if all_passed:

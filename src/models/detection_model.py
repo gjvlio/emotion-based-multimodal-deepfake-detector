@@ -408,14 +408,49 @@ class DeepfakeDetector(nn.Module):
         # 3. Detect
         return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_emo if z_at_emo is not None else z_at_clean, has_speech=has_speech)
 
-    # ── State Dict Loading ────────────────────────────────────────────────────
-
     def load_state_dict(self, state_dict: dict, strict: bool = True, assign: bool = False):
         """
-        Custom load_state_dict to handle ViT layer naming conventions across transformers versions:
-        - If current ViTModel uses `encoder.layer` and state_dict uses `layers`: remap to `encoder.layer`.
-        - If current ViTModel uses `layers` and state_dict uses `encoder.layer`: remap to `layers`.
+        Custom load_state_dict to handle:
+        - Auto-instantiation of backbones if state_dict has fine-tuned backbones.
+        - Auto-adaptation between 299-D bottleneck and 8199-D baseline heads.
+        - Bidirectional ViT layer naming remapping across transformers versions.
         """
+        # Auto-instantiate backbones if checkpoint contains backbone weights
+        if not self._backbones_loaded and any(k.startswith(("wav2vec2.", "bert.", "vit.", "_wav2vec.", "_bert.", "_vit.")) for k in state_dict.keys()):
+            self.load_backbones()
+
+        # Auto-detect bottleneck (299-D) vs baseline (8199-D) head to prevent size mismatch
+        if "classifier.fc1.weight" in state_dict:
+            ckpt_in_features = state_dict["classifier.fc1.weight"].shape[1]
+            if ckpt_in_features == 299 and self.classifier_mode != "bottleneck":
+                device = next(self.classifier.parameters()).device
+                self.classifier_mode = "bottleneck"
+                self.bilinear_proj = nn.Linear(8192, 256).to(device)
+                self.proj_ln = nn.LayerNorm(256).to(device)
+                self.classifier = ClassifierMLP(299, dropout=0.4).to(device)
+                self.domain_classifier = nn.Sequential(
+                    nn.Linear(256, 128),
+                    nn.LayerNorm(128),
+                    nn.GELU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(128, 5),
+                ).to(device)
+            elif ckpt_in_features == 8199 and self.classifier_mode != "baseline":
+                device = next(self.classifier.parameters()).device
+                self.classifier_mode = "baseline"
+                if hasattr(self, "bilinear_proj"):
+                    del self.bilinear_proj
+                if hasattr(self, "proj_ln"):
+                    del self.proj_ln
+                self.classifier = ClassifierMLP(8199, dropout=0.4).to(device)
+                self.domain_classifier = nn.Sequential(
+                    nn.Linear(8192, 128),
+                    nn.LayerNorm(128),
+                    nn.GELU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(128, 5),
+                ).to(device)
+
         remapped_state = {}
         vit_has_encoder = False
         if hasattr(self, "_vit") and self._vit is not None:

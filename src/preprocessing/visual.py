@@ -264,6 +264,7 @@ def _load_insightface_app():
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
         _insightface_app = FaceAnalysis(
             name="buffalo_s",
+            allowed_modules=["detection"],
             providers=providers,
         )
         _insightface_app.prepare(ctx_id=0, det_size=(640, 640))
@@ -441,7 +442,7 @@ def get_keyframe_pixels(
     detector:             str   = "retinaface",
     n_keyframes:          int   = 8,
     frame_size:           int   = 224,
-    target_fps:           float = 25.0,
+    target_fps:           float = 10.0,
     motion_threshold:     float = 0.3,
     confidence_threshold: float = 0.7,
     device:               str   = "cpu",
