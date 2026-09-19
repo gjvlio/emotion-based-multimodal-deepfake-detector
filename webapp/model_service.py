@@ -292,6 +292,133 @@ class ModelService:
 
         return probs
 
+    def _fuse_and_calibrate_verdict(
+        self,
+        raw_logit: torch.Tensor,
+        raw_sarcasm: torch.Tensor,
+        raw_emo_a: torch.Tensor,
+        raw_emo_b: torch.Tensor,
+        has_speech: bool,
+        transcript: str,
+        meta: ModelInfo,
+    ) -> Tuple[DetectionResult, dict]:
+        """
+        Calibrated Evidence Accumulation with Information-Theoretic Synchrony Engine:
+        1. Distributional Jensen-Shannon Divergence D_JS(P_A || P_B) & Cosine Synchrony
+        2. Multimodal Sarcasm Irony Filter (gating textual rhetorical artifacts via visual cues)
+        3. Calibrated Biological Harmony prior against domain-shift shortcut artifacts
+        """
+        pb = self._calibrate_emotion_probs(raw_emo_b, modality="visual").squeeze(0)
+        if not has_speech:
+            pa = torch.zeros(6, device=self.device)
+            pa[0] = 1.0  # 100% neutral voice when silent
+            p_sarc = 0.0
+            delta = torch.zeros(6, device=self.device)
+            cos_sim = 0.0
+            d_js = 0.0
+            harmony_bonus = 0.0
+        else:
+            pa = self._calibrate_emotion_probs(raw_emo_a, modality="audio").squeeze(0)
+            delta = torch.abs(pa - pb)
+
+            # ── Multimodal Sarcasm Irony Filter ───────────────────────────
+            p_sarc_raw = torch.sigmoid(raw_sarcasm.squeeze() - settings.sarcasm_logit_bias).item()
+            top_b_idx = int(torch.argmax(pb).item())
+            vis_happy = float(pb[1].item())
+            # Sarcasm in affective science requires visual amusement/smirking incongruence.
+            # If the dominant visual expression is not smiling/smirking (top_b_idx != 1),
+            # rhetorical phrasing is gated by excess smiling above the uniform baseline (1/6 ≈ 0.167).
+            if top_b_idx != 1:
+                excess_smile = max(0.0, vis_happy - 0.167)
+                sarc_gate = max(0.05, min(1.0, (excess_smile / 0.20) ** 2))
+                p_sarc = p_sarc_raw * sarc_gate
+            else:
+                p_sarc = p_sarc_raw
+
+            # ── Information-Theoretic Synchrony Engine (D_JS & CosSim) ───
+            eps = 1e-12
+            p_a_safe = (pa + eps) / (pa.sum() + eps * 6)
+            p_b_safe = (pb + eps) / (pb.sum() + eps * 6)
+            m = 0.5 * (p_a_safe + p_b_safe)
+            kl_a = torch.sum(p_a_safe * torch.log(p_a_safe / m)).item()
+            kl_b = torch.sum(p_b_safe * torch.log(p_b_safe / m)).item()
+            d_js = max(0.0, 0.5 * (kl_a + kl_b))
+
+            dot = torch.sum(pa * pb).item()
+            norm_a = torch.norm(pa, p=2).item()
+            norm_b = torch.norm(pb, p=2).item()
+            cos_sim = max(0.0, min(1.0, dot / (norm_a * norm_b + eps)))
+
+            # Valence definitions: 1 (happy), -1 (sad, angry, fear, disgust), 0 (neutral)
+            top_a_idx = int(torch.argmax(pa).item())
+            val_a = 1 if top_a_idx == 1 else (-1 if top_a_idx in {2, 3, 4, 5} else 0)
+            val_b = 1 if top_b_idx == 1 else (-1 if top_b_idx in {2, 3, 4, 5} else 0)
+
+            harmony_bonus = 0.0
+            if top_a_idx == top_b_idx:
+                if top_a_idx != 0:
+                    harmony_bonus = settings.active_emotion_harmony_bonus  # 2.70
+                else:
+                    harmony_bonus = settings.neutral_emotion_harmony_bonus  # 0.70
+            elif val_a * val_b > 0:
+                # Same active valence (both positive or both negative)
+                if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
+                    sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
+                    harmony_bonus = settings.compatible_active_harmony_bonus * sync_scale
+            elif ((val_a == 0 and val_b > 0) or (val_b == 0 and val_a > 0)):
+                # Pleasant conversational engagement: Neutral baseline + gentle positive tone/expression
+                if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
+                    sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
+                    harmony_bonus = settings.compatible_neutral_harmony_bonus * sync_scale
+
+        # ── Calibrated Evidence Accumulation ─────────────────────────────
+        logit = raw_logit.squeeze() - harmony_bonus
+
+        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
+        logit_0 = math.log(tau_0 / (1.0 - tau_0))
+        T = max(float(settings.temperature), 1e-3)
+        calibrated_logit = (logit - logit_0) / T
+        p_fake = torch.sigmoid(calibrated_logit).item()
+        verdict = "FAKE" if p_fake > 0.50 else "REAL"
+
+        def _emo(probs) -> EmotionPrediction:
+            idx = int(torch.argmax(probs).item())
+            return EmotionPrediction(
+                label=EMOTIONS[idx],
+                confidence=float(probs[idx].item()),
+                distribution={EMOTIONS[i]: float(probs[i].item()) for i in range(len(EMOTIONS))},
+            )
+
+        audio_emo = _emo(pa)
+        visual_emo = _emo(pb)
+        delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
+
+        det_result = DetectionResult(
+            verdict=verdict,
+            p_fake=p_fake,
+            threshold=0.50,
+            audio_text_emotion=audio_emo,
+            visual_emotion=visual_emo,
+            emotion_mismatch=delta_dict,
+            p_sarcasm=p_sarc,
+            transcript=transcript,
+            served_by=meta,
+        )
+
+        extra = {
+            "pa": pa,
+            "pb": pb,
+            "delta": delta,
+            "delta_dict": delta_dict,
+            "audio_emo": audio_emo,
+            "visual_emo": visual_emo,
+            "p_sarcasm": p_sarc,
+            "cos_sim": cos_sim,
+            "d_js": d_js,
+            "harmony_bonus": harmony_bonus,
+        }
+        return det_result, extra
+
     # ── Inference ──────────────────────────────────────────────────────────────
 
     @torch.no_grad()
@@ -342,54 +469,16 @@ class ModelService:
         has_speech = bool(feats.transcript and len(feats.transcript.strip()) > 0)
         out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at, has_speech=has_speech)
 
-        pb = self._calibrate_emotion_probs(out.emotion_b, modality="visual").squeeze(0)
-        if not has_speech:
-            pa = torch.zeros(6, device=self.device)
-            pa[0] = 1.0  # 100% neutral voice when silent
-            p_sarc = 0.0
-            delta = torch.zeros(6, device=self.device)
-        else:
-            pa = self._calibrate_emotion_probs(out.emotion_a, modality="audio").squeeze(0)
-            p_sarc = torch.sigmoid(out.sarcasm.squeeze() - settings.sarcasm_logit_bias).item()
-            delta = torch.abs(pa - pb)
-
-        # Calibrated probability with multimodal emotional harmony prior
-        logit = out.logit.squeeze()
-        if has_speech:
-            top_a = int(torch.argmax(pa).item())
-            top_b = int(torch.argmax(pb).item())
-            max_delta = float(torch.max(delta).item())
-            conf_a = float(pa[top_a].item())
-            # Authentic biological coordination: voice and face emotions align with natural human dynamic range
-            if top_a == top_b and max_delta < 0.45 and conf_a >= 0.30:
-                logit = logit - 0.70  # Authenticity prior for genuine congruent emotional expression
-
-        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
-        logit_0 = math.log(tau_0 / (1.0 - tau_0))
-        T = max(float(settings.temperature), 1e-3)
-        calibrated_logit = (logit - logit_0) / T
-        p_fake = torch.sigmoid(calibrated_logit).item()
-        verdict = "FAKE" if p_fake > 0.50 else "REAL"
-
-        def _emo(probs) -> EmotionPrediction:
-            idx = int(torch.argmax(probs).item())
-            return EmotionPrediction(
-                label=EMOTIONS[idx],
-                confidence=float(probs[idx].item()),
-                distribution={EMOTIONS[i]: float(probs[i].item()) for i in range(len(EMOTIONS))},
-            )
-
-        return DetectionResult(
-            verdict=verdict,
-            p_fake=p_fake,
-            threshold=0.50,
-            audio_text_emotion=_emo(pa),
-            visual_emotion=_emo(pb),
-            emotion_mismatch={EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))},
-            p_sarcasm=p_sarc,
+        det_result, _ = self._fuse_and_calibrate_verdict(
+            raw_logit=out.logit,
+            raw_sarcasm=out.sarcasm,
+            raw_emo_a=out.emotion_a,
+            raw_emo_b=out.emotion_b,
+            has_speech=has_speech,
             transcript=feats.transcript,
-            served_by=meta,
+            meta=meta,
         )
+        return det_result
 
     def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0) -> List[dict]:
         import cv2
@@ -629,50 +718,21 @@ class ModelService:
             z_v_t = z_v.unsqueeze(0).float().to(self.device)
             out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t, has_speech=has_speech)
 
-        pb = self._calibrate_emotion_probs(out.emotion_b, modality="visual").squeeze(0)
-        if not has_speech:
-            pa = torch.zeros(6, device=self.device)
-            pa[0] = 1.0  # 100% neutral voice when silent
-            p_sarc = 0.0
-            delta = torch.zeros(6, device=self.device)
-        else:
-            pa = self._calibrate_emotion_probs(out.emotion_a, modality="audio").squeeze(0)
-            p_sarc = torch.sigmoid(out.sarcasm.squeeze() - settings.sarcasm_logit_bias).item()
-            delta = torch.abs(pa - pb)
+        det_result, extra = self._fuse_and_calibrate_verdict(
+            raw_logit=out.logit,
+            raw_sarcasm=out.sarcasm,
+            raw_emo_a=out.emotion_a,
+            raw_emo_b=out.emotion_b,
+            has_speech=has_speech,
+            transcript=transcript,
+            meta=meta,
+        )
 
-        # Calibrated probability with multimodal emotional harmony prior
-        logit = out.logit.squeeze()
-        if has_speech:
-            top_a = int(torch.argmax(pa).item())
-            top_b = int(torch.argmax(pb).item())
-            max_delta = float(torch.max(delta).item())
-            conf_a = float(pa[top_a].item())
-            # Authentic biological coordination: voice and face emotions align with natural human dynamic range
-            if top_a == top_b and max_delta < 0.45 and conf_a >= 0.30:
-                logit = logit - 0.70  # Authenticity prior for genuine congruent emotional expression
-
-        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
-        logit_0 = math.log(tau_0 / (1.0 - tau_0))
-        T = max(float(settings.temperature), 1e-3)
-        calibrated_logit = (logit - logit_0) / T
-        p_fake = torch.sigmoid(calibrated_logit).item()
-        verdict = "FAKE" if p_fake > 0.50 else "REAL"
-
-        def _emo(probs) -> EmotionPrediction:
-            idx = int(torch.argmax(probs).item())
-            return EmotionPrediction(
-                label=EMOTIONS[idx],
-                confidence=float(probs[idx].item()),
-                distribution={EMOTIONS[i]: float(probs[i].item()) for i in range(len(EMOTIONS))},
-            )
-
-        audio_emo = _emo(pa)
-        visual_emo = _emo(pb)
         yield {
             "step": 4,
             "status": "done",
-            "audio_emotion": audio_emo.dict(),
-            "visual_emotion": visual_emo.dict(),
+            "audio_emotion": extra["audio_emo"].dict(),
+            "visual_emotion": extra["visual_emo"].dict(),
         }
 
         # Step 5: Measuring the emotion gap (Δ)
@@ -683,12 +743,11 @@ class ModelService:
             "tech": "Δ Incongruence",
             "status": "active",
         }
-        delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
         yield {
             "step": 5,
             "status": "done",
-            "emotion_mismatch": delta_dict,
-            "p_sarcasm": p_sarc,
+            "emotion_mismatch": extra["delta_dict"],
+            "p_sarcasm": extra["p_sarcasm"],
         }
 
         # Step 6: Reaching a verdict
@@ -698,17 +757,6 @@ class ModelService:
             "name": "Reaching a verdict",
             "status": "active",
         }
-        det_result = DetectionResult(
-            verdict=verdict,
-            p_fake=p_fake,
-            threshold=0.50,
-            audio_text_emotion=audio_emo,
-            visual_emotion=visual_emo,
-            emotion_mismatch=delta_dict,
-            p_sarcasm=p_sarc,
-            transcript=transcript,
-            served_by=meta,
-        )
         yield {
             "step": 6,
             "status": "done",
@@ -816,58 +864,16 @@ class ModelService:
             has_speech=has_speech,
         )
 
-        pb = self._calibrate_emotion_probs(out.emotion_b, modality="visual").squeeze(0)
-        if not has_speech:
-            pa = torch.zeros(6, device=self.device)
-            pa[0] = 1.0  # 100% neutral voice when silent
-            p_sarc = 0.0
-            delta = torch.zeros(6, device=self.device)
-        else:
-            pa = self._calibrate_emotion_probs(out.emotion_a, modality="audio").squeeze(0)
-            p_sarc = torch.sigmoid(out.sarcasm.squeeze() - settings.sarcasm_logit_bias).item()
-            delta = torch.abs(pa - pb)
-
-        # Calibrated probability with multimodal emotional harmony prior
-        logit = out.logit.squeeze()
-        if has_speech:
-            top_a = int(torch.argmax(pa).item())
-            top_b = int(torch.argmax(pb).item())
-            max_delta = float(torch.max(delta).item())
-            conf_a = float(pa[top_a].item())
-            # Authentic biological coordination: voice and face emotions align with natural human dynamic range
-            if top_a == top_b and max_delta < 0.45 and conf_a >= 0.30:
-                logit = logit - 0.70  # Authenticity prior for genuine congruent emotional expression
-
-        tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
-        logit_0 = math.log(tau_0 / (1.0 - tau_0))
-        T = max(float(settings.temperature), 1e-3)
-        calibrated_logit = (logit - logit_0) / T
-        p_fake = torch.sigmoid(calibrated_logit).item()
-        verdict = "FAKE" if p_fake > 0.50 else "REAL"
-
-        def _emo(probs) -> EmotionPrediction:
-            idx = int(torch.argmax(probs).item())
-            return EmotionPrediction(
-                label=EMOTIONS[idx],
-                confidence=float(probs[idx].item()),
-                distribution={EMOTIONS[i]: float(probs[i].item()) for i in range(len(EMOTIONS))},
-            )
-
-        audio_emo = _emo(pa)
-        visual_emo = _emo(pb)
-        delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
-
-        return DetectionResult(
-            verdict=verdict,
-            p_fake=p_fake,
-            threshold=0.50,
-            audio_text_emotion=audio_emo,
-            visual_emotion=visual_emo,
-            emotion_mismatch=delta_dict,
-            p_sarcasm=p_sarc,
+        det_result, _ = self._fuse_and_calibrate_verdict(
+            raw_logit=out.logit,
+            raw_sarcasm=out.sarcasm,
+            raw_emo_a=out.emotion_a,
+            raw_emo_b=out.emotion_b,
+            has_speech=has_speech,
             transcript=transcript,
-            served_by=meta,
+            meta=meta,
         )
+        return det_result
 
 
 # Module-level singleton, created by the app lifespan.

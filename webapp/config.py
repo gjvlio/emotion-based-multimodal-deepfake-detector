@@ -105,10 +105,22 @@ class Settings:
     emotion_floor_epsilon: float = float(_env("EMOTION_FLOOR_EPSILON", "0.040"))
 
     # Sarcasm head logit calibration bias:
-    # Subtracting 1.50 aligns raw logits so sincere speech (which naturally scores +0.7 ~ +1.0)
-    # stays cleanly within Sincere (<50%), while genuine sarcasm (e.g. MUStARD at +3.7) stays >90%. Default: 1.50.
-    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "1.50"))
+    # Subtracting 2.20 aligns raw logits so conversational sincere speech (scoring up to +1.5)
+    # stays cleanly within Sincere (0% - 25%), while genuine sarcasm (MUStARD at +3.7) stays >80%. Default: 2.20.
+    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "2.20"))
 
+    # Multimodal Biological Harmony Logit Adjustments:
+    # When voice and face agree on an active emotion (e.g. angry==angry, happy==happy),
+    # genuine human biological synchrony is confirmed; applies -2.70 authenticity bonus.
+    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.70"))
+    # When voice and face agree on neutral baseline speech:
+    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.70"))
+    # Continuous Information-Theoretic Harmony (D_JS & CosSim) for compatible non-conflicting emotions:
+    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "1.80"))
+    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "1.40"))
+    synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.75"))
+    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.070"))
+    sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))
 
 settings = Settings()
 
