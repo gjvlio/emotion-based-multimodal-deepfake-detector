@@ -3,7 +3,17 @@
   "use strict";
 
   const EMO_ORDER = ["angry", "happy", "sad", "neutral", "fear", "disgust"];
-  const EMO_LABEL = { angry: "Angry", happy: "Happy", sad: "Sad", neutral: "Neutral", fear: "Fearful", disgust: "Disgust" };
+  const EMO_LABEL = { angry: "Angry", happy: "Happy", sad: "Sad", neutral: "Neutral", fear: "Fearful", disgust: "Disgust", fearful: "Fearful" };
+
+  const EMO_SVGS = {
+    happy: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="9.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="9.5" r="1.1" fill="currentColor" stroke="none"/><path d="M8 13.8c1.3 2.5 6.7 2.5 8 0"/></svg>`,
+    sad: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 8.5l2.2 1M16.5 8.5l-2.2 1"/><circle cx="9" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="11" r="1.1" fill="currentColor" stroke="none"/><path d="M8.5 16.5c1.2-2.1 5.8-2.1 7 0"/></svg>`,
+    angry: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 8.5l3 1.5M16.5 8.5l-3 1.5"/><circle cx="9" cy="11.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="11.2" r="1.1" fill="currentColor" stroke="none"/><path d="M8.5 16c1.8-.8 5.2-.8 7 0"/></svg>`,
+    disgust: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 10l2.5-1M7.5 9l2.5 1"/><circle cx="15" cy="9.5" r="1.1" fill="currentColor" stroke="none"/><path d="M8.5 16c1.4-1.2 3.1 1.3 4.4.2 1.2-1 2.6 0 2.6 0"/></svg>`,
+    neutral: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r="1.1" fill="currentColor" stroke="none"/><path d="M8.5 15h7"/></svg>`,
+    fear: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 7.8c.8-.8 2-.8 2.8 0M16.5 7.8c-.8-.8-2-.8-2.8 0"/><circle cx="9" cy="11" r="1.4"/><circle cx="15" cy="11" r="1.4"/><ellipse cx="12" cy="16.2" rx="2.5" ry="1.8"/></svg>`,
+    fearful: `<svg class="emo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 7.8c.8-.8 2-.8 2.8 0M16.5 7.8c-.8-.8-2-.8-2.8 0"/><circle cx="9" cy="11" r="1.4"/><circle cx="15" cy="11" r="1.4"/><ellipse cx="12" cy="16.2" rx="2.5" ry="1.8"/></svg>`,
+  };
 
   const ROUTES = {
     "/": "landing", "/upload": "upload", "/analyzing": "analyzing", "/results": "results",
@@ -807,8 +817,11 @@
   let liveAudioEmotion = null;
   let clientTrackedBox = null;   // { x, y, w, h } from client face detector
   let faceScanInterval = null;
-  let estimatedTotalSec = 7.5;
+  let estimatedTotalSec = 10.0;
   let analysisStartTime = 0;
+  let targetProgressPct = 0;
+  let currentRenderedPct = 0;
+  const STEP_MILESTONES = [12, 30, 62, 84, 92, 97, 100];
 
   function fmtElapsed(sec) {
     if (sec == null || isNaN(sec) || sec < 0) sec = 0;
@@ -826,6 +839,8 @@
     liveVisualEmotion = null;
     liveAudioEmotion = null;
     clientTrackedBox = null;
+    targetProgressPct = 0;
+    currentRenderedPct = 0;
 
     const v = document.getElementById("analyzing-video");
     if (v) {
@@ -953,7 +968,9 @@
     const startTime = performance.now();
     analysisStartTime = startTime;
     const clipDur = Math.max(1.0, endSec - startSec);
-    estimatedTotalSec = Math.max(5.0, Math.round((3.2 + clipDur * 0.65) * 10) / 10);
+    estimatedTotalSec = Math.max(8.5, Math.round((4.2 + clipDur * 0.95) * 10) / 10);
+    targetProgressPct = 6;
+    currentRenderedPct = 0;
     let lastDomTimeUpdate = 0;
 
     // Smoothed bounding box state (normalized [0, 1])
@@ -1244,15 +1261,34 @@
         ctx.fillStyle = "#ffffff";
         ctx.fillText(emoPillText, emoPillX + 18, emoPillY + 15);
 
+        // Smooth asymptotic progress interpolation towards targetProgressPct
+        if (currentRenderedPct < targetProgressPct) {
+          const diff = targetProgressPct - currentRenderedPct;
+          currentRenderedPct += Math.max(0.15, diff * 0.08);
+          if (currentRenderedPct > targetProgressPct) currentRenderedPct = targetProgressPct;
+        }
+
         // 8. Corner Telemetry & Live Evaluation Stopwatch
         const elapsedSec = (now - startTime) / 1000;
+
+        // Bottleneck guard: if elapsedSec catches up to estimatedTotalSec while intermediate steps
+        // are still actively computing, dynamically expand estimatedTotalSec so EST. REMAINING
+        // never freezes or reads 0.1s while waiting.
+        if (currentStepIdx < 6) {
+          const pendingSteps = 6 - currentStepIdx;
+          const minBufferSec = Math.max(1.8, pendingSteps * 0.85);
+          if (elapsedSec > estimatedTotalSec - minBufferSec) {
+            estimatedTotalSec = Math.round((elapsedSec + minBufferSec) * 10) / 10;
+          }
+        }
+
         const elapsedStr = fmtElapsed(elapsedSec);
         const estStr = fmtElapsed(estimatedTotalSec);
         const remSec = Math.max(0.1, estimatedTotalSec - elapsedSec);
         const remStr = fmtElapsed(remSec);
 
-        // Update DOM timing metrics smoothly without UI lag
-        if (now - lastDomTimeUpdate > 80) {
+        // Update DOM timing metrics and loader percentage smoothly without UI lag
+        if (now - lastDomTimeUpdate > 60) {
           lastDomTimeUpdate = now;
           const elElapsedHeader = document.getElementById("analyzing-elapsed-header");
           const elEstHeader = document.getElementById("analyzing-est-header");
@@ -1265,6 +1301,17 @@
           if (elElapsedVal) elElapsedVal.textContent = elapsedStr;
           if (elEstVal) elEstVal.textContent = `~${estStr}`;
           if (elRemainingVal) elRemainingVal.textContent = `~${remStr}`;
+
+          const pctInt = Math.min(100, Math.round(currentRenderedPct));
+          const elPct = document.getElementById("analyzing-progress-pct");
+          if (elPct) elPct.textContent = `${pctInt}%`;
+
+          const loaderArc = document.getElementById("loader-arc");
+          if (loaderArc) {
+            const circ = 264;
+            const offset = Math.max(0, circ - (currentRenderedPct / 100) * circ);
+            loaderArc.style.strokeDashoffset = offset.toFixed(1);
+          }
         }
 
         ctx.font = "500 10px monospace";
@@ -1356,7 +1403,14 @@
       markStep(ds.step, "done");
     }
 
-    await new Promise((r) => setTimeout(r, 900));
+    targetProgressPct = 100;
+    currentRenderedPct = 100;
+    const elPctDemo = document.getElementById("analyzing-progress-pct");
+    if (elPctDemo) elPctDemo.textContent = "100%";
+    const loaderArcDemo = document.getElementById("loader-arc");
+    if (loaderArcDemo) loaderArcDemo.style.strokeDashoffset = "0";
+
+    await new Promise((r) => setTimeout(r, 700));
     stopAnalyzingHUD();
     renderResults(lastResult);
     navigate(routePath("/results"));
@@ -1409,19 +1463,22 @@
       if (status === "active") {
         steps[stepIdx].classList.add("active");
         steps[stepIdx].classList.remove("done");
+        targetProgressPct = STEP_MILESTONES[stepIdx] || (stepIdx + 1) * 14;
       } else if (status === "done") {
         steps[stepIdx].classList.remove("active");
         steps[stepIdx].classList.add("done");
+        targetProgressPct = Math.min(100, (STEP_MILESTONES[stepIdx] || (stepIdx + 1) * 14) + 4);
       }
 
       // Dynamically refine estimated total runtime based on actual step progress
       if (analysisStartTime > 0 && stepIdx > 0) {
-        const stepFractions = [0.15, 0.35, 0.55, 0.72, 0.85, 0.94, 1.0];
+        const stepFractions = [0.12, 0.30, 0.62, 0.84, 0.92, 0.97, 1.0];
         const f = stepFractions[stepIdx] || 0.15;
         const curElapsed = (performance.now() - analysisStartTime) / 1000;
         if (curElapsed > 1.0) {
           const sampleEst = curElapsed / f;
-          estimatedTotalSec = Math.max(curElapsed + 0.5, estimatedTotalSec * 0.6 + sampleEst * 0.4);
+          const remEstimate = (1 - f) * sampleEst * 0.9;
+          estimatedTotalSec = Math.max(curElapsed + Math.max(0.8, remEstimate), estimatedTotalSec * 0.45 + sampleEst * 0.55);
         }
       }
     };
@@ -1452,7 +1509,13 @@
         lastResult = await fbRes.json();
         if (lastResult?.transcript) streamLiveTranscript(lastResult.transcript);
         steps.forEach((s) => { s.classList.remove("active"); s.classList.add("done"); });
-        await new Promise((r) => setTimeout(r, 1200));
+        targetProgressPct = 100;
+        currentRenderedPct = 100;
+        const fbPct = document.getElementById("analyzing-progress-pct");
+        if (fbPct) fbPct.textContent = "100%";
+        const fbArc = document.getElementById("loader-arc");
+        if (fbArc) fbArc.style.strokeDashoffset = "0";
+        await new Promise((r) => setTimeout(r, 800));
         stopAnalyzingHUD();
         renderResults(lastResult);
         navigate(routePath("/results"));
@@ -1516,7 +1579,14 @@
       steps.forEach((s) => { s.classList.remove("active"); s.classList.add("done"); });
       setPhase("Multimodal Verdict Synthesized");
 
-      await new Promise((r) => setTimeout(r, 1200));
+      targetProgressPct = 100;
+      currentRenderedPct = 100;
+      const elPct = document.getElementById("analyzing-progress-pct");
+      if (elPct) elPct.textContent = "100%";
+      const loaderArc = document.getElementById("loader-arc");
+      if (loaderArc) loaderArc.style.strokeDashoffset = "0";
+
+      await new Promise((r) => setTimeout(r, 850));
       stopAnalyzingHUD();
 
       if (lastResult) {
@@ -1546,13 +1616,42 @@
     requestAnimationFrame(step);
   }
 
-  function distRows(container, dist, barClass) {
+  function getTopEmotion(dist) {
+    let topKey = EMO_ORDER[0], topVal = -1;
+    for (const k of EMO_ORDER) {
+      const v = dist[k] ?? 0;
+      if (v > topVal) { topVal = v; topKey = k; }
+    }
+    return { key: topKey, val: Math.max(0, topVal) };
+  }
+
+  function renderEmotionHead(bannerEl, dist) {
+    if (!bannerEl || !dist) return;
+    const { key: topKey } = getTopEmotion(dist);
+    const svg = EMO_SVGS[topKey] || EMO_SVGS.neutral;
+    const label = EMO_LABEL[topKey] || topKey;
+
+    bannerEl.className = `head-dominant-banner dom-banner-${topKey}`;
+    bannerEl.innerHTML = `
+      <div class="dom-icon-box">${svg}</div>
+      <div class="dom-text-box">
+        <span class="dom-tag">Dominant emotion</span>
+        <span class="dom-name">${label}</span>
+      </div>
+    `;
+  }
+
+  function distRows(container, dist) {
+    if (!container) return;
     container.innerHTML = "";
+    const { key: topKey } = getTopEmotion(dist);
+
     EMO_ORDER.forEach((k, idx) => {
       const v = dist[k] ?? 0;
+      const isTop = k === topKey && v > 0;
       const row = document.createElement("div");
-      row.className = "drow";
-      row.innerHTML = `<span class="dlabel">${EMO_LABEL[k]}</span><div class="bar"><div class="bar-fill ${barClass}"></div></div><span class="dval">${Math.round(v * 100)}%</span>`;
+      row.className = isTop ? "drow drow-top" : "drow";
+      row.innerHTML = `<span class="dlabel">${EMO_LABEL[k]}</span><div class="bar"><div class="bar-fill bar-emo-${k}"></div></div><span class="dval">${Math.round(v * 100)}%</span>`;
       container.appendChild(row);
       const fill = row.querySelector(".bar-fill");
       setTimeout(() => (fill.style.width = (v * 100).toFixed(1) + "%"), 80 + idx * 60);
@@ -1647,8 +1746,16 @@
     domBar.style.width = "0%";
     setTimeout(() => (domBar.style.width = (domVal * 100).toFixed(1) + "%"), 140);
 
-    distRows(document.getElementById("head-a"), r.audio_text_emotion?.distribution || {}, "bar-blue");
-    distRows(document.getElementById("head-b"), r.visual_emotion?.distribution || {}, "bar-mint");
+    renderEmotionHead(
+      document.getElementById("head-a-top"),
+      r.audio_text_emotion?.distribution || {}
+    );
+    renderEmotionHead(
+      document.getElementById("head-b-top"),
+      r.visual_emotion?.distribution || {}
+    );
+    distRows(document.getElementById("head-a"), r.audio_text_emotion?.distribution || {});
+    distRows(document.getElementById("head-b"), r.visual_emotion?.distribution || {});
     deltaRows(document.getElementById("delta-list"), delta);
 
     const sb = r.served_by || {};

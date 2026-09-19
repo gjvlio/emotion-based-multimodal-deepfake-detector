@@ -274,7 +274,7 @@ class ModelService:
         else:
             bias_s = settings.visual_sad_logit_bias if sad_bias is None else sad_bias
 
-        T = max(float(settings.emotion_temperature if temperature is None else temperature), 0.01)
+        T_base = max(float(settings.emotion_temperature if temperature is None else temperature), 0.01)
         eps = max(float(settings.emotion_floor_epsilon if floor_epsilon is None else floor_epsilon), 0.0)
 
         adj_logits = logits.clone()
@@ -283,7 +283,16 @@ class ModelService:
         # EMOTIONS[2] is 'sad'
         adj_logits[..., 2] -= bias_s
 
-        probs = F.softmax(adj_logits / T, dim=-1)
+        # Asymmetric Active Sharpening & Neutral Protection:
+        # If any active emotion (indices 1..5) is leading, sharpen at T_base (0.65) so it decisively peaks at 60-70%.
+        # If neutral is leading, soften at T=1.15 so neutral NEVER balloons or aggressively suppresses subtle expressions.
+        top_idx = int(adj_logits.argmax(dim=-1).flatten()[0].item())
+        if top_idx == 0:
+            T_eff = max(T_base, 1.15)  # Neutral stays calm & modest (~35-40%), never dominates!
+        else:
+            T_eff = T_base             # Active emotions get intensified to 60-70% just like the demo!
+
+        probs = F.softmax(adj_logits / T_eff, dim=-1)
 
         # Apply floor amplification: P_amp = (1 - K*eps) * P + eps
         K = probs.size(-1)

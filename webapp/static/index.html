@@ -291,17 +291,22 @@
           <!-- Right side: Analyzing Steps & Pipeline Progress -->
           <div class="analyzing-right">
             <div class="analyzing-status-card glass-card">
-              <div class="loader">
-                <svg class="loader-ring" viewBox="0 0 80 80">
+              <div class="loader loader-lg">
+                <svg class="loader-ring" viewBox="0 0 100 100">
                   <defs>
-                    <linearGradient id="loaderGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="#1EA896" /><stop offset="1" stop-color="#72A1E5" />
+                    <linearGradient id="loaderGrad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stop-color="#1EA896" />
+                      <stop offset="50%" stop-color="#3DF3D8" />
+                      <stop offset="100%" stop-color="#72A1E5" />
                     </linearGradient>
                   </defs>
-                  <circle class="track" cx="40" cy="40" r="34" />
-                  <circle class="arc" cx="40" cy="40" r="34" />
+                  <circle class="track" cx="50" cy="50" r="42" />
+                  <circle class="arc" id="loader-arc" cx="50" cy="50" r="42" />
                 </svg>
-                <span class="loader-core"></span>
+                <div class="loader-center">
+                  <span class="loader-pct" id="analyzing-progress-pct">0%</span>
+                  <span class="loader-sub">ANALYZING</span>
+                </div>
               </div>
               <h2 class="stage-title analyzing-title">Analyzing video</h2>
               <p class="muted" id="analyzing-file">—</p>
@@ -388,28 +393,28 @@
         <!-- two emotion reads -->
         <div class="grid-2">
           <div class="glass-card" data-reveal>
-            <div class="card-head"><strong>Voice emotion</strong><span class="hint">what the voice expresses</span></div>
+            <div class="card-head">
+              <div class="card-head-modality">
+                <strong class="modality-title">Voice emotion</strong>
+                <span class="hint">what the voice expresses</span>
+              </div>
+            </div>
+            <div class="head-dominant-banner" id="head-a-top"></div>
             <div class="dist" id="head-a"></div>
           </div>
           <div class="glass-card" data-reveal>
-            <div class="card-head"><strong>Face emotion</strong><span class="hint">what the face shows</span></div>
+            <div class="card-head">
+              <div class="card-head-modality">
+                <strong class="modality-title">Face emotion</strong>
+                <span class="hint">what the face shows</span>
+              </div>
+            </div>
+            <div class="head-dominant-banner" id="head-b-top"></div>
             <div class="dist" id="head-b"></div>
           </div>
         </div>
 
-        <!-- delta per class -->
-        <div class="glass-card" data-reveal>
-          <div class="card-head">
-            <strong>Emotion gap per feeling <span class="step-tech">(Δ)</span></strong>
-            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
-              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
-            </button>
-          </div>
-          <div class="dist dist-delta" id="delta-list"></div>
-          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures, for each emotion, how much the voice and the face disagree — from 0 (perfect agreement) to 1 (total disagreement). Authentic clips stay <b class="ok">low</b> across the board; a big spike on any emotion is a classic sign of a stitched-together fake.</p></div></div>
-        </div>
-
-        <!-- biggest emotion gap — the summary / conclusion of the per-feeling gaps -->
+        <!-- biggest emotion gap — headline summary first for enhanced readability -->
         <div class="glass-card mismatch-card" data-reveal>
           <div class="row-between">
             <strong id="dom-title">Biggest emotion gap · —</strong>
@@ -423,6 +428,18 @@
           <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
           <p class="hint" id="dom-desc">—</p>
           <div class="guide-note" id="g-gap"><div><p>The single feeling where the voice and the face disagree most. A long bar here means a big gap — a strong sign the clip was stitched together from different sources.</p></div></div>
+        </div>
+
+        <!-- delta per class — detailed itemized breakdown below summary -->
+        <div class="glass-card" data-reveal>
+          <div class="card-head">
+            <strong>Emotion gap per feeling <span class="step-tech">(Δ)</span></strong>
+            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
+            </button>
+          </div>
+          <div class="dist dist-delta" id="delta-list"></div>
+          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures, for each emotion, how much the voice and the face disagree — from 0 (perfect agreement) to 1 (total disagreement). Authentic clips stay <b class="ok">low</b> across the board; a big spike on any emotion is a classic sign of a stitched-together fake.</p></div></div>
         </div>
 
         <div class="results-foot">

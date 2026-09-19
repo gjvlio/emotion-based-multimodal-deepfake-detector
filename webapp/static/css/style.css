@@ -28,6 +28,43 @@
   /* coherent cool brand gradient — copper is reserved strictly for the "fake" signal */
   --grad-brand: linear-gradient(120deg, #1EA896 0%, #3FB6C0 50%, #72A1E5 100%);
 
+  /* Emotion System: color-coded gradients & glow */
+  --emo-happy-text: #D97706;
+  --emo-happy-bg: rgba(245, 158, 11, 0.12);
+  --emo-happy-border: rgba(245, 158, 11, 0.35);
+  --emo-happy-grad: linear-gradient(90deg, #F59E0B, #FCD34D);
+  --emo-happy-glow: rgba(245, 158, 11, 0.22);
+
+  --emo-sad-text: #2563EB;
+  --emo-sad-bg: rgba(59, 130, 246, 0.12);
+  --emo-sad-border: rgba(59, 130, 246, 0.35);
+  --emo-sad-grad: linear-gradient(90deg, #3B82F6, #93C5FD);
+  --emo-sad-glow: rgba(59, 130, 246, 0.22);
+
+  --emo-angry-text: #DC2626;
+  --emo-angry-bg: rgba(239, 68, 68, 0.12);
+  --emo-angry-border: rgba(239, 68, 68, 0.35);
+  --emo-angry-grad: linear-gradient(90deg, #EF4444, #FCA5A5);
+  --emo-angry-glow: rgba(239, 68, 68, 0.22);
+
+  --emo-disgust-text: #059669;
+  --emo-disgust-bg: rgba(16, 185, 129, 0.12);
+  --emo-disgust-border: rgba(16, 185, 129, 0.35);
+  --emo-disgust-grad: linear-gradient(90deg, #10B981, #6EE7B7);
+  --emo-disgust-glow: rgba(16, 185, 129, 0.22);
+
+  --emo-neutral-text: #4B5563;
+  --emo-neutral-bg: rgba(100, 116, 139, 0.12);
+  --emo-neutral-border: rgba(100, 116, 139, 0.30);
+  --emo-neutral-grad: linear-gradient(90deg, #64748B, #CBD5E1);
+  --emo-neutral-glow: rgba(100, 116, 139, 0.18);
+
+  --emo-fear-text: #7C3AED;
+  --emo-fear-bg: rgba(139, 92, 246, 0.12);
+  --emo-fear-border: rgba(139, 92, 246, 0.35);
+  --emo-fear-grad: linear-gradient(90deg, #8B5CF6, #C4B5FD);
+  --emo-fear-glow: rgba(139, 92, 246, 0.22);
+
   --r: 16px; --r-lg: 24px; --r-xl: 32px;
   --e-out: cubic-bezier(.16, 1, .3, 1);
   --e-soft: cubic-bezier(.4, 0, .2, 1);
@@ -688,14 +725,45 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
   font-size: 10.5px;
 }
 
-.loader { position: relative; width: 72px; height: 72px; margin: 8px auto 16px; }
-.loader-ring { width: 72px; height: 72px; transform: rotate(-90deg); }
-.loader-ring .track { fill: none; stroke: rgba(60,60,60,.08); stroke-width: 5; }
-.loader-ring .arc { fill: none; stroke: url(#loaderGrad); stroke-width: 5; stroke-linecap: round; stroke-dasharray: 60 220; animation: arc 1.4s linear infinite; }
-@keyframes arc { to { stroke-dashoffset: -280; } }
-.loader-core { position: absolute; inset: 50% auto auto 50%; width: 11px; height: 11px; transform: translate(-50%,-50%);
-  border-radius: 50%; background: var(--grad-brand); box-shadow: 0 0 16px 2px rgba(219,90,66,.5); animation: pulse 1.4s var(--e-soft) infinite; }
-@keyframes pulse { 0%,100%{transform:translate(-50%,-50%) scale(.8); opacity:.8} 50%{transform:translate(-50%,-50%) scale(1.25); opacity:1} }
+.loader { position: relative; width: 104px; height: 104px; margin: 8px auto 18px; display: grid; place-items: center; }
+.loader-ring { width: 104px; height: 104px; transform: rotate(-90deg); filter: drop-shadow(0 4px 14px rgba(30,168,150,.2)); }
+.loader-ring .track { fill: none; stroke: rgba(60,60,60,.08); stroke-width: 5.5; }
+.loader-ring .arc {
+  fill: none;
+  stroke: url(#loaderGrad);
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  stroke-dasharray: 264;
+  stroke-dashoffset: 264;
+  transition: stroke-dashoffset .28s ease-out;
+}
+.loader-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+}
+.loader-pct {
+  font-family: var(--f-display);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--gun);
+  letter-spacing: -0.02em;
+}
+.loader-sub {
+  font-family: var(--f-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-top: 4px;
+  text-transform: uppercase;
+}
 .steps { list-style: none; padding: 22px 26px; margin: 30px auto 0; max-width: 440px; text-align: left; }
 .steps li { display: flex; align-items: center; gap: 13px; padding: 9px 0; color: var(--muted); font-size: 14.5px; transition: color .4s; }
 .step-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center; transition: all .4s var(--e-out); }
@@ -709,9 +777,144 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 
 /* ── Cards / results ──────────────────────────────────────────────────────── */
 .glass-card { padding: 24px 26px; margin-bottom: 18px; }
-.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-.card-head strong { font-family: var(--f-display); font-size: 15px; }
-.card-head .hint { margin-left: auto; }
+.card-head { margin-bottom: 12px; }
+.card-head-modality {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.modality-title {
+  font-family: var(--f-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gun);
+  letter-spacing: -0.01em;
+}
+.card-head .hint { font-size: 12px; color: var(--muted); }
+
+/* ── Prominent Dominant Emotion Highlight Banner ──────────────────────────── */
+.head-dominant-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+  border: 1.5px solid transparent;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.35s var(--e-out);
+}
+.dom-icon-box {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: inset 0 1px 0 #fff, 0 2px 6px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s var(--e-out);
+}
+.dom-icon-box .emo-svg {
+  width: 28px;
+  height: 28px;
+  stroke-width: 1.8;
+}
+.dom-text-box {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.dom-tag {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+.dom-name {
+  font-family: var(--f-display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+/* Color-coded dominant banners & glow */
+.dom-banner-happy {
+  background: var(--emo-happy-bg);
+  border-color: var(--emo-happy-border);
+  box-shadow: 0 4px 18px var(--emo-happy-glow);
+}
+.dom-banner-happy .dom-icon-box { color: var(--emo-happy-text); border: 1px solid var(--emo-happy-border); }
+.dom-banner-happy .dom-tag { color: var(--emo-happy-text); }
+.dom-banner-happy .dom-name { color: var(--emo-happy-text); }
+
+.dom-banner-sad {
+  background: var(--emo-sad-bg);
+  border-color: var(--emo-sad-border);
+  box-shadow: 0 4px 18px var(--emo-sad-glow);
+}
+.dom-banner-sad .dom-icon-box { color: var(--emo-sad-text); border: 1px solid var(--emo-sad-border); }
+.dom-banner-sad .dom-tag { color: var(--emo-sad-text); }
+.dom-banner-sad .dom-name { color: var(--emo-sad-text); }
+
+.dom-banner-angry {
+  background: var(--emo-angry-bg);
+  border-color: var(--emo-angry-border);
+  box-shadow: 0 4px 18px var(--emo-angry-glow);
+}
+.dom-banner-angry .dom-icon-box { color: var(--emo-angry-text); border: 1px solid var(--emo-angry-border); }
+.dom-banner-angry .dom-tag { color: var(--emo-angry-text); }
+.dom-banner-angry .dom-name { color: var(--emo-angry-text); }
+
+.dom-banner-disgust {
+  background: var(--emo-disgust-bg);
+  border-color: var(--emo-disgust-border);
+  box-shadow: 0 4px 18px var(--emo-disgust-glow);
+}
+.dom-banner-disgust .dom-icon-box { color: var(--emo-disgust-text); border: 1px solid var(--emo-disgust-border); }
+.dom-banner-disgust .dom-tag { color: var(--emo-disgust-text); }
+.dom-banner-disgust .dom-name { color: var(--emo-disgust-text); }
+
+.dom-banner-neutral {
+  background: var(--emo-neutral-bg);
+  border-color: var(--emo-neutral-border);
+  box-shadow: 0 4px 18px var(--emo-neutral-glow);
+}
+.dom-banner-neutral .dom-icon-box { color: var(--emo-neutral-text); border: 1px solid var(--emo-neutral-border); }
+.dom-banner-neutral .dom-tag { color: var(--emo-neutral-text); }
+.dom-banner-neutral .dom-name { color: var(--emo-neutral-text); }
+
+.dom-banner-fear, .dom-banner-fearful {
+  background: var(--emo-fear-bg);
+  border-color: var(--emo-fear-border);
+  box-shadow: 0 4px 18px var(--emo-fear-glow);
+}
+.dom-banner-fear .dom-icon-box, .dom-banner-fearful .dom-icon-box { color: var(--emo-fear-text); border: 1px solid var(--emo-fear-border); }
+.dom-banner-fear .dom-tag, .dom-banner-fearful .dom-tag { color: var(--emo-fear-text); }
+.dom-banner-fear .dom-name, .dom-banner-fearful .dom-name { color: var(--emo-fear-text); }
+
+.bar-emo-happy { background: var(--emo-happy-grad); }
+.bar-emo-sad { background: var(--emo-sad-grad); }
+.bar-emo-angry { background: var(--emo-angry-grad); }
+.bar-emo-disgust { background: var(--emo-disgust-grad); }
+.bar-emo-neutral { background: var(--emo-neutral-grad); }
+.bar-emo-fear, .bar-emo-fearful { background: var(--emo-fear-grad); }
+
+.drow.drow-top {
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  padding: 5px 8px;
+  margin: -3px -8px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.85), 0 2px 8px rgba(0,0,0,0.03);
+}
+.drow.drow-top .dlabel { font-weight: 700; color: var(--gun); }
+.drow.drow-top .dval { font-weight: 700; color: var(--gun); }
 .row-between { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .mono-tag { font-family: var(--f-mono); font-size: 13px; color: var(--gun-soft); }

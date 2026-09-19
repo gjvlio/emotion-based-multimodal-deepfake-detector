@@ -96,8 +96,9 @@ class Settings:
     visual_sad_logit_bias: float = float(_env("VISUAL_SAD_LOGIT_BIAS", "0.35"))
 
     # Emotion distribution temperature scaling (T_emo):
-    # T > 1.0 softens the peaked softmax distribution so all expressive emotions surface cleanly. Default: 1.40.
-    emotion_temperature: float = float(_env("EMOTION_TEMPERATURE", "1.40"))
+    # Lower T (e.g. 0.65) sharpens and intensifies the dominant emotion (peaking at 60-70%),
+    # matching clear affective reads just like the demo while keeping minority classes legible. Default: 0.65.
+    emotion_temperature: float = float(_env("EMOTION_TEMPERATURE", "0.65"))
 
     # Bounded floor amplification (epsilon):
     # Injects a gentle baseline floor (~4.0%) so minority emotions (fear, disgust) are never
