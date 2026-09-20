@@ -1537,4 +1537,70 @@ body.no-scroll { overflow: hidden; }
   margin: 0;
 }
 
+/* ── Benchmarks page ───────────────────────────────────────────────────────── */
+.bm-stage { max-width: 920px; }
+.bm-lede  { margin-left: 0; margin-right: 0; max-width: none; margin-top: 18px; }
 
+/* Stat row */
+.bm-stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 36px 0 0; }
+.bm-stat-card { padding: 22px 20px; margin: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.bm-stat-label { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.bm-stat-num { font-family: var(--f-display); font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; }
+.bm-stat-sub { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+
+/* Table */
+.bm-table-card { margin-top: 32px; padding: 22px 24px 18px; }
+.bm-table-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+.bm-table-header strong { font-family: var(--f-display); font-size: 15px; font-weight: 600; }
+.bm-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bm-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.bm-table th { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 6px 10px; border-bottom: 1.5px solid var(--line); text-align: left; }
+.bm-table td { padding: 10px 10px; border-bottom: 1px solid rgba(60,60,60,.06); vertical-align: middle; color: var(--gun-soft); }
+.bm-table tbody tr:last-child td { border-bottom: none; }
+.bm-table tbody tr:hover td { background: rgba(255,255,255,.45); }
+/* Highlight our model */
+.bm-table tbody tr.bm-ours td { color: var(--gun); font-weight: 500; }
+.bm-table tbody tr.bm-ours td:first-child { font-weight: 700; }
+.bm-table tbody tr.bm-ours { background: rgba(30,168,150,.07); border-left: 3px solid var(--verdigris); }
+/* Model badge pill in first column */
+.bm-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-family: var(--f-mono); font-size: 10px; font-weight: 700; color: #fff; margin-right: 6px; vertical-align: middle; }
+/* AUC highlight for our model */
+.bm-auc-ours { background: linear-gradient(120deg,#1EA896,#72A1E5); -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 700; }
+
+/* Chart cards */
+.bm-chart-card { margin-top: 24px; padding: 22px 24px 18px; }
+.bm-chart-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.bm-chart-header strong { font-family: var(--f-display); font-size: 15px; font-weight: 600; }
+.bm-chart-wrap { position: relative; width: 100%; height: 340px; }
+.bm-chart-wrap-bar { height: 360px; }
+.bm-canvas { width: 100% !important; height: 100% !important; display: block; }
+
+/* Legend strip */
+.bm-legend { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 12px; }
+.bm-leg-item { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--gun-soft); }
+.bm-leg-swatch { width: 20px; height: 3.5px; border-radius: 2px; flex: none; }
+.bm-leg-swatch-dashed { height: 0; border-top: 2.5px dashed currentColor; border-radius: 2px; }
+
+/* Findings */
+.bm-findings { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.bm-finding-card { padding: 22px 24px; margin: 0; }
+.bm-finding-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.bm-finding-head strong { font-family: var(--f-display); font-size: 15px; font-weight: 600; color: var(--gun); }
+.bm-finding-ic { flex: none; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; color: #fff; }
+.bm-finding-ic svg { width: 20px; height: 20px; }
+.bm-finding-card > p { margin: 0; color: var(--gun-soft); font-size: 14.5px; line-height: 1.65; }
+.bm-finding-card code { font-family: var(--f-mono); background: rgba(60,60,60,.08); padding: 2px 7px; border-radius: 6px; font-size: 12.5px; }
+
+/* CTA foot */
+.bm-foot { margin-top: 40px; }
+
+/* Responsive */
+@media (max-width: 820px) {
+  .bm-stat-row { grid-template-columns: repeat(2, 1fr); }
+  .bm-chart-wrap { height: 260px; }
+  .bm-chart-wrap-bar { height: 300px; }
+}
+@media (max-width: 520px) {
+  .bm-stat-row { grid-template-columns: 1fr 1fr; }
+  .bm-stat-num { font-size: 26px; }
+}
