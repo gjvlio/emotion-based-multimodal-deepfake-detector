@@ -34,6 +34,19 @@ log = logging.getLogger(__name__)
 
 # ── Emotion label maps ────────────────────────────────────────────────────────
 
+DOMAIN_MAP: Dict[str, int] = {
+    "crema_d": 0,
+    "meld": 1,
+    "meld_real": 1,
+    "mosei": 2,
+    "mosei_real": 2,
+    "mustard": 3,
+    "track1": 4,
+    "track2": 4,
+    "track3": 4,
+    "synthetic": 4,
+}
+
 EMOTION_TO_IDX: Dict[str, int] = {
     # CREMA-D codes
     "NEU": 0, "neutral": 0,
@@ -85,6 +98,7 @@ def _build_records(
         return []
     df = pd.read_csv(p)
     records = []
+    dom_idx = DOMAIN_MAP.get(source_pipeline.lower(), 4)
     for _, row in df.iterrows():
         clip_id = str(row.get("output_stem") or row.get("clip_id") or "")
         if not clip_id:
@@ -114,6 +128,7 @@ def _build_records(
             "visual_emotion":    vis_emo,
             "sarcasm_label":     UNKNOWN_SARCASM,
             "source_pipeline":   source_pipeline,
+            "domain_label":      dom_idx,
             "speaker_id":        _speaker_from_row(row.to_dict()),
         })
     return records
@@ -133,6 +148,7 @@ def _build_real_records(
         return []
     df = pd.read_csv(p)
     records = []
+    dom_idx = DOMAIN_MAP.get(source_name.lower(), 0)
     for _, row in df.iterrows():
         clip_id = str(row.get(clip_id_col, ""))
         if not clip_id:
@@ -157,6 +173,7 @@ def _build_real_records(
             "visual_emotion":    emo,
             "sarcasm_label":     UNKNOWN_SARCASM,
             "source_pipeline":   source_name,
+            "domain_label":      dom_idx,
             "speaker_id":        spk,
         })
     return records
@@ -173,6 +190,7 @@ def _build_mustard_records(
         return []
     df = pd.read_csv(p)
     records = []
+    dom_idx = DOMAIN_MAP.get("mustard", 3)
     for _, row in df.iterrows():
         clip_id = str(row.get("clip_id", ""))
         if not clip_id:
@@ -193,6 +211,7 @@ def _build_mustard_records(
             "visual_emotion":    UNKNOWN_EMOTION,
             "sarcasm_label":     sarc,
             "source_pipeline":   "mustard",
+            "domain_label":      dom_idx,
             "speaker_id":        clip_id.split("_")[0],
         })
     return records

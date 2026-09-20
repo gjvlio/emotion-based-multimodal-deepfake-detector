@@ -9,28 +9,39 @@ from __future__ import annotations
 import logging
 from typing import List, Tuple
 
+import os
 import cv2
 import numpy as np
 from PIL import Image
 
 log = logging.getLogger(__name__)
 
-_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+_cascade_dir = getattr(cv2.data, "haarcascades", "")
+_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml") if _cascade_dir else ""
 _cascade: cv2.CascadeClassifier | None = None
 
 
-def _get_cascade() -> cv2.CascadeClassifier:
+def _get_cascade():
     global _cascade
-    if _cascade is None:
-        _cascade = cv2.CascadeClassifier(_CASCADE_PATH)
+    if _cascade is None and _CASCADE_PATH and os.path.exists(_CASCADE_PATH):
+        try:
+            _cascade = cv2.CascadeClassifier(_CASCADE_PATH)
+        except Exception:
+            _cascade = None
     return _cascade
 
 
 def coarse_has_face(frame: np.ndarray) -> bool:
     """True if Haar cascade finds at least one face in the BGR frame."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = _get_cascade().detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
-    return len(faces) > 0
+    cas = _get_cascade()
+    if cas is None or getattr(cas, "empty", lambda: True)():
+        return True
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = cas.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+        return len(faces) > 0
+    except Exception:
+        return True
 
 
 def sharpness_score(frame: np.ndarray) -> float:

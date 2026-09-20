@@ -14,6 +14,8 @@ Falls back to conf × sharpness if py-feat unavailable.
 from __future__ import annotations
 
 import logging
+import os
+import warnings
 from pathlib import Path
 from typing import List, Tuple
 
@@ -21,6 +23,11 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
+
+# Silence numpy & insightface deprecation warnings from spamming stdout
+warnings.filterwarnings("ignore", category=FutureWarning, module="insightface.*")
+warnings.filterwarnings("ignore", message=".*rcond.*")
+warnings.filterwarnings("ignore", message=".*estimate is deprecated.*")
 
 from .filters import coarse_has_face, sharpness_score, select_keyframes, frames_to_pil
 
@@ -35,9 +42,13 @@ _insightface_app = None
 try:
     import feat as _feat_pkg  # noqa: F401
     _FEAT_AVAILABLE = True
+    # py-feat 2.0 renamed the class (Detector -> Detectorv1) and detect_image() -> detect().
+    # The local .venv-feat pins 0.6.2 (still has `Detector`); Colab pulls latest (2.x). Detect it.
+    _PYFEAT_V2 = not hasattr(_feat_pkg, "Detector")
 except ImportError:
     _FEAT_AVAILABLE = False
-    log.warning("py-feat not installed — AU saliency unavailable. Keyframe scoring: conf × sharpness only. Install: pip install feat")
+    _PYFEAT_V2 = False
+    log.warning("py-feat not installed — AU saliency unavailable. Keyframe scoring: conf × sharpness only. Install: pip install py-feat")
 
 try:
     import insightface as _insightface_pkg  # noqa: F401
@@ -47,14 +58,19 @@ except ImportError:
     log.warning("insightface not installed — face detection will use Haar cascade fallback. Install: pip install insightface")
 
 
-def _load_vit(model_name: str = "google/vit-base-patch16-224") -> Tuple:
+_DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_vit(model_name: str = "google/vit-base-patch16-224", device: str = _DEFAULT_DEVICE) -> Tuple:
     global _vit_model, _vit_processor
     if _vit_model is None:
         from transformers import ViTModel, ViTImageProcessor
-        log.info(f"Loading ViT: {model_name}")
+        log.info(f"Loading ViT: {model_name} on {device}")
         _vit_processor = ViTImageProcessor.from_pretrained(model_name)
-        _vit_model     = ViTModel.from_pretrained(model_name)
+        _vit_model     = ViTModel.from_pretrained(model_name).to(device)
         _vit_model.eval()
+    elif str(_vit_model.device) != device:
+        _vit_model = _vit_model.to(device)
     return _vit_model, _vit_processor
 
 
@@ -78,54 +94,100 @@ def configure_au(enabled: bool = False, device: str = "cpu", top_k: int = 12) ->
 def _load_feat_detector(device: str = "cpu"):
     global _feat_detector, _feat_device
     if _feat_detector is None or _feat_device != device:
-        from feat import Detector
-        log.info(f"Loading py-feat AU Detector on {device}")
-        _feat_detector = Detector(au_model="xgb", device=device)
+        if _PYFEAT_V2:
+            from feat import Detectorv1 as Detector   # py-feat 2.x (Detectorv1 = v1-compatible API)
+        else:
+            from feat import Detector                 # py-feat 0.6.x
+        log.info(f"Loading py-feat AU Detector on {device} (py-feat {'2.x' if _PYFEAT_V2 else '0.6.x'})")
+        # We use ONLY AU intensities. Try to disable the unused heads (emotion / head-pose /
+        # identity / gaze) so detect() skips their compute per crop — the main speedup.
+        # Falls back to the full detector if this py-feat version rejects the kwargs.
+        try:
+            _feat_detector = Detector(
+                au_model="xgb", device=device,
+                emotion_model=None, facepose_model=None,
+                identity_model=None, gaze_model=None,
+            )
+            log.info("py-feat: emotion/pose/identity/gaze heads DISABLED (AU-only, faster)")
+        except Exception as e:
+            log.warning(f"py-feat: could not disable extra heads ({e}); using full detector (slower)")
+            _feat_detector = Detector(au_model="xgb", device=device)
         _feat_device = device
     return _feat_detector
 
 
-def _au_saliency(crop: np.ndarray, device: str = "cpu") -> float:
+def _au_saliency_batch(crops: List[np.ndarray], device: str = "cpu") -> List[float]:
     """
-    Sum of FACS AU intensities for one face crop.
-    Higher = more facial muscle activity = more expression-relevant.
-    Returns 1.0 on failure so score degrades to conf × sharpness.
+    Sum of FACS AU intensities for a BATCH of face crops, in ONE py-feat call.
+    Returns one saliency per crop (higher = more muscle activity = more expression-
+    relevant); 1.0 on failure so the score degrades to conf × sharpness.
 
-    py-feat's detect_image() takes FILE PATHS, so the crop is written to a temp
-    PNG and passed by path (passing an array/PIL yields 0 detections → 1.0).
+    Batching amortizes py-feat's per-call pipeline overhead (vs one call per crop).
+    py-feat takes FILE PATHS, so each crop is written to a temp PNG and passed by path.
     """
-    if not _FEAT_AVAILABLE:
-        return 1.0
+    n = len(crops)
+    if not _FEAT_AVAILABLE or n == 0:
+        return [1.0] * n
     import os
     import tempfile
+    out = [1.0] * n
     try:
         det = _load_feat_detector(device)
         with tempfile.TemporaryDirectory() as td:
-            fp = os.path.join(td, "crop.png")
-            cv2.imwrite(fp, crop)
-            result = det.detect_image([fp], face_detection_threshold=0.5)
-        if result is not None and not result.empty:
-            au_cols = [c for c in result.columns if c.startswith("AU")]
-            if au_cols:
-                s = float(np.nansum(result[au_cols].values[0]))
-                return s if s > 0 else 1.0
+            paths = []
+            for j, crop in enumerate(crops):
+                fp = os.path.join(td, f"c{j}.png")
+                cv2.imwrite(fp, crop)
+                paths.append(fp)
+            if _PYFEAT_V2:
+                result = det.detect(paths, data_type="image", batch_size=n,
+                                    face_detection_threshold=0.5, progress_bar=False)
+            else:
+                result = det.detect_image(paths, face_detection_threshold=0.5)
+        if result is None or not len(result):
+            return out
+        au_df = getattr(result, "aus", None)
+        mat = au_df.values if (au_df is not None and len(au_df)) else None
+        if mat is None:
+            au_cols = [c for c in result.columns if str(c).upper().startswith("AU")]
+            mat = result[au_cols].values if au_cols else None
+        if mat is None:
+            return out
+        # Map each result row back to its input crop by filename (c{j}.png) if available,
+        # else assume row order matches input order (one face per crop).
+        cols = list(getattr(result, "columns", []))
+        idx_col = next((c for c in ("input", "FileName", "frame") if c in cols), None)
+        if idx_col is not None:
+            for row, name in enumerate(str(p) for p in result[idx_col].tolist()):
+                base = os.path.basename(name)
+                if base.startswith("c") and base.endswith(".png"):
+                    try:
+                        j = int(base[1:-4])
+                    except ValueError:
+                        continue
+                    if 0 <= j < n and row < len(mat):
+                        s = float(np.nansum(mat[row]))
+                        out[j] = s if s > 0 else 1.0
+        else:
+            for j in range(min(len(mat), n)):
+                s = float(np.nansum(mat[j]))
+                out[j] = s if s > 0 else 1.0
     except Exception as e:
-        log.debug(f"AU saliency error: {e}")
-    return 1.0
+        log.debug(f"AU batch error: {e}")
+    return out
 
 
 def _rescore_with_au(results: List[Tuple[np.ndarray, float]]) -> List[Tuple[np.ndarray, float]]:
     """If AU is enabled, multiply the top-K crops (by conf × sharpness) by their AU
-    saliency. AU only runs on the K most promising frames so per-clip cost stays
-    bounded (K × ~1.4s GPU) instead of scaling with every detected frame."""
+    saliency. AU runs on only the K most promising frames, in ONE batched py-feat call,
+    so per-clip cost stays bounded instead of scaling with every detected frame."""
     if not _AU_ENABLED or not _FEAT_AVAILABLE or not results:
         return results
     order = sorted(range(len(results)), key=lambda i: results[i][1], reverse=True)
-    topk = set(order[:_AU_TOP_K])
-    rescored = []
-    for i, (crop, base) in enumerate(results):
-        rescored.append((crop, base * _au_saliency(crop, _AU_DEVICE)) if i in topk else (crop, base))
-    return rescored
+    topk = order[:_AU_TOP_K]
+    sal = _au_saliency_batch([results[i][0] for i in topk], _AU_DEVICE)
+    sal_map = {i: s for i, s in zip(topk, sal)}
+    return [(crop, base * sal_map.get(i, 1.0)) for i, (crop, base) in enumerate(results)]
 
 
 # ── Frame extraction ───────────────────────────────────────────────────────────
@@ -133,9 +195,11 @@ def _rescore_with_au(results: List[Tuple[np.ndarray, float]]) -> List[Tuple[np.n
 def extract_frames(
     video_path: str | Path,
     target_fps: float = 25.0,
+    max_seconds: float = 5.0,
 ) -> List[np.ndarray]:
     """
-    Read video and sample frames at target_fps.
+    Read video and sample frames at target_fps up to max_seconds.
+    Strictly synchronizes the visual keyframe window with Phase-2 audio (5.0s / 80k samples).
     Returns list of BGR numpy arrays (H, W, 3).
     """
     cap = cv2.VideoCapture(str(video_path))
@@ -144,11 +208,13 @@ def extract_frames(
         return []
 
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    interval   = max(1, int(round(native_fps / target_fps)))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    max_frames = int(max_seconds * native_fps) if (max_seconds and max_seconds > 0) else total_frames
+    interval = max(1, int(round(native_fps / target_fps)))
     frames, idx = [], 0
-    while True:
+    while idx < max_frames:
         ret, frame = cap.read()
-        if not ret:
+        if not ret or frame is None:
             break
         if idx % interval == 0:
             frames.append(frame)
@@ -165,26 +231,25 @@ def optical_flow_gate(
 ) -> List[np.ndarray]:
     """
     Keep frames where mean optical flow magnitude >= motion_threshold.
-    Retains first frame unconditionally. Falls back to all frames if
-    nothing passes (fully static clip).
+    Downsamples frames to (160, 120) for 50x faster execution on CPU without precision loss.
     """
     if len(frames) < 2:
         return frames
 
     gated = [frames[0]]
-    prev_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+    prev_small = cv2.resize(cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY), (160, 120))
 
     for frame in frames[1:]:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (160, 120))
         flow = cv2.calcOpticalFlowFarneback(
-            prev_gray, gray, None,
-            pyr_scale=0.5, levels=3, winsize=15,
-            iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
+            prev_small, small, None,
+            pyr_scale=0.5, levels=2, winsize=11,
+            iterations=2, poly_n=5, poly_sigma=1.1, flags=0,
         )
         magnitude = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2).mean()
         if magnitude >= motion_threshold:
             gated.append(frame)
-        prev_gray = gray
+        prev_small = small
 
     return gated if len(gated) > 1 else frames
 
@@ -195,9 +260,12 @@ def _load_insightface_app():
     global _insightface_app
     if _insightface_app is None:
         from insightface.app import FaceAnalysis
+        import torch
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
         _insightface_app = FaceAnalysis(
             name="buffalo_s",
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            allowed_modules=["detection"],
+            providers=providers,
         )
         _insightface_app.prepare(ctx_id=0, det_size=(640, 640))
     return _insightface_app
@@ -211,6 +279,7 @@ def _insightface_detect(
     insightface (ONNX RetinaFace) detection with AU-saliency weighted scoring.
     score = conf × sharpness × AU_saliency
     Only keeps detections with conf >= confidence_threshold.
+    Preserves natural 1:1 aspect ratio with 20% context margin to avoid facial squashing/distortion.
     """
     if not _INSIGHTFACE_AVAILABLE:
         return _haar_fallback(frames)
@@ -230,7 +299,16 @@ def _insightface_detect(
             if best.det_score < confidence_threshold:
                 continue
             x1, y1, x2, y2 = best.bbox.astype(int)
-            crop = frame[max(0, y1):y2, max(0, x1):x2]
+            bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            # Expand to square bounding box with 20% context margin to preserve 1:1 facial aspect ratio
+            side = max(bw, bh) * 1.20
+            h, w = frame.shape[:2]
+            ny1 = max(0, int(round(cy - side / 2.0)))
+            ny2 = min(h, int(round(cy + side / 2.0)))
+            nx1 = max(0, int(round(cx - side / 2.0)))
+            nx2 = min(w, int(round(cx + side / 2.0)))
+            crop = frame[ny1:ny2, nx1:nx2]
             if crop.size == 0:
                 continue
             base = float(best.det_score) * sharpness_score(crop)
@@ -241,18 +319,44 @@ def _insightface_detect(
 
 
 def _haar_fallback(frames: List[np.ndarray]) -> List[Tuple[np.ndarray, float]]:
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
+    cascade = None
+    try:
+        cascade_dir = getattr(cv2.data, "haarcascades", "")
+        cascade_path = os.path.join(cascade_dir, "haarcascade_frontalface_default.xml") if cascade_dir else ""
+        if cascade_path and os.path.exists(cascade_path):
+            cascade = cv2.CascadeClassifier(cascade_path)
+    except Exception:
+        cascade = None
+
     results = []
     for frame in frames:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = cascade.detectMultiScale(gray, 1.1, 4)
-        if len(faces) == 0:
-            continue
-        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-        crop    = frame[y:y+h, x:x+w]
-        base    = sharpness_score(crop)
+        if cascade is not None and not getattr(cascade, "empty", lambda: True)():
+            try:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = cascade.detectMultiScale(gray, 1.1, 4)
+                if len(faces) > 0:
+                    x, y, w_box, h_box = max(faces, key=lambda f: f[2] * f[3])
+                    cx, cy = x + w_box / 2.0, y + h_box / 2.0
+                    side = max(w_box, h_box) * 1.20
+                    h_f, w_f = frame.shape[:2]
+                    ny1 = max(0, int(round(cy - side / 2.0)))
+                    ny2 = min(h_f, int(round(cy + side / 2.0)))
+                    nx1 = max(0, int(round(cx - side / 2.0)))
+                    nx2 = min(w_f, int(round(cx + side / 2.0)))
+                    crop = frame[ny1:ny2, nx1:nx2]
+                    if crop.size > 0:
+                        base = sharpness_score(crop)
+                        results.append((crop, base))
+                        continue
+            except Exception:
+                pass
+        # High-quality human center crop (biased upper-center for human head/face)
+        h, w = frame.shape[:2]
+        side = min(h, w)
+        y1 = max(0, (h - side) // 4)
+        x1 = max(0, (w - side) // 2)
+        crop = cv2.resize(frame[y1:y1+side, x1:x1+side], (224, 224), interpolation=cv2.INTER_AREA)
+        base = sharpness_score(crop)
         results.append((crop, base))
     return _rescore_with_au(results)
 
@@ -287,19 +391,19 @@ def get_z_v(
     motion_threshold:     float = 0.3,
     confidence_threshold: float = 0.7,
     device:               str   = "cpu",
+    max_seconds:          float = 5.0,
 ) -> torch.Tensor:
     """
     Full visual pipeline: extract → optical flow gate → detect (conf≥0.7)
     → AU-saliency weighted Top-8 keyframes → ViT.
-    Returns mean-pooled CLS token: (768,) float32.
+    Returns keyframe CLS token sequence: (K, 768) float32 (default K=8).
     """
-    model, processor = _load_vit(vit_model_name)
-    model = model.to(device)
+    model, processor = _load_vit(vit_model_name, device=device)
 
-    frames = extract_frames(video_path, target_fps)
+    frames = extract_frames(video_path, target_fps, max_seconds=max_seconds)
     if not frames:
         log.warning(f"No frames extracted from {video_path}")
-        return torch.zeros(768)
+        return torch.zeros(n_keyframes, 768)
 
     gated_frames = optical_flow_gate(frames, motion_threshold)
 
@@ -329,5 +433,48 @@ def get_z_v(
     with torch.no_grad():
         out = model(**inputs)
     cls_tokens = out.last_hidden_state[:, 0, :]   # (K, 768)
-    z_v = cls_tokens.mean(dim=0).cpu()            # (768,)
-    return z_v
+    return cls_tokens.cpu()                       # (K, 768) keyframe sequence
+
+
+def get_keyframe_pixels(
+    video_path: str | Path,
+    vit_model_name:       str   = "google/vit-base-patch16-224",
+    detector:             str   = "retinaface",
+    n_keyframes:          int   = 8,
+    frame_size:           int   = 224,
+    target_fps:           float = 10.0,
+    motion_threshold:     float = 0.3,
+    confidence_threshold: float = 0.7,
+    device:               str   = "cpu",
+    max_seconds:          float = 5.0,
+) -> torch.Tensor:
+    """
+    Extracts Top-K keyframes from video and processes them into pixel_values tensor.
+    Returns: (1, K, 3, 224, 224) float32 tensor ready for ViT / DeepfakeDetector.forward().
+    """
+    _, processor = _load_vit(vit_model_name, device=device)
+
+    frames = extract_frames(video_path, target_fps, max_seconds=max_seconds)
+    if not frames:
+        pils = [Image.new("RGB", (frame_size, frame_size), color=(128, 128, 128)) for _ in range(n_keyframes)]
+    else:
+        gated_frames = optical_flow_gate(frames, motion_threshold)
+        face_results = detect_and_align_faces(gated_frames, detector, confidence_threshold)
+        if not face_results:
+            face_results = detect_and_align_faces(gated_frames, detector, 0.0)
+        if not face_results:
+            face_results = detect_and_align_faces(frames, detector, 0.0)
+        if not face_results:
+            face_results = [(f, sharpness_score(f)) for f in frames]
+
+        crops = [r[0] for r in face_results]
+        scores = [r[1] for r in face_results]
+        keyframes = select_keyframes(crops, scores, k=n_keyframes)
+        pils = frames_to_pil(keyframes, size=frame_size)
+        while len(pils) < n_keyframes:
+            pils.append(pils[-1].copy() if pils else Image.new("RGB", (frame_size, frame_size), color=(128, 128, 128)))
+
+    inputs = processor(images=pils, return_tensors="pt")
+    # inputs["pixel_values"] has shape (K, 3, 224, 224)
+    return inputs["pixel_values"].unsqueeze(0).to(device)  # (1, K, 3, 224, 224)
+

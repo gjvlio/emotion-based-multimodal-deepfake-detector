@@ -27,6 +27,25 @@ class EmotionPrediction(BaseModel):
     distribution: Dict[str, float]
 
 
+class ForensicInterpretation(BaseModel):
+    state_id: str                          # Unique state code (e.g., STATE_REAL_HARMONY, STATE_FAKE_EMOTION_DESYNC)
+    state_tag: Optional[str] = "ANALYSIS COMPLETE"  # Category badge tag
+    headline: str                          # Concise verdict headline
+    summary: str                           # Plain-language explanation for general audience
+    voice_face_analysis: str               # Breakdown of Voice vs Face alignment
+    sarcasm_analysis: str                  # Rhetorical context and role of sarcasm filtering
+    technical_rationale: Optional[str] = None  # Friendly AI reasoning rationale
+    forensic_rationale: Optional[str] = None   # Alias for backward compatibility
+
+
+class ValidationErrorDetail(BaseModel):
+    code: str
+    title: str
+    message: str
+    suggestion: str
+    details: Dict[str, float | int | str] = {}
+
+
 class DetectionResult(BaseModel):
     verdict: str                     # "FAKE" | "REAL"
     p_fake: float                    # P(fake) ∈ [0, 1]
@@ -37,6 +56,7 @@ class DetectionResult(BaseModel):
     p_sarcasm: float
     transcript: str
     served_by: ModelInfo             # which checkpoint produced this result
+    forensic_interpretation: Optional[ForensicInterpretation] = None
 
 
 class HealthResponse(BaseModel):

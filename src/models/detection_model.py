@@ -28,12 +28,40 @@ from .classifier import ClassifierMLP
 from .sarcasm_head import SarcasmHead
 
 
+class GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        ctx.alpha = alpha
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        output = grad_output.neg() * ctx.alpha
+        return output, None
+
+
+class GradientReversalLayer(nn.Module):
+    """
+    Gradient Reversal Layer (GRL) for Domain-Adversarial Training (DANN).
+    Forward pass: Identity mapping.
+    Backward pass: Multiplies gradients by -alpha.
+    """
+    def __init__(self, alpha: float = 1.0):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, x: torch.Tensor, alpha: float | None = None) -> torch.Tensor:
+        a = alpha if alpha is not None else self.alpha
+        return GradientReversalFunction.apply(x, a)
+
+
 @dataclass
 class DetectorOutput:
-    logit: torch.Tensor       # (B, 1) — raw, no sigmoid
-    emotion_a: torch.Tensor   # (B, 6) — audio emotion logits
-    emotion_b: torch.Tensor   # (B, 6) — visual emotion logits
-    sarcasm: torch.Tensor     # (B, 1) — raw sarcasm logit
+    logit: torch.Tensor             # (B, 1) — raw, no sigmoid
+    emotion_a: torch.Tensor         # (B, 6) — audio emotion logits
+    emotion_b: torch.Tensor         # (B, 6) — visual emotion logits
+    sarcasm: torch.Tensor           # (B, 1) — raw sarcasm logit
+    domain_logits: Optional[torch.Tensor] = None  # (B, 5) — domain classifier logits (DANN)
 
 
 class DeepfakeDetector(nn.Module):
@@ -58,19 +86,59 @@ class DeepfakeDetector(nn.Module):
         cbp_dim:       int = 8192,
         dropout_heads: float = 0.3,
         dropout_cls:   float = 0.4,
+        classifier_mode: str = "baseline",
+        proj_dim:      Optional[int] = None,
+        **kwargs,
     ):
         super().__init__()
+        if proj_dim is not None:
+            cbp_dim = proj_dim
         self._wav2vec_name = wav2vec_model
         self._bert_name    = bert_model
         self._vit_name     = vit_model
+        self.classifier_mode = classifier_mode
 
         # Detection components (always present)
         self.emotion_head_a  = EmotionHeadA(self.Z_AT_DIM, n_emotions, dropout_heads)
         self.emotion_head_b  = EmotionHeadB(self.Z_V_DIM,  n_emotions, dropout_heads)
         self.sarcasm_head    = SarcasmHead(self.Z_AT_DIM, dropout=dropout_heads)
         self.bilinear_fusion = BilinearFusion(self.Z_AT_DIM, self.Z_V_DIM, cbp_dim)
-        fused_dim = cbp_dim + n_emotions + 1   # 8192 + 6 (delta) + 1 (P_sarcasm)
+
+        if classifier_mode == "mismatch_only":
+            fused_dim = n_emotions + 1
+        elif classifier_mode == "emotion_bilinear":
+            fused_dim = 36 + n_emotions + 1
+        elif classifier_mode == "bottleneck":
+            self.bilinear_proj = nn.Linear(cbp_dim, 256)
+            self.proj_ln = nn.LayerNorm(256)
+            fused_dim = 256 + 36 + n_emotions + 1
+        elif classifier_mode == "high_dropout":
+            self.high_dropout = nn.Dropout(0.85)
+            fused_dim = cbp_dim + n_emotions + 1
+        else:  # baseline
+            fused_dim = cbp_dim + n_emotions + 1
+
         self.classifier = ClassifierMLP(fused_dim, dropout=dropout_cls)
+
+        # Domain Adversarial Classifier (DANN / GRL) to neutralize dataset shortcuts
+        self.grl = GradientReversalLayer(alpha=1.0)
+        domain_in_dim = 256 if classifier_mode == "bottleneck" else (cbp_dim if classifier_mode in ("baseline", "high_dropout") else fused_dim)
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(domain_in_dim, 128),
+            nn.LayerNorm(128),
+            nn.GELU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 5),  # 5 Source Domains: {0: CREMA-D, 1: MELD, 2: MOSEI, 3: MUStARD, 4: SYNTHETIC}
+        )
+
+        # Cross-Modal Attention between audio/text and visual keyframes
+        self.cross_attn_at = nn.MultiheadAttention(embed_dim=768, num_heads=8, batch_first=True)
+        self.cross_attn_v  = nn.MultiheadAttention(embed_dim=768, num_heads=8, batch_first=True)
+        self.norm_at       = nn.LayerNorm(768)
+        self.norm_v        = nn.LayerNorm(768)
+
+        # Temporal GRU Aggregator over visual keyframe sequence
+        self.vit_gru       = nn.GRU(input_size=768, hidden_size=768, num_layers=2, batch_first=True)
 
         # Backbones — loaded on demand
         self._wav2vec: Optional[nn.Module] = None
@@ -130,12 +198,31 @@ class DeepfakeDetector(nn.Module):
         for p in self._bert.pooler.parameters():
             p.requires_grad = True
 
-        # ViT: encoder.layer[-n_layers:]
-        for layer in self._vit.encoder.layer[-n_layers:]:
+        # ViT unfreezing (supports both self._vit.encoder.layer and self._vit.layers architectures)
+        vit_layers = None
+        vit_encoder = getattr(self._vit, "encoder", None)
+        if vit_encoder is None and hasattr(self._vit, "vit"):
+            vit_encoder = getattr(self._vit.vit, "encoder", None)
+            
+        if vit_encoder is not None and hasattr(vit_encoder, "layer"):
+            vit_layers = vit_encoder.layer
+        elif hasattr(self._vit, "layers"):
+            vit_layers = self._vit.layers
+            
+        if vit_layers is None:
+            raise AttributeError("Could not find ViT layers or encoder module. Check transformers library version.")
+            
+        for layer in vit_layers[-n_layers:]:
             for p in layer.parameters():
                 p.requires_grad = True
-        for p in self._vit.layernorm.parameters():
-            p.requires_grad = True
+                
+        vit_layernorm = getattr(self._vit, "layernorm", None)
+        if vit_layernorm is None and hasattr(self._vit, "vit"):
+            vit_layernorm = getattr(self._vit.vit, "layernorm", None)
+            
+        if vit_layernorm is not None:
+            for p in vit_layernorm.parameters():
+                p.requires_grad = True
 
     def enable_gradient_checkpointing(self) -> None:
         """Trade compute for memory — recompute activations on backward pass."""
@@ -147,22 +234,70 @@ class DeepfakeDetector(nn.Module):
 
     # ── Core detection logic ───────────────────────────────────────────────────
 
-    def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor) -> DetectorOutput:
+    def _detect(
+        self,
+        z_at: torch.Tensor,
+        z_v: torch.Tensor,
+        grl_alpha: float = 1.0,
+        z_at_emo: Optional[torch.Tensor] = None,
+        has_speech: bool = True,
+    ) -> DetectorOutput:
         """Shared logic after feature extraction."""
-        emo_a = self.emotion_head_a(z_at)  # (B, 6)
+        emo_source = z_at_emo if z_at_emo is not None else z_at
+        emo_a = self.emotion_head_a(emo_source)  # (B, 6)
         emo_b = self.emotion_head_b(z_v)   # (B, 6)
         sarc  = self.sarcasm_head(z_at)    # (B, 1)
 
         fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192)
 
-        delta = torch.abs(
-            F.softmax(emo_a, dim=-1) - F.softmax(emo_b, dim=-1)
-        )  # (B, 6)
+        prob_b = F.softmax(emo_b, dim=-1)
+        if not has_speech:
+            B = z_at.size(0)
+            # When speech is absent (silent/quiet video), vocal emotion is neutral, sarcasm is 0,
+            # and there is no voice-face incongruence (delta=0)
+            prob_a = torch.zeros(B, 6, device=z_at.device)
+            prob_a[:, 0] = 1.0  # 100% neutral voice
+            sarc = torch.zeros(B, 1, device=z_at.device)
+            delta = torch.zeros(B, 6, device=z_at.device)
+        else:
+            prob_a = F.softmax(emo_a, dim=-1)
+            delta = torch.abs(prob_a - prob_b)  # (B, 6)
 
-        combined = torch.cat([fused, delta, sarc], dim=-1)  # (B, 8199)
+        if self.classifier_mode == "mismatch_only":
+            combined = torch.cat([delta, sarc], dim=-1)
+            domain_in = combined
+        elif self.classifier_mode == "emotion_bilinear":
+            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
+            fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
+            combined = torch.cat([fused_emo, delta, sarc], dim=-1)       # (B, 43)
+            domain_in = combined
+        elif self.classifier_mode == "bottleneck":
+            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
+            fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
+            fused_proj = F.gelu(self.proj_ln(self.bilinear_proj(fused))) # (B, 256)
+            combined = torch.cat([fused_proj, fused_emo, delta, sarc], dim=-1) # (B, 299)
+            domain_in = fused_proj
+        elif self.classifier_mode == "high_dropout":
+            fused_drop = self.high_dropout(fused)
+            combined = torch.cat([fused_drop, delta, sarc], dim=-1)
+            domain_in = fused
+        else:  # baseline
+            combined = torch.cat([fused, delta, sarc], dim=-1)
+            domain_in = fused
+
         logit = self.classifier(combined)                    # (B, 1)
 
-        return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b, sarcasm=sarc)
+        # Domain adversarial classifier through GRL
+        rev_feat = self.grl(domain_in, alpha=grl_alpha)
+        domain_logits = self.domain_classifier(rev_feat)      # (B, 5)
+
+        return DetectorOutput(
+            logit=logit,
+            emotion_a=emo_a,
+            emotion_b=emo_b,
+            sarcasm=sarc,
+            domain_logits=domain_logits,
+        )
 
     # ── Phase 1 path (cached features) ────────────────────────────────────────
 
@@ -170,12 +305,26 @@ class DeepfakeDetector(nn.Module):
         self,
         z_at: torch.Tensor,
         z_v:  torch.Tensor,
+        grl_alpha: float = 1.0,
+        z_at_emo: Optional[torch.Tensor] = None,
+        has_speech: bool = True,
     ) -> DetectorOutput:
         """
-        Phase 1 forward pass — takes precomputed Z_at (B,1536) and Z_v (B,768).
+        Phase 1 forward pass - takes precomputed Z_at (B,1536) and Z_v (B,768) or (B,8,768).
         Does NOT require backbones to be loaded.
         """
-        return self._detect(z_at, z_v)
+        has_cross_attn = getattr(self, "_has_cross_attn", True)
+        if not has_cross_attn or z_v.ndim == 2:
+            z_v_vec = z_v if z_v.ndim == 2 else z_v.mean(dim=1)
+            return self._detect(z_at, z_v_vec, grl_alpha=grl_alpha, z_at_emo=z_at_emo, has_speech=has_speech)
+
+        w2v_emb = z_at[:, :768]
+        bert_emb = z_at[:, 768:]
+        if z_v.ndim == 3:
+            z_v_seq = z_v                               # Genuine keyframe sequence (B, K, 768)
+        else:
+            raise ValueError(f"Unexpected z_v shape: {z_v.shape}")
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo, has_speech=has_speech)
 
     # ── Phase 2 path (end-to-end) ─────────────────────────────────────────────
 
@@ -185,10 +334,13 @@ class DeepfakeDetector(nn.Module):
         input_ids:       torch.Tensor,            # (B, seq_len)
         attention_mask:  torch.Tensor,            # (B, seq_len)
         keyframe_pixels: torch.Tensor,            # (B, K, 3, 224, 224)
+        grl_alpha:       float = 1.0,
+        z_at_emo:        Optional[torch.Tensor] = None,
+        has_speech:      bool = True,
     ) -> DetectorOutput:
         """
         Phase 2 end-to-end forward pass.
-        Runs Wav2Vec2 + BERT for audio-text, ViT for visual.
+        Runs Wav2Vec2 + BERT for audio-text, ViT for visual, followed by Cross-Attention and GRU.
         Call load_backbones() once before using this path.
         """
         if not self._backbones_loaded:
@@ -206,15 +358,161 @@ class DeepfakeDetector(nn.Module):
         bert_out = self._bert(input_ids=input_ids, attention_mask=attention_mask)
         bert_emb = bert_out.last_hidden_state[:, 0, :]            # (B, 768) CLS token
 
-        z_at = torch.cat([w2v_emb, bert_emb], dim=-1)            # (B, 1536)
-
         # Visual branch — ViT on K keyframes per clip
         B, K, C, H, W = keyframe_pixels.shape
         frames = keyframe_pixels.view(B * K, C, H, W)
         vit_out = self._vit(pixel_values=frames).last_hidden_state[:, 0, :]  # (B*K, 768)
-        z_v = vit_out.view(B, K, 768).mean(dim=1)                # (B, 768)
+        z_v_seq = vit_out.view(B, K, 768)                        # (B, K, 768)
 
-        return self._detect(z_at, z_v)
+        return self._forward_impl(w2v_emb, bert_emb, z_v_seq, grl_alpha=grl_alpha, z_at_emo=z_at_emo, has_speech=has_speech)
+
+    def _forward_impl(
+        self,
+        w2v_emb: torch.Tensor,
+        bert_emb: torch.Tensor,
+        z_v_seq: torch.Tensor,
+        grl_alpha: float = 1.0,
+        z_at_emo: Optional[torch.Tensor] = None,
+        has_speech: bool = True,
+    ) -> DetectorOutput:
+        if not has_speech:
+            # Genuine silence: visual sequence is purely visual, no cross-modal noise contamination
+            gru_out, _ = self.vit_gru(z_v_seq)
+            z_v = gru_out[:, -1, :]
+            z_at_clean = torch.zeros(z_v.size(0), self.Z_AT_DIM, device=z_v.device)
+            return self._detect(z_at_clean, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_clean, has_speech=False)
+
+        # Pure audio-text embedding before cross-attention visual contamination
+        z_at_clean = torch.cat([w2v_emb, bert_emb], dim=-1)
+
+        # 1. Multi-Head Cross-Modal Attention
+        audio_text_seq = torch.stack([w2v_emb, bert_emb], dim=1)  # (B, 2, 768)
+
+        # Visual queries audio/text
+        z_v_attn, _ = self.cross_attn_v(query=z_v_seq, key=audio_text_seq, value=audio_text_seq)
+        z_v_seq = self.norm_v(z_v_seq + z_v_attn)
+
+        # Audio/text queries visual
+        at_attn, _ = self.cross_attn_at(query=audio_text_seq, key=z_v_seq, value=z_v_seq)
+        audio_text_seq = self.norm_at(audio_text_seq + at_attn)
+
+        # Split back to acoustic and linguistic
+        w2v_emb_fused = audio_text_seq[:, 0, :]
+        bert_emb_fused = audio_text_seq[:, 1, :]
+        z_at_fused = torch.cat([w2v_emb_fused, bert_emb_fused], dim=-1)            # (B, 1536)
+
+        # 2. Temporal GRU Aggregation on Visual Sequence
+        gru_out, _ = self.vit_gru(z_v_seq)                       # (B, K, 768)
+        z_v = gru_out[:, -1, :]                                  # Take last hidden state (B, 768)
+
+        # 3. Detect
+        return self._detect(z_at_fused, z_v, grl_alpha=grl_alpha, z_at_emo=z_at_emo if z_at_emo is not None else z_at_clean, has_speech=has_speech)
+
+    def load_state_dict(self, state_dict: dict, strict: bool = True, assign: bool = False):
+        """
+        Custom load_state_dict to handle:
+        - Auto-instantiation of backbones if state_dict has fine-tuned backbones.
+        - Auto-adaptation between 299-D bottleneck and 8199-D baseline heads.
+        - Bidirectional ViT layer naming remapping across transformers versions.
+        """
+        # Auto-instantiate backbones if checkpoint contains backbone weights
+        if not self._backbones_loaded and any(k.startswith(("wav2vec2.", "bert.", "vit.", "_wav2vec.", "_bert.", "_vit.")) for k in state_dict.keys()):
+            self.load_backbones()
+
+        # Auto-detect bottleneck (299-D) vs baseline (8199-D) head to prevent size mismatch
+        if "classifier.fc1.weight" in state_dict:
+            ckpt_in_features = state_dict["classifier.fc1.weight"].shape[1]
+            if ckpt_in_features == 299 and self.classifier_mode != "bottleneck":
+                device = next(self.classifier.parameters()).device
+                self.classifier_mode = "bottleneck"
+                self.bilinear_proj = nn.Linear(8192, 256).to(device)
+                self.proj_ln = nn.LayerNorm(256).to(device)
+                self.classifier = ClassifierMLP(299, dropout=0.4).to(device)
+                self.domain_classifier = nn.Sequential(
+                    nn.Linear(256, 128),
+                    nn.LayerNorm(128),
+                    nn.GELU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(128, 5),
+                ).to(device)
+            elif ckpt_in_features == 8199 and self.classifier_mode != "baseline":
+                device = next(self.classifier.parameters()).device
+                self.classifier_mode = "baseline"
+                if hasattr(self, "bilinear_proj"):
+                    del self.bilinear_proj
+                if hasattr(self, "proj_ln"):
+                    del self.proj_ln
+                self.classifier = ClassifierMLP(8199, dropout=0.4).to(device)
+                self.domain_classifier = nn.Sequential(
+                    nn.Linear(8192, 128),
+                    nn.LayerNorm(128),
+                    nn.GELU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(128, 5),
+                ).to(device)
+
+        remapped_state = {}
+        vit_has_encoder = False
+        if hasattr(self, "_vit") and self._vit is not None:
+            vit_has_encoder = hasattr(self._vit, "encoder") or (hasattr(self._vit, "vit") and hasattr(self._vit.vit, "encoder"))
+
+        for k, v in state_dict.items():
+            new_k = k
+            for prefix in ["_vit.", "vit."]:
+                if vit_has_encoder and new_k.startswith(prefix + "layers."):
+                    parts = new_k.split(".")
+                    i = parts[2]
+                    rest = ".".join(parts[3:])
+                    mapping = {
+                        "attention.q_proj.weight": f"{prefix}encoder.layer.{i}.attention.attention.query.weight",
+                        "attention.q_proj.bias":   f"{prefix}encoder.layer.{i}.attention.attention.query.bias",
+                        "attention.k_proj.weight": f"{prefix}encoder.layer.{i}.attention.attention.key.weight",
+                        "attention.k_proj.bias":   f"{prefix}encoder.layer.{i}.attention.attention.key.bias",
+                        "attention.v_proj.weight": f"{prefix}encoder.layer.{i}.attention.attention.value.weight",
+                        "attention.v_proj.bias":   f"{prefix}encoder.layer.{i}.attention.attention.value.bias",
+                        "attention.o_proj.weight": f"{prefix}encoder.layer.{i}.attention.output.dense.weight",
+                        "attention.o_proj.bias":   f"{prefix}encoder.layer.{i}.attention.output.dense.bias",
+                        "layernorm_before.weight": f"{prefix}encoder.layer.{i}.layernorm_before.weight",
+                        "layernorm_before.bias":   f"{prefix}encoder.layer.{i}.layernorm_before.bias",
+                        "layernorm_after.weight":  f"{prefix}encoder.layer.{i}.layernorm_after.weight",
+                        "layernorm_after.bias":    f"{prefix}encoder.layer.{i}.layernorm_after.bias",
+                        "mlp.fc1.weight":          f"{prefix}encoder.layer.{i}.intermediate.dense.weight",
+                        "mlp.fc1.bias":            f"{prefix}encoder.layer.{i}.intermediate.dense.bias",
+                        "mlp.fc2.weight":          f"{prefix}encoder.layer.{i}.output.dense.weight",
+                        "mlp.fc2.bias":            f"{prefix}encoder.layer.{i}.output.dense.bias",
+                    }
+                    if rest in mapping:
+                        new_k = mapping[rest]
+                elif (not vit_has_encoder) and new_k.startswith(prefix + "encoder.layer."):
+                    parts = new_k.split(".")
+                    i = parts[3]
+                    rest = ".".join(parts[4:])
+                    inv_mapping = {
+                        "attention.attention.query.weight": f"{prefix}layers.{i}.attention.q_proj.weight",
+                        "attention.attention.query.bias":   f"{prefix}layers.{i}.attention.q_proj.bias",
+                        "attention.attention.key.weight":   f"{prefix}layers.{i}.attention.k_proj.weight",
+                        "attention.attention.key.bias":     f"{prefix}layers.{i}.attention.k_proj.bias",
+                        "attention.attention.value.weight": f"{prefix}layers.{i}.attention.v_proj.weight",
+                        "attention.attention.value.bias":   f"{prefix}layers.{i}.attention.v_proj.bias",
+                        "attention.output.dense.weight":    f"{prefix}layers.{i}.attention.o_proj.weight",
+                        "attention.output.dense.bias":      f"{prefix}layers.{i}.attention.o_proj.bias",
+                        "layernorm_before.weight":          f"{prefix}layers.{i}.layernorm_before.weight",
+                        "layernorm_before.bias":            f"{prefix}layers.{i}.layernorm_before.bias",
+                        "layernorm_after.weight":           f"{prefix}layers.{i}.layernorm_after.weight",
+                        "layernorm_after.bias":             f"{prefix}layers.{i}.layernorm_after.bias",
+                        "intermediate.dense.weight":        f"{prefix}layers.{i}.mlp.fc1.weight",
+                        "intermediate.dense.bias":          f"{prefix}layers.{i}.mlp.fc1.bias",
+                        "output.dense.weight":              f"{prefix}layers.{i}.mlp.fc2.weight",
+                        "output.dense.bias":                f"{prefix}layers.{i}.mlp.fc2.bias",
+                    }
+                    if rest in inv_mapping:
+                        new_k = inv_mapping[rest]
+            remapped_state[new_k] = v
+
+        try:
+            return super().load_state_dict(remapped_state, strict=strict, assign=assign)
+        except TypeError:
+            return super().load_state_dict(remapped_state, strict=strict)
 
     # ── Convenience ───────────────────────────────────────────────────────────
 

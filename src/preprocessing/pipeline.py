@@ -6,7 +6,7 @@ Processes a single video clip and caches:
         audio/{clip_id}.wav          16kHz mono WAV
         transcripts/{clip_id}.txt    Whisper ASR output
         features/z_at/{clip_id}.pt   (1536,) tensor
-        features/z_v/{clip_id}.pt    (768,)  tensor
+        features/z_v/{clip_id}.pt    (8, 768) keyframe sequence tensor (or legacy 768,)
 
 Re-running on an already-processed clip is a no-op (cached files respected).
 """
@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 class ClipFeatures:
     clip_id:    str
     z_at:       torch.Tensor    # (1536,)
-    z_v:        torch.Tensor    # (768,)
+    z_v:        torch.Tensor    # (8, 768) or (768,)
     transcript: str
 
 
@@ -49,11 +49,11 @@ class PreprocessingPipeline:
         face_detector:        str   = "retinaface",
         n_keyframes:          int   = 8,
         frame_size:           int   = 224,
-        max_audio_sec:        int   = 30,
+        max_audio_sec:        int   = 5,
         target_fps:           float = 25.0,
         motion_threshold:     float = 0.3,
         confidence_threshold: float = 0.7,
-        device:               str   = "cpu",
+        device:               str   = "cuda",
     ):
         self.cache_dir            = Path(cache_dir)
         self.wav2vec_model        = wav2vec_model

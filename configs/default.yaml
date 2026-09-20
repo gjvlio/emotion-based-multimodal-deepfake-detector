@@ -10,7 +10,8 @@ model:
 
 preprocessing:
   audio_sample_rate: 16000
-  max_audio_seconds: 30
+  min_video_seconds: 3
+  max_audio_seconds: 20
   n_keyframes: 8
   frame_size: 224
   face_detector: "retinaface"   # retinaface | mtcnn

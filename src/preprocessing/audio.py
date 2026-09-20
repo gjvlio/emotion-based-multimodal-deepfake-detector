@@ -28,31 +28,38 @@ _bert_tokenizer = None
 _whisper_model  = None
 
 
-def _load_wav2vec(model_name: str = "facebook/wav2vec2-base") -> Tuple:
+_DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_wav2vec(model_name: str = "facebook/wav2vec2-base", device: str = _DEFAULT_DEVICE) -> Tuple:
     global _wav2vec_model, _wav2vec_proc
     if _wav2vec_model is None:
         from transformers import Wav2Vec2Model, Wav2Vec2Processor
-        log.info(f"Loading Wav2Vec2: {model_name}")
+        log.info(f"Loading Wav2Vec2: {model_name} on {device}")
         _wav2vec_proc  = Wav2Vec2Processor.from_pretrained(model_name)
-        _wav2vec_model = Wav2Vec2Model.from_pretrained(model_name)
+        _wav2vec_model = Wav2Vec2Model.from_pretrained(model_name).to(device)
         _wav2vec_model.eval()
+    elif str(_wav2vec_model.device) != device:
+        _wav2vec_model = _wav2vec_model.to(device)
     return _wav2vec_model, _wav2vec_proc
 
 
-def _load_bert(model_name: str = "bert-base-uncased") -> Tuple:
+def _load_bert(model_name: str = "bert-base-uncased", device: str = _DEFAULT_DEVICE) -> Tuple:
     global _bert_model, _bert_tokenizer
     if _bert_model is None:
         from transformers import BertModel, BertTokenizer
-        log.info(f"Loading BERT: {model_name}")
+        log.info(f"Loading BERT: {model_name} on {device}")
         _bert_tokenizer = BertTokenizer.from_pretrained(model_name)
-        _bert_model     = BertModel.from_pretrained(model_name)
+        _bert_model     = BertModel.from_pretrained(model_name).to(device)
         _bert_model.eval()
+    elif str(_bert_model.device) != device:
+        _bert_model = _bert_model.to(device)
     return _bert_model, _bert_tokenizer
 
 
-_whisper_device: str = "cpu"
+_whisper_device: str = _DEFAULT_DEVICE
 
-def _load_whisper(model_name: str = "openai/whisper-base", device: str = "cpu") -> object:
+def _load_whisper(model_name: str = "openai/whisper-base", device: str = _DEFAULT_DEVICE) -> object:
     global _whisper_model, _whisper_device
     if _whisper_model is None or _whisper_device != device:
         import whisper
@@ -83,27 +90,51 @@ def extract_audio_to_wav(
     return result.returncode == 0
 
 
+def load_audio_waveform(wav_path: str | Path, target_sr: int = 16000) -> Tuple[torch.Tensor, int]:
+    """
+    Robust audio loader using soundfile first, falling back to torchaudio.
+    Always returns mono float32 (waveform_1d_tensor, target_sr).
+    """
+    try:
+        import soundfile as sf
+        data, sr = sf.read(str(wav_path), dtype="float32")
+        waveform = torch.from_numpy(data)
+        if waveform.ndim > 1:
+            waveform = waveform.mean(dim=-1)
+        if sr != target_sr:
+            import torchaudio
+            waveform = torchaudio.functional.resample(waveform, sr, target_sr)
+            sr = target_sr
+        return waveform, sr
+    except Exception as e:
+        log.debug(f"soundfile.read failed ({e}), falling back to torchaudio")
+        import torchaudio
+        waveform, sr = torchaudio.load(str(wav_path))
+        if waveform.ndim > 1 and waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0)
+        else:
+            waveform = waveform.squeeze(0)
+        if sr != target_sr:
+            waveform = torchaudio.functional.resample(waveform, sr, target_sr)
+            sr = target_sr
+        return waveform, sr
+
+
 # ── Acoustic embedding (Wav2Vec2) ──────────────────────────────────────────────
 
 def get_acoustic_embedding(
     wav_path: str | Path,
     model_name: str = "facebook/wav2vec2-base",
     device: str = "cpu",
-    max_seconds: int = 30,
+    max_seconds: int = 5,
 ) -> torch.Tensor:
     """
     Load WAV, run Wav2Vec2, mean-pool temporal dim.
     Returns (768,) float32 tensor.
     """
-    import torchaudio
-    model, processor = _load_wav2vec(model_name)
-    model = model.to(device)
+    model, processor = _load_wav2vec(model_name, device=device)
 
-    waveform, sr = torchaudio.load(str(wav_path))
-    if sr != 16000:
-        waveform = torchaudio.functional.resample(waveform, sr, 16000)
-    waveform = waveform.mean(dim=0)  # mono
-
+    waveform, sr = load_audio_waveform(wav_path, target_sr=16000)
     max_samples = max_seconds * 16000
     if waveform.shape[0] > max_samples:
         waveform = waveform[:max_samples]
@@ -125,12 +156,16 @@ def transcribe(
     wav_path: str | Path,
     model_name: str = "openai/whisper-base",
     device: str = "cpu",
+    language: str = "en",
 ) -> str:
     """Transcribe WAV file using Whisper. Returns text string."""
     try:
         wm = _load_whisper(model_name, device=device)
         use_fp16 = device.startswith("cuda")
-        result = wm.transcribe(str(wav_path), fp16=use_fp16)
+        kwargs = {"fp16": use_fp16, "task": "transcribe", "temperature": 0.0}
+        if language:
+            kwargs["language"] = language
+        result = wm.transcribe(str(wav_path), **kwargs)
         return result.get("text", "").strip()
     except Exception as e:
         log.warning(f"Whisper transcription failed for {wav_path}: {e}")
@@ -151,8 +186,7 @@ def get_linguistic_embedding(
     if not text:
         return torch.zeros(768)
 
-    model, tokenizer = _load_bert(model_name)
-    model = model.to(device)
+    model, tokenizer = _load_bert(model_name, device=device)
 
     enc = tokenizer(
         text, return_tensors="pt",
@@ -174,7 +208,7 @@ def get_z_at(
     wav2vec_model: str = "facebook/wav2vec2-base",
     bert_model:    str = "bert-base-uncased",
     device:        str = "cpu",
-    max_seconds:   int = 30,
+    max_seconds:   int = 5,
 ) -> torch.Tensor:
     """
     Compute Z_at = concat(acoustic_emb, linguistic_emb) → (1536,).

@@ -145,9 +145,65 @@ def main():
     parser.add_argument("--smoke",     action="store_true", help="Use smoke manifests (fast ~1k clip test)")
     parser.add_argument("--max_clips", type=int, default=None,
                         help="Stop after processing this many NEW clips (resume-safe sharding)")
+    parser.add_argument("--num_shards", type=int, default=1,
+                        help="Split the whole clip list into N shards for parallel machines (e.g. 4 Colabs)")
+    parser.add_argument("--shard", type=int, default=0,
+                        help="This machine's shard index (0..num_shards-1)")
+    parser.add_argument("--use_au", action="store_true",
+                        help="Enable REAL AU-saliency keyframe scoring (needs py-feat). "
+                             "OFF by default = conf x sharpness. WARNING: only use if ALL features "
+                             "(existing + new) are AU-on — do not mix regimes. Much slower (~s/crop).")
+    parser.add_argument("--au_top_k", type=int, default=12,
+                        help="AU runs only on the top-K frames by conf x sharpness (bounds cost)")
+    parser.add_argument("--out_dir", default=None,
+                        help="Write features to this dir instead of the default cache. REQUIRED with "
+                             "--use_au so the existing AU-off baseline is NEVER overwritten (separate store).")
+    parser.add_argument("--reuse_zat_from", default=None,
+                        help="Copy existing z_at/*.pt from this cache into --out_dir BEFORE processing, so an "
+                             "AU-on run rebuilds ONLY z_v (z_at is AU-independent). e.g. data/preprocessed")
     args = parser.parse_args()
 
+    if args.num_shards < 1 or not (0 <= args.shard < args.num_shards):
+        parser.error(f"--shard must be in [0, {args.num_shards - 1}] with --num_shards {args.num_shards}")
+
+    if args.use_au:
+        from src.preprocessing import visual
+        visual.configure_au(enabled=True, device=args.device, top_k=args.au_top_k)
+        print(f"  AU saliency : ENABLED (device={args.device}, top_k={args.au_top_k}) "
+              f"-- requires py-feat; slower")
+    else:
+        print(f"  AU saliency : OFF (conf x sharpness) -- default, matches existing features")
+
     cfg = Config.from_yaml(args.config)
+
+    # ── Output store + AU-on safeguard (never overwrite the AU-off baseline) ──
+    out_dir = args.out_dir or cfg.paths.preprocessed_dir
+    _default_resolved = str(Path(cfg.paths.preprocessed_dir).resolve())
+    _out_resolved     = str(Path(out_dir).resolve())
+    if args.use_au and (args.out_dir is None or _out_resolved == _default_resolved):
+        parser.error(
+            "--use_au must write to a SEPARATE --out_dir (not the default cache), so the existing "
+            "AU-off features are never overwritten. This keeps the AU-off baseline intact for the "
+            "ablation. Example:\n"
+            "  --use_au --out_dir data/preprocessed_au_on --reuse_zat_from data/preprocessed")
+    if _out_resolved != _default_resolved:
+        print(f"  Output store : {out_dir}  (default cache '{cfg.paths.preprocessed_dir}' left UNTOUCHED)")
+
+    # Reuse z_at (AU-independent) so an AU-on run rebuilds ONLY z_v. Copy-only — never
+    # overwrites an existing target file, never deletes the source.
+    if args.reuse_zat_from:
+        import shutil
+        src_zat = Path(args.reuse_zat_from) / "features" / "z_at"
+        dst_zat = Path(out_dir) / "features" / "z_at"
+        dst_zat.mkdir(parents=True, exist_ok=True)
+        copied = kept = 0
+        for f in src_zat.glob("*.pt"):
+            d = dst_zat / f.name
+            if d.exists():
+                kept += 1
+            else:
+                shutil.copy2(f, d); copied += 1
+        print(f"  Reused z_at  : copied {copied} new, kept {kept} existing  (from {src_zat})")
 
     _section("Loading preprocessing pipeline")
     print(f"  Wav2Vec2   : {cfg.model.wav2vec_model}")
@@ -159,7 +215,7 @@ def main():
     print(f"  Force redo : {args.force}")
 
     pipeline = PreprocessingPipeline(
-        cache_dir       = cfg.paths.preprocessed_dir,
+        cache_dir       = out_dir,
         wav2vec_model   = cfg.model.wav2vec_model,
         bert_model      = cfg.model.bert_model,
         whisper_model   = cfg.model.whisper_model,
@@ -172,6 +228,15 @@ def main():
     )
 
     clips = _collect_clips(cfg, smoke=args.smoke)
+
+    # Stable shard partition — applied to the FULL list (before cache check) so each
+    # machine's assignment never shifts on resume. Strided = balanced across shards.
+    if args.num_shards > 1:
+        total = len(clips)
+        clips = clips[args.shard::args.num_shards]
+        _section(f"SHARD {args.shard} / {args.num_shards}")
+        print(f"  This machine handles {len(clips)} of {total} clips "
+              f"(every {args.num_shards}th, starting at index {args.shard}).")
 
     _section("Cache check")
     already_done = sum(1 for cid, _, _ in clips if pipeline.is_cached(cid))
@@ -202,7 +267,7 @@ def main():
     print("             MP4 -> insightface keyframes -> ViT CLS mean (768) -> Z_v (768)")
     print("  Cache: data/preprocessed/features/z_at/<id>.pt + z_v/<id>.pt\n")
 
-    fail_file = Path(cfg.paths.preprocessed_dir) / "failed_clips.txt"
+    fail_file = Path(out_dir) / "failed_clips.txt"
     failed: list[str] = []
     failed_by_src: dict[str, list[str]] = {}
     done_by_src:   dict[str, int] = {}

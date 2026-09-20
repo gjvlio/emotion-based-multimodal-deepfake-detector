@@ -34,6 +34,12 @@ from src.utils.logging_utils import TBWriter, get_logger
 
 log = get_logger(__name__)
 
+# Sarcasm decision threshold. MUStARD (Castro et al., 2019) is class-balanced
+# (345 sarcastic / 345 non-sarcastic), so 0.5 is the Bayes-optimal cut for a
+# sigmoid head trained with BCE under balanced priors — matches the fake/real
+# threshold convention already used below (`>= 0.5`).
+SARCASM_THRESHOLD = 0.5
+
 
 class EarlyStopping:
     def __init__(self, patience: int = 5, min_delta: float = 1e-4):
@@ -63,23 +69,43 @@ class Trainer:
         checkpoint_dir: str | Path = "checkpoints",
         log_dir:        str | Path = "logs",
         fp16:           bool       = True,
-        lambda_a:       float      = 0.5,
-        lambda_b:       float      = 0.5,
-        lambda_sarcasm: float      = 0.3,
-        pos_weight:     float | None = None,
+        lambda_a:       float      = 0.1,
+        lambda_b:       float      = 0.1,
+        lambda_sarcasm: float      = 0.05,
+        lambda_domain:  float      = 0.1,
+        lambda_margin:  float      = 0.2,
+        margin:         float      = 1.5,
+        pos_weight:     float | None = 1.0,
+        use_focal:      bool       = True,
+        focal_gamma:    float      = 2.0,
         device:         str        = "cuda" if torch.cuda.is_available() else "cpu",
+        ckpt_suffix:    str        = "",
     ):
-        self.model   = model.to(device)
+        if device.startswith("cuda") and not torch.cuda.is_available():
+            device = "cpu"
         self.device  = device
-        self.fp16    = fp16 and (device == "cuda")
-        self._amp_device = "cuda" if device == "cuda" else "cpu"
+        self.model   = model.to(device)
+        self.fp16    = fp16 and (device.startswith("cuda"))
+        self._amp_device = "cuda" if device.startswith("cuda") else "cpu"
         self.train_loader = train_loader
         self.val_loader   = val_loader
-        self.criterion    = MultiTaskLoss(lambda_a, lambda_b, lambda_sarcasm, pos_weight)
-        self.scaler       = GradScaler("cuda", enabled=self.fp16)
+        self.criterion    = MultiTaskLoss(
+            lambda_a=lambda_a,
+            lambda_b=lambda_b,
+            lambda_sarcasm=lambda_sarcasm,
+            lambda_domain=lambda_domain,
+            lambda_margin=lambda_margin,
+            margin=margin,
+            pos_weight=pos_weight,
+            use_focal=use_focal,
+            focal_gamma=focal_gamma,
+        )
+        self.scaler       = GradScaler(self._amp_device, enabled=self.fp16)
         self.ckpt_dir     = Path(checkpoint_dir)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.tb           = TBWriter(log_dir)
+        self.ckpt_suffix  = ckpt_suffix
+        self.best_val_loss = float("inf")
 
         print(f"\n{'='*60}")
         print(f"  DeepSentinel Trainer initialized")
@@ -88,7 +114,9 @@ class Trainer:
         print(f"  lambda_a     : {lambda_a}  (audio emotion loss weight)")
         print(f"  lambda_b     : {lambda_b}  (visual emotion loss weight)")
         print(f"  lambda_sarc  : {lambda_sarcasm}  (sarcasm loss weight)")
-        print(f"  pos_weight   : {pos_weight}  (BCE fake class weight — None=balanced)")
+        print(f"  lambda_domain: {lambda_domain}  (DANN domain adversarial weight)")
+        print(f"  lambda_margin: {lambda_margin}  (Supervised margin loss weight)")
+        print(f"  pos_weight   : {pos_weight}  (BCE fake class weight — 1.3835=balanced)")
         print(f"  Train batches: {len(train_loader)}")
         print(f"  Val   batches: {len(val_loader)}")
         print(f"{'='*60}\n")
@@ -111,6 +139,7 @@ class Trainer:
         print(f"  LR={lr}  weight_decay={weight_decay}  max_epochs={max_epochs}")
         print(f"{'='*60}\n")
 
+        self.best_val_loss = float("inf")
         optimizer = AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=lr, weight_decay=weight_decay,
@@ -120,13 +149,13 @@ class Trainer:
         global_step = 0
 
         for epoch in range(1, max_epochs + 1):
-            train_loss, train_components = self._train_epoch_cached(optimizer, epoch, global_step)
-            val_loss, val_acc, val_components = self._val_epoch_cached(epoch)
+            train_loss, train_components = self._train_epoch_cached(optimizer, epoch, global_step, max_epochs=max_epochs)
+            val_loss, val_acc, sarc_acc, emo_a_acc, emo_b_acc, val_components = self._val_epoch_cached(epoch)
             scheduler.step(val_loss)
             current_lr = optimizer.param_groups[0]["lr"]
 
             self.tb.scalars("loss",     {"train": train_loss, "val": val_loss},     epoch)
-            self.tb.scalars("accuracy", {"val": val_acc},                           epoch)
+            self.tb.scalars("accuracy", {"val": val_acc, "sarcasm": sarc_acc, "emo_a": emo_a_acc, "emo_b": emo_b_acc}, epoch)
 
             print(
                 f"\n[P1 Epoch {epoch:3d}/{max_epochs}]  LR={current_lr:.2e}\n"
@@ -140,18 +169,21 @@ class Trainer:
                 f"emo_a={val_components['emo_a']:.4f}  "
                 f"emo_b={val_components['emo_b']:.4f}  "
                 f"sarc={val_components['sarc']:.4f}  "
-                f"acc={val_acc:.4f}"
+                f"acc={val_acc:.4f}  "
+                f"sarc_acc={sarc_acc:.4f}  "
+                f"emo_a_acc={emo_a_acc:.4f}  emo_b_acc={emo_b_acc:.4f} (thresh={SARCASM_THRESHOLD})"
             )
-            log.info(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
+            log.info(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f}")
 
-            self._save_checkpoint("best_phase1.pt", val_loss, epoch)
+            filename = f"best_phase1_{self.ckpt_suffix}.pt" if self.ckpt_suffix else "best_phase1.pt"
+            self._save_checkpoint(filename, val_loss, epoch)
             if stopper.step(val_loss):
                 print(f"\n  Early stopping triggered at epoch {epoch} (patience={patience}).")
                 log.info(f"Early stopping at epoch {epoch}.")
                 break
 
         print(f"\n  Phase 1 complete. Best val_loss={stopper.best:.4f}")
-        print(f"  Checkpoint: {self.ckpt_dir}/best_phase1.pt\n")
+        print(f"  Checkpoint: {self.ckpt_dir}/{filename}\n")
 
     def _print_grad_report(self) -> float:
         """Print per-module gradient norms. Returns total grad norm."""
@@ -162,9 +194,9 @@ class Trainer:
             "BilinearFusion": self.model.bilinear_fusion,
             "Classifier":     self.model.classifier,
         }
-        print(f"\n  {'─'*52}")
+        print(f"\n  {'-'*52}")
         print(f"  GRADIENT FLOW REPORT")
-        print(f"  {'─'*52}")
+        print(f"  {'-'*52}")
         total_norm = 0.0
         for name, module in modules.items():
             norms = [p.grad.norm().item() for p in module.parameters()
@@ -177,17 +209,21 @@ class Trainer:
             else:
                 print(f"  {name:<18} NO GRAD (frozen or not in graph)")
         total_norm = total_norm ** 0.5
-        print(f"  {'─'*52}")
+        print(f"  {'-'*52}")
         print(f"  Total grad norm  : {total_norm:.6f}")
-        print(f"  {'─'*52}\n")
+        print(f"  {'-'*52}\n")
         return total_norm
 
-    def _train_epoch_cached(self, optimizer, epoch: int, global_step: int):
+    def _train_epoch_cached(self, optimizer, epoch: int, global_step: int, max_epochs: int = 10):
         self.model.train()
         total_loss = 0.0
-        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0}
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
         n_batches = len(self.train_loader)
         first_batch = (epoch == 1)
+
+        import numpy as np
+        p_val = float(epoch) / max(float(max_epochs), 1.0)
+        grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
 
         pbar = tqdm(self.train_loader, desc=f"P1 Train Ep{epoch}", unit="batch",
                     leave=False, dynamic_ncols=True)
@@ -198,14 +234,19 @@ class Trainer:
             ae    = batch["audio_emotion"].to(self.device)
             ve    = batch["visual_emotion"].to(self.device)
             sl    = batch["sarcasm_label"].to(self.device)
+            dl    = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             optimizer.zero_grad()
             with autocast(self._amp_device, enabled=self.fp16):
-                out  = self.model.forward_from_features(z_at, z_v)
+                out  = self.model.forward_from_features(z_at, z_v, grl_alpha=grl_alpha)
                 loss = self.criterion(
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
 
             if first_batch:
@@ -214,16 +255,20 @@ class Trainer:
                 print(f"  FIRST BATCH FORWARD PASS — shape check")
                 print(f"  {'='*52}")
                 print(f"  z_at shape      : {z_at.shape}   (expect B x 1536)")
-                print(f"  z_v  shape      : {z_v.shape}    (expect B x 768)")
+                print(f"  z_v  shape      : {z_v.shape}    (expect B x 768 or B x 8 x 768)")
                 print(f"  out.logit       : {out.logit.shape}    (expect B x 1)")
                 print(f"  out.emotion_a   : {out.emotion_a.shape}  (expect B x 6)")
                 print(f"  out.emotion_b   : {out.emotion_b.shape}  (expect B x 6)")
                 print(f"  out.sarcasm     : {out.sarcasm.shape}    (expect B x 1)")
+                if out.domain_logits is not None:
+                    print(f"  out.domain_logits: {out.domain_logits.shape}  (expect B x 5)")
                 print(f"  loss.total      : {loss.total.item():.6f}")
                 print(f"  loss.bce        : {loss.bce.item():.6f}")
                 print(f"  loss.emotion_a  : {loss.emotion_a.item():.6f}")
                 print(f"  loss.emotion_b  : {loss.emotion_b.item():.6f}")
                 print(f"  loss.sarcasm    : {loss.sarcasm.item():.6f}")
+                print(f"  loss.domain     : {loss.domain.item():.6f}")
+                print(f"  loss.margin     : {loss.margin.item():.6f}")
                 print(f"  {'='*52}")
                 print(f"  TRIGGERING BACKPROPAGATION...")
 
@@ -249,13 +294,14 @@ class Trainer:
             comp["emo_a"]   += loss.emotion_a.item()
             comp["emo_b"]   += loss.emotion_b.item()
             comp["sarc"]    += loss.sarcasm.item()
+            comp["domain"]  += loss.domain.item()
+            comp["margin"]  += loss.margin.item()
             global_step     += 1
 
             pbar.set_postfix(
                 bce=f"{loss.bce.item():.3f}",
-                emo_a=f"{loss.emotion_a.item():.3f}",
-                emo_b=f"{loss.emotion_b.item():.3f}",
-                sarc=f"{loss.sarcasm.item():.3f}",
+                dom=f"{loss.domain.item():.3f}",
+                mar=f"{loss.margin.item():.3f}",
             )
 
         for k in comp:
@@ -266,7 +312,10 @@ class Trainer:
     def _val_epoch_cached(self, epoch: int):
         self.model.eval()
         total_loss, correct, total = 0.0, 0, 0
-        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0}
+        sarc_correct, sarc_total = 0, 0
+        emo_a_correct, emo_a_total = 0, 0
+        emo_b_correct, emo_b_total = 0, 0
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
         n_batches = len(self.val_loader)
 
         pbar = tqdm(self.val_loader, desc=f"P1 Val   Ep{epoch}", unit="batch",
@@ -278,6 +327,9 @@ class Trainer:
             ae   = batch["audio_emotion"].to(self.device)
             ve   = batch["visual_emotion"].to(self.device)
             sl   = batch["sarcasm_label"].to(self.device)
+            dl   = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             with autocast(self._amp_device, enabled=self.fp16):
                 out  = self.model.forward_from_features(z_at, z_v)
@@ -285,12 +337,16 @@ class Trainer:
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
             total_loss     += loss.total.item()
             comp["bce"]    += loss.bce.item()
             comp["emo_a"]  += loss.emotion_a.item()
             comp["emo_b"]  += loss.emotion_b.item()
             comp["sarc"]   += loss.sarcasm.item()
+            comp["domain"] += loss.domain.item()
+            comp["margin"] += loss.margin.item()
 
             # Only count non-MUStARD clips for fake/real accuracy
             valid_mask = fl != -1
@@ -299,11 +355,36 @@ class Trainer:
                 correct += (preds == fl[valid_mask]).sum().item()
                 total   += valid_mask.sum().item()
 
+            # Emotion accuracy tracking
+            ae_mask = ae != -1
+            if ae_mask.any():
+                ae_preds = out.emotion_a[ae_mask].argmax(dim=-1)
+                emo_a_correct += (ae_preds == ae[ae_mask]).sum().item()
+                emo_a_total   += ae_mask.sum().item()
+
+            ve_mask = ve != -1
+            if ve_mask.any():
+                ve_preds = out.emotion_b[ve_mask].argmax(dim=-1)
+                emo_b_correct += (ve_preds == ve[ve_mask]).sum().item()
+                emo_b_total   += ve_mask.sum().item()
+
+            # Only count MUStARD clips for sarcasm accuracy
+            sarc_mask = sl != -1
+            if sarc_mask.any():
+                sarc_preds    = (torch.sigmoid(out.sarcasm.squeeze(1)[sarc_mask]) >= SARCASM_THRESHOLD).long()
+                sarc_correct += (sarc_preds == sl[sarc_mask]).sum().item()
+                sarc_total   += sarc_mask.sum().item()
+
         for k in comp:
             comp[k] /= max(n_batches, 1)
+        emo_a_acc = emo_a_correct / max(emo_a_total, 1)
+        emo_b_acc = emo_b_correct / max(emo_b_total, 1)
         return (
             total_loss / max(n_batches, 1),
             correct / max(total, 1),
+            sarc_correct / max(sarc_total, 1),
+            emo_a_acc,
+            emo_b_acc,
             comp,
         )
 
@@ -332,25 +413,52 @@ class Trainer:
             self.model.unfreeze_top_layers(freeze_layers)
         else:
             self.model.unfreeze_backbones()
-        if grad_ckpt:
-            self.model.enable_gradient_checkpointing()
-        optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        self.best_val_loss = float("inf")
+
+        # Group parameters for differential learning rates (10x higher LR for heads/bottleneck)
+        backbone_params = []
+        head_params = []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if any(b in name for b in ["_wav2vec", "_bert", "_vit", "wav2vec2", "bert", "vit"]):
+                backbone_params.append(param)
+            else:
+                head_params.append(param)
+
+        param_groups = [
+            {"params": backbone_params, "lr": lr},
+            {"params": head_params,     "lr": lr * 10.0},
+        ]
+        optimizer = AdamW(param_groups, weight_decay=weight_decay)
         scheduler = ReduceLROnPlateau(optimizer, patience=2, factor=0.5)
         stopper   = EarlyStopping(patience=patience)
 
+        if self.device.startswith("cuda"):
+            torch.cuda.empty_cache()
+
         for epoch in range(1, max_epochs + 1):
-            train_loss = self._train_epoch_e2e(optimizer, epoch)
-            val_loss, val_acc, val_components = self._val_epoch_cached(epoch)
+            train_loss = self._train_epoch_e2e(optimizer, epoch, max_epochs=max_epochs)
+            if hasattr(self, "val_loader_p2") and self.val_loader_p2 is not None:
+                val_loss, val_acc, sarc_acc, emo_a_acc, emo_b_acc, val_components = self._val_epoch_e2e(epoch)
+            else:
+                val_loss, val_acc, sarc_acc, val_components = self._val_epoch_cached(epoch)
+                emo_a_acc, emo_b_acc = 0.0, 0.0
+
+            if self.device.startswith("cuda"):
+                torch.cuda.empty_cache()
             scheduler.step(val_loss)
             current_lr = optimizer.param_groups[0]["lr"]
 
             self.tb.scalars("loss_p2", {"train": train_loss, "val": val_loss}, epoch)
             print(
                 f"\n[P2 Epoch {epoch:3d}/{max_epochs}]  LR={current_lr:.2e}  "
-                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  val_acc={val_acc:.4f}"
+                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  val_acc={val_acc:.4f}  "
+                f"sarc_acc={sarc_acc:.4f}  emo_a_acc={emo_a_acc:.4f}  emo_b_acc={emo_b_acc:.4f}"
             )
-            log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
-            self._save_checkpoint("best_phase2.pt", val_loss, epoch)
+            log.info(f"[P2] Epoch {epoch:3d} | train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} sarc_acc={sarc_acc:.4f} emo_a={emo_a_acc:.4f} emo_b={emo_b_acc:.4f}")
+            filename = f"best_phase2_{self.ckpt_suffix}.pt" if self.ckpt_suffix else "best_phase2.pt"
+            self._save_checkpoint(filename, val_loss, epoch)
             if stopper.step(val_loss):
                 print(f"\n  Early stopping triggered at epoch {epoch}.")
                 log.info(f"Early stopping at epoch {epoch}.")
@@ -358,10 +466,15 @@ class Trainer:
 
         print(f"\n  Phase 2 complete. Best val_loss={stopper.best:.4f}")
 
-    def _train_epoch_e2e(self, optimizer, epoch: int) -> float:
-        """End-to-end epoch — requires DataLoader returning raw audio/text/frames."""
+    def _train_epoch_e2e(self, optimizer, epoch: int, max_epochs: int = 15) -> float:
+        """End-to-end epoch — requires DataLoader returning raw audio/text/frames with DANN and Supervised Margin Loss."""
         self.model.train()
         total_loss = 0.0
+
+        import numpy as np
+        p_val = float(epoch) / max(float(max_epochs), 1.0)
+        grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
+
         pbar = tqdm(self.train_loader, desc=f"P2 Train Ep{epoch}", unit="batch",
                     leave=False, dynamic_ncols=True)
         for batch in pbar:
@@ -373,24 +486,123 @@ class Trainer:
             ae      = batch["audio_emotion"].to(self.device)
             ve      = batch["visual_emotion"].to(self.device)
             sl      = batch["sarcasm_label"].to(self.device)
+            dl      = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
 
             optimizer.zero_grad()
+            with autocast(self._amp_device, enabled=self.fp16):
+                out  = self.model(audio, ids, mask, pixels, grl_alpha=grl_alpha)
+                loss = self.criterion(
+                    out.logit, fl,
+                    out.emotion_a, out.emotion_b, ae, ve,
+                    out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
+                )
+                total_step_loss = loss.total
+
+            self.scaler.scale(total_step_loss).backward()
+            self.scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.scaler.step(optimizer)
+            self.scaler.update()
+            total_loss += total_step_loss.item()
+            pbar.set_postfix(
+                loss=f"{total_step_loss.item():.3f}",
+                bce=f"{loss.bce.item():.3f}",
+                dom=f"{loss.domain.item():.3f}",
+                mar=f"{loss.margin.item():.3f}",
+            )
+
+        return total_loss / max(len(self.train_loader), 1)
+
+    @torch.no_grad()
+    def _val_epoch_e2e(self, epoch: int):
+        """End-to-end validation pass over raw keyframes and audio waveforms."""
+        self.model.eval()
+        total_loss, correct, total = 0.0, 0, 0
+        sarc_correct, sarc_total = 0, 0
+        emo_a_correct, emo_a_total = 0, 0
+        emo_b_correct, emo_b_total = 0, 0
+        comp = {"bce": 0.0, "emo_a": 0.0, "emo_b": 0.0, "sarc": 0.0, "domain": 0.0, "margin": 0.0}
+        loader = getattr(self, "val_loader_p2", self.val_loader)
+        n_batches = len(loader)
+
+        pbar = tqdm(loader, desc=f"P2 Val   Ep{epoch}", unit="batch",
+                    leave=False, dynamic_ncols=True)
+        for batch in pbar:
+            audio   = batch["audio_values"].to(self.device)
+            ids     = batch["input_ids"].to(self.device)
+            mask    = batch["attention_mask"].to(self.device)
+            pixels  = batch["keyframe_pixels"].to(self.device)
+            fl      = batch["fake_label"].to(self.device)
+            ae      = batch["audio_emotion"].to(self.device)
+            ve      = batch["visual_emotion"].to(self.device)
+            sl      = batch["sarcasm_label"].to(self.device)
+            dl      = batch.get("domain_label")
+            if dl is not None:
+                dl = dl.to(self.device)
+
             with autocast(self._amp_device, enabled=self.fp16):
                 out  = self.model(audio, ids, mask, pixels)
                 loss = self.criterion(
                     out.logit, fl,
                     out.emotion_a, out.emotion_b, ae, ve,
                     out.sarcasm, sl,
+                    domain_logits=out.domain_logits,
+                    domain_label=dl,
                 )
-            self.scaler.scale(loss.total).backward()
-            self.scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.scaler.step(optimizer)
-            self.scaler.update()
-            total_loss += loss.total.item()
-            pbar.set_postfix(loss=f"{loss.total.item():.3f}")
+                total_step_loss = loss.total
 
-        return total_loss / max(len(self.train_loader), 1)
+            total_loss     += total_step_loss.item()
+            comp["bce"]    += loss.bce.item()
+            comp["emo_a"]  += loss.emotion_a.item()
+            comp["emo_b"]  += loss.emotion_b.item()
+            comp["sarc"]   += loss.sarcasm.item()
+            comp["domain"] += loss.domain.item()
+            comp["margin"] += loss.margin.item()
+            # Only count non-MUStARD clips for fake/real accuracy
+            valid_mask = fl != -1
+            if valid_mask.any():
+                preds   = (torch.sigmoid(out.logit.squeeze(1)[valid_mask]) >= 0.5).long()
+                correct += (preds == fl[valid_mask]).sum().item()
+                total   += valid_mask.sum().item()
+
+            ae_mask = ae != -1
+            if ae_mask.any():
+                ae_preds = out.emotion_a[ae_mask].argmax(dim=-1)
+                emo_a_correct += (ae_preds == ae[ae_mask]).sum().item()
+                emo_a_total   += ae_mask.sum().item()
+
+            ve_mask = ve != -1
+            if ve_mask.any():
+                ve_preds = out.emotion_b[ve_mask].argmax(dim=-1)
+                emo_b_correct += (ve_preds == ve[ve_mask]).sum().item()
+                emo_b_total   += ve_mask.sum().item()
+
+            sarc_mask = sl != -1
+            if sarc_mask.any():
+                sarc_preds    = (torch.sigmoid(out.sarcasm.squeeze(1)[sarc_mask]) >= SARCASM_THRESHOLD).long()
+                sarc_correct += (sarc_preds == sl[sarc_mask]).sum().item()
+                sarc_total   += sarc_mask.sum().item()
+
+        for k in comp:
+            comp[k] /= max(n_batches, 1)
+
+        val_acc = correct / max(total, 1)
+        sarc_acc = sarc_correct / max(sarc_total, 1)
+        emo_a_acc = emo_a_correct / max(emo_a_total, 1)
+        emo_b_acc = emo_b_correct / max(emo_b_total, 1)
+
+        return (
+            total_loss / max(n_batches, 1),
+            val_acc,
+            sarc_acc,
+            emo_a_acc,
+            emo_b_acc,
+            comp,
+        )
 
     # ── Checkpointing ─────────────────────────────────────────────────────────
 
@@ -398,11 +610,12 @@ class Trainer:
         import math
         if math.isnan(current_loss):
             return
+
+        if current_loss >= self.best_val_loss:
+            return
+
+        self.best_val_loss = current_loss
         ckpt = self.ckpt_dir / filename
-        if ckpt.exists():
-            saved = torch.load(ckpt, weights_only=True).get("val_loss", float("inf"))
-            if current_loss >= saved:
-                return
         torch.save(
             {"val_loss": current_loss, "epoch": epoch,
              "model_state": self.model.state_dict()},
@@ -411,12 +624,63 @@ class Trainer:
         print(f"  [CKPT] Saved {filename}  (val_loss={current_loss:.4f}, epoch={epoch})")
         log.info(f"Checkpoint saved: {ckpt} (val_loss={current_loss:.4f})")
 
+        # Directly backup and flush to all Google Drive checkpoint folders
+        drive_dirs = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints"),
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/bottleneck_mode"),
+        ]
+        try:
+            import shutil, os
+            for d in drive_dirs:
+                if d.parent.parent.exists():  # If Google Drive is mounted
+                    d.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ckpt, d / filename)
+            if hasattr(os, "sync"):
+                os.sync()
+            print(f"  [DRIVE BACKUP] Successfully saved & flushed {filename} to Google Drive (val_loss={current_loss:.4f}).")
+        except Exception as e:
+            print(f"  [DRIVE BACKUP WARNING] Failed to copy checkpoint to Drive: {e}")
+
     def load_best(self, phase: int = 1) -> None:
-        filename = f"best_phase{phase}.pt"
-        ckpt = self.ckpt_dir / filename
+        filename = f"best_phase{phase}_{self.ckpt_suffix}.pt" if self.ckpt_suffix else f"best_phase{phase}.pt"
+        local_ckpt = self.ckpt_dir / filename
+        
+        # Check Google Drive for latest / best checkpoint
+        drive_sources = [
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest/bottleneck_mode") / filename,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/latest") / filename,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints/bottleneck_mode") / filename,
+            Path("/content/drive/MyDrive/THESIS_MOTHERFILE/checkpoints") / filename,
+        ]
+
+        drive_source = None
+        for cand in drive_sources:
+            if cand.exists():
+                drive_source = cand
+                break
+
+        if drive_source is not None:
+            try:
+                import shutil
+                self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(drive_source, local_ckpt)
+                print(f"  [DRIVE OVERWRITE] Overwrote local checkpoint from Drive ({drive_source.parent.name}) -> {local_ckpt}")
+            except Exception as e:
+                print(f"  [DRIVE OVERWRITE WARNING] Failed to copy from Drive: {e}")
+
+        ckpt = local_ckpt
         if not ckpt.exists():
-            raise FileNotFoundError(f"No checkpoint at {ckpt}")
+            # Fall back to standard filename if suffix model doesn't exist
+            fallback_filename = f"best_phase{phase}.pt"
+            fallback_ckpt = self.ckpt_dir / fallback_filename
+            if fallback_ckpt.exists():
+                filename = fallback_filename
+                ckpt = fallback_ckpt
+            else:
+                raise FileNotFoundError(f"No checkpoint at {ckpt}")
         data = torch.load(ckpt, weights_only=True)
-        self.model.load_state_dict(data["model_state"])
+        self.model.load_state_dict(data["model_state"], strict=False)
         print(f"  [CKPT] Loaded {filename}  (epoch={data['epoch']}, val_loss={data['val_loss']:.4f})")
         log.info(f"Loaded checkpoint {filename} (epoch={data['epoch']}, val_loss={data['val_loss']:.4f})")

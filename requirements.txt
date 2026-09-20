@@ -1,3 +1,12 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  This is the FULL THESIS pipeline (generation + training). It is heavy and  ║
+# ║  has known dependency conflicts on new Python versions (RVC/StyleTTS2).     ║
+# ║                                                                            ║
+# ║  >>> To just RUN THE WEB APP / DEMO, do NOT install this file. <<<          ║
+# ║      Use:  pip install -r webapp/requirements.txt   (4 packages)            ║
+# ║      See README → "Web Application → Quick start — Demo".                   ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
 # ── Core ──────────────────────────────────────────────────────────────────────
 torch
 torchvision

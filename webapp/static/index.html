@@ -8,9 +8,53 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/style.css?v=16" />
 </head>
 <body>
+  <!-- ── Model Warmup Loading Screen (Simple & Clean Mirrored Bar) ──────────────── -->
+  <aside class="warmup-screen" id="warmup-screen" aria-label="DeepSentinel Model Warmup">
+    <div class="warmup-container">
+      <div class="warmup-logo-box">
+        <img src="/static/img/logo.svg" alt="DeepSentinel" class="warmup-logo" />
+      </div>
+
+      <div class="warmup-meta">
+        <h1 class="warmup-title">DeepSentinel</h1>
+        <p class="warmup-subtitle">Warming models for detection</p>
+      </div>
+
+      <!-- Percentage Display -->
+      <div class="warmup-pct-wrap">
+        <span class="warmup-pct-num" id="warmup-pct-num">0</span><span class="warmup-pct-unit">%</span>
+      </div>
+
+      <!-- Mirrored Progress Bar -->
+      <div class="warmup-bar-container">
+        <div class="warmup-bar-track" id="warmup-bar-track">
+          <div class="warmup-bar-core"></div>
+          <div class="warmup-bar-wing wing-left" id="warmup-wing-left"></div>
+          <div class="warmup-bar-wing wing-right" id="warmup-wing-right"></div>
+        </div>
+      </div>
+
+      <!-- Simple Dynamic Status Console Line: fetching [ ... ] ... -->
+      <div class="warmup-status-box">
+        <div class="warmup-status-line" id="warmup-status-line">
+          <span class="w-status-action" id="warmup-action">fetching</span>
+          <span class="w-status-bracket">[</span>
+          <span class="w-status-target" id="warmup-target">Wav2Vec 2.0 Audio Backbone</span>
+          <span class="w-status-bracket">]</span>
+          <span class="w-status-dots"><span class="w-dot d1">.</span><span class="w-dot d2">.</span><span class="w-dot d3">.</span></span>
+        </div>
+      </div>
+
+      <!-- Quick skip button -->
+      <button class="warmup-skip-btn" id="warmup-skip-btn" type="button" aria-label="Skip warmup">
+        <span>Skip</span>
+      </button>
+    </div>
+  </aside>
+
   <!-- ── Aurora background ─────────────────────────────────────────────────── -->
   <div class="aurora" aria-hidden="true">
     <span class="silk"></span>
@@ -30,6 +74,7 @@
     </a>
     <nav class="nav" id="nav">
       <a href="/" data-link class="nav-link"><span>Home</span></a>
+      <a href="/benchmarks" data-link class="nav-link"><span>Benchmarks</span></a>
       <div class="nav-dropdown">
         <button class="nav-link nav-dropdown-toggle" aria-haspopup="true" aria-expanded="false">
           <span>About</span>
@@ -97,9 +142,9 @@
 
     <!-- ── Upload ──────────────────────────────────────────────────────────── -->
     <section class="view" data-view="upload">
-      <div class="stage">
-        <p class="eyebrow center" data-reveal>// ANALYZE A CLIP</p>
-        <h2 class="stage-title" data-reveal>Upload a video to inspect</h2>
+      <div class="stage" id="upload-stage">
+        <p class="eyebrow center" id="upload-eyebrow" data-reveal>// ANALYZE A CLIP</p>
+        <h2 class="stage-title" id="upload-title" data-reveal>Upload a video to inspect</h2>
         <div id="dropzone" class="dropzone glass-card" tabindex="0" data-reveal>
           <div class="dz-sheen"></div>
           <div class="dz-empty">
@@ -108,7 +153,7 @@
             </span>
             <h3>Drop your video here</h3>
             <p class="muted">or click to browse files</p>
-            <p class="hint">Max 10 seconds · MP4, MOV, WEBM</p>
+            <p class="hint">Up to 10 minutes · MP4, MOV, WEBM</p>
           </div>
           <div class="dz-file" hidden>
             <span class="dz-icon">
@@ -118,52 +163,295 @@
           </div>
           <input id="file-input" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden />
         </div>
+
+        <!-- ── Interactive Playback & Clip Selector (Up to 10 min) ────────── -->
+        <div id="crop-panel" class="crop-panel glass-card" hidden data-reveal>
+          <div class="crop-header">
+            <div class="crop-header-left">
+              <span class="crop-chip mono-tag" id="crop-file-info">video.mp4 · 00:00</span>
+            </div>
+            <button id="change-video-btn" type="button" class="btn-text">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span>Change Video</span>
+            </button>
+          </div>
+
+          <!-- Sleek Cinematic Video Player Container -->
+          <div class="crop-video-container" id="video-wrapper">
+            <video id="crop-video" preload="metadata" playsinline></video>
+            <div id="video-center-indicator" class="video-center-indicator">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
+            </div>
+
+            <!-- Bottom Glass Player Controls -->
+            <div class="video-control-bar">
+              <button id="player-play-btn" type="button" class="player-btn" aria-label="Play/Pause">
+                <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              </button>
+              <div class="player-time-display">
+                <span id="player-curr-time">00:00.0</span> <span class="time-sep">/</span> <span id="player-total-time">00:00.0</span>
+              </div>
+              <div class="player-badge-clip">
+                <span class="badge-dot"></span>
+                <span>Clip: <strong id="player-clip-range">00:00.0 – 00:10.0</strong></span>
+              </div>
+              <div class="player-controls-right">
+                <button id="player-jump-start" type="button" class="player-pill-btn" title="Jump to start of selected clip">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+                  <span>To Clip</span>
+                </button>
+                <button id="player-mute-btn" type="button" class="player-btn player-btn-sm" aria-label="Toggle Mute">
+                  <svg class="icon-vol-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                  <svg class="icon-vol-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Interactive Timeline Scrubber & Filmstrip -->
+          <div class="crop-timeline-wrapper">
+            <div class="timeline-header-row">
+              <div class="timeline-time-col">
+                <span class="time-label">Start</span>
+                <strong class="time-value" id="start-time-val">00:00.0</strong>
+              </div>
+              <div class="timeline-status-col">
+                <span id="crop-duration-pill" class="pill pill-optimal">10.0s selected (3s – 20s optimal)</span>
+              </div>
+              <div class="timeline-time-col text-right">
+                <span class="time-label">End</span>
+                <strong class="time-value" id="end-time-val">00:10.0</strong>
+              </div>
+            </div>
+
+            <!-- Timeline track with filmstrip, stretch handles, and draggable window -->
+            <div id="timeline-track" class="timeline-track">
+              <canvas id="filmstrip-canvas" class="timeline-filmstrip"></canvas>
+              <div class="timeline-mask timeline-mask-left" id="timeline-mask-left"></div>
+              <div class="timeline-mask timeline-mask-right" id="timeline-mask-right"></div>
+              
+              <!-- Draggable / Pannable Selected Window -->
+              <div class="timeline-window" id="timeline-window" title="Drag horizontally to slide the 3–20s clip">
+                <span class="window-pan-hint">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg>
+                  <span>PAN CLIP</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg>
+                </span>
+              </div>
+
+              <!-- Independent Stretch Handles (Left & Right) -->
+              <div class="timeline-handle handle-left" id="handle-left" title="Drag to stretch start time (3s–20s)">
+                <span class="handle-grip"></span>
+              </div>
+              <div class="timeline-handle handle-right" id="handle-right" title="Drag to stretch end time (3s–20s)">
+                <span class="handle-grip"></span>
+              </div>
+
+              <div id="timeline-playhead" class="timeline-playhead"></div>
+
+              <!-- Floating hover & stretch preview tooltip -->
+              <div id="timeline-hover-card" class="timeline-hover-card">
+                <canvas id="hover-canvas" width="120" height="68"></canvas>
+                <div class="hover-time" id="hover-time-badge">00:00.0</div>
+              </div>
+            </div>
+
+            <!-- Timeline ticks & quick presets -->
+            <div class="crop-presets-row">
+              <div class="presets-left">
+                <span class="presets-caption">Quick presets:</span>
+                <button type="button" class="btn-pill" id="preset-10s">First 10s</button>
+                <button type="button" class="btn-pill" id="preset-20s">First 20s</button>
+                <button type="button" class="btn-pill" id="preset-middle">Middle 10s</button>
+              </div>
+              <div class="presets-right">
+                <button type="button" class="btn-preview-clip" id="preview-clip-btn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span>Preview Clip</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <button id="run-btn" class="btn btn-primary btn-block magnetic" hidden>
-          <span>Run Analysis</span>
+          <span id="run-btn-label">Run Analysis</span>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <p id="upload-error" class="error-text" hidden></p>
+
+        <!-- System Scope & Known Limitations Card -->
+        <div class="scope-card glass-card" data-reveal>
+          <div class="scope-header">
+            <span class="scope-tag">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>SYSTEM SCOPE &amp; LIMITATIONS</span>
+            </span>
+            <span class="scope-sub">Outside operational scope:</span>
+          </div>
+          <div class="scope-grid">
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>Unobstructed Face</strong>
+                <p>Face and mouth must stay visible. Masks, coverings, or hands over the face are outside scope.</p>
+              </div>
+            </div>
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>Spoken Dialogue Required</strong>
+                <p>Requires audible speech. Silent videos, background music only, or whispering are outside scope.</p>
+              </div>
+            </div>
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>English Speech Optimized</strong>
+                <p>Optimized for English speech. Other languages may yield less accurate emotion reads.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- ── Analyzing ───────────────────────────────────────────────────────── -->
     <section class="view" data-view="analyzing">
-      <div class="stage stage-center">
-        <div class="loader">
-          <svg class="loader-ring" viewBox="0 0 80 80">
-            <defs>
-              <linearGradient id="loaderGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#1EA896" /><stop offset="1" stop-color="#72A1E5" />
-              </linearGradient>
-            </defs>
-            <circle class="track" cx="40" cy="40" r="34" />
-            <circle class="arc" cx="40" cy="40" r="34" />
-          </svg>
-          <span class="loader-core"></span>
+      <div class="stage stage-wide stage-analyzing">
+        <div class="analyzing-grid">
+          <!-- Left side: Live Playback, Detection Box & Transcript -->
+          <div class="analyzing-left">
+            <div class="analyzing-player-card glass-card">
+              <div class="analyzing-player-header">
+                <span class="live-pill"><span class="live-dot"></span> LIVE INFERENCE</span>
+                <div class="analyzing-header-meta">
+                  <span class="analyzing-timer-badge mono-tag" id="analyzing-timer-badge" title="Elapsed / Estimated Evaluation Time">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    <span id="analyzing-elapsed-header">00:00.0</span> / <span id="analyzing-est-header">~00:07.5</span>
+                  </span>
+                  <span class="analyzing-chip mono-tag" id="analyzing-clip-badge">00:00.0 – 00:05.5</span>
+                </div>
+              </div>
+              <div class="analyzing-video-wrapper">
+                <video id="analyzing-video" playsinline muted autoplay loop></video>
+                <canvas id="analyzing-hud-canvas"></canvas>
+                <div class="analyzing-telemetry-badge" id="hud-telemetry-pill">
+                  <span class="hud-phase-label" id="hud-phase-label">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    <span>ViT Face Keyframe Analysis</span>
+                  </span>
+                  <span class="hud-emotion-stat" id="hud-emotion-stat">Neutral · 94.1%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live Transcript Below Playback -->
+            <div class="analyzing-transcript-card glass-card">
+              <div class="transcript-header">
+                <div class="live-audio-icon">
+                  <span class="bar b1"></span>
+                  <span class="bar b2"></span>
+                  <span class="bar b3"></span>
+                  <span class="bar b4"></span>
+                </div>
+                <strong>Live Speech &amp; Acoustic Stream</strong>
+                <span class="transcript-model-tag mono-tag">Wav2Vec 2.0 · Whisper</span>
+              </div>
+              <div class="transcript-body">
+                <p id="analyzing-transcript-text" class="analyzing-transcript-text">
+                  <span class="typing-cursor">Listening to speech audio stream...</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right side: Analyzing Steps & Pipeline Progress -->
+          <div class="analyzing-right">
+            <div class="analyzing-status-card glass-card">
+              <div class="loader loader-lg">
+                <svg class="loader-ring" viewBox="0 0 100 100">
+                  <defs>
+                    <linearGradient id="loaderGrad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stop-color="#1EA896" />
+                      <stop offset="50%" stop-color="#3DF3D8" />
+                      <stop offset="100%" stop-color="#72A1E5" />
+                    </linearGradient>
+                  </defs>
+                  <circle class="track" cx="50" cy="50" r="42" />
+                  <circle class="arc" id="loader-arc" cx="50" cy="50" r="42" />
+                </svg>
+                <div class="loader-center">
+                  <span class="loader-pct" id="analyzing-progress-pct">0%</span>
+                  <span class="loader-sub">ANALYZING</span>
+                </div>
+              </div>
+              <h2 class="stage-title analyzing-title">Analyzing video</h2>
+              <p class="muted" id="analyzing-file">—</p>
+
+              <!-- Evaluation Timing Telemetry Bar -->
+              <div class="analyzing-timing-bar">
+                <div class="timing-col">
+                  <span class="timing-lbl">TIME ELAPSED</span>
+                  <span class="timing-num" id="timing-elapsed-val">00:00.0</span>
+                </div>
+                <div class="timing-divider"></div>
+                <div class="timing-col">
+                  <span class="timing-lbl">EST. RUNTIME</span>
+                  <span class="timing-num" id="timing-est-val">~00:07.5</span>
+                </div>
+                <div class="timing-divider"></div>
+                <div class="timing-col">
+                  <span class="timing-lbl">EST. REMAINING</span>
+                  <span class="timing-num highlight" id="timing-remaining-val">~00:07.5</span>
+                </div>
+              </div>
+              <ul class="steps analyzing-steps" id="steps">
+                <li data-step><span class="step-dot"></span>Listening to the voice</li>
+                <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">(Wav2Vec&nbsp;2.0 · BERT)</span></li>
+                <li data-step><span class="step-dot"></span>Picking the clearest face frames</li>
+                <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">(Vision Transformer)</span></li>
+                <li data-step><span class="step-dot"></span>Comparing voice emotion vs face emotion</li>
+                <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">(Δ)</span></li>
+                <li data-step><span class="step-dot"></span>Reaching a verdict</li>
+              </ul>
+            </div>
+
+            <!-- Diagnostic Error Card (Halt pipeline on input modality / quality validation failure) -->
+            <div id="analyzing-error-card" class="analyzing-error-card glass-card" hidden>
+              <div class="diag-badge-wrapper">
+                <span class="diag-badge-pill" id="diag-error-badge">INPUT VERIFICATION FAILED</span>
+              </div>
+              <h2 class="diag-title" id="diag-error-title">Modality Error Detected</h2>
+              <p class="diag-message" id="diag-error-message">DeepSentinel halted analysis because this clip does not meet multimodal input requirements.</p>
+
+              <div class="diag-suggestions-box">
+                <span class="diag-box-label">RECOMMENDED ADJUSTMENTS</span>
+                <ul class="diag-checklist" id="diag-suggestions-list">
+                  <!-- Populated dynamically -->
+                </ul>
+              </div>
+
+              <div class="diag-actions-row">
+                <button type="button" class="btn btn-primary magnetic" id="diag-reselect-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  <span>Adjust Selection Range</span>
+                </button>
+                <button type="button" class="btn btn-glass magnetic" id="diag-restart-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  <span>Upload Different Video</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <h2 class="stage-title">Analyzing video</h2>
-        <p class="muted" id="analyzing-file">—</p>
-        <ul class="steps glass-card" id="steps">
-          <li data-step><span class="step-dot"></span>Listening to the voice</li>
-          <li data-step><span class="step-dot"></span>Reading the tone &amp; words <span class="step-tech">Wav2Vec&nbsp;2.0 · BERT</span></li>
-          <li data-step><span class="step-dot"></span>Picking the clearest face frames</li>
-          <li data-step><span class="step-dot"></span>Reading the face's emotion <span class="step-tech">Vision Transformer</span></li>
-          <li data-step><span class="step-dot"></span>Comparing voice emotion vs face emotion</li>
-          <li data-step><span class="step-dot"></span>Measuring the emotion gap <span class="step-tech">Δ</span></li>
-          <li data-step><span class="step-dot"></span>Reaching a verdict</li>
-        </ul>
       </div>
     </section>
 
     <!-- ── Results ─────────────────────────────────────────────────────────── -->
     <section class="view" data-view="results">
       <div class="stage stage-wide">
-
-        <!-- plain-language how-to -->
-        <div class="howto glass" data-reveal>
-          <span class="ht-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.1h6c0-.8.4-1.5 1-2.1A6 6 0 0 0 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <p><strong>How to read this.</strong> DeepSentinel compares the emotion in the <em>voice</em> with the emotion on the <em>face</em>. When they disagree, the clip is more likely manipulated. Each panel has an <span class="mono">i</span> button explaining what its numbers mean.</p>
-        </div>
 
         <!-- headline verdict -->
         <div class="verdict-card glass-card" id="verdict-card" data-reveal>
@@ -176,55 +464,127 @@
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <div class="guide-note" id="g-verdict"><div><p>This percentage is how likely the clip is a <b>deepfake</b>, based on whether the emotions in the voice and face match. Above 50% leans fake; below 50% leans authentic. It is an estimate, not proof.</p></div></div>
+          <div class="guide-note" id="g-verdict"><div><p>Chance that this video is an <b>AI deepfake</b>. 50% or more means likely fake; under 50% means authentic.</p></div></div>
         </div>
 
-        <!-- sarcasm + plain-language interpretation -->
+        <!-- Forensic Multi-Tier Interpretation Card -->
+        <div class="glass-card forensic-card" id="forensic-interpretation-card" data-reveal>
+          <div class="forensic-head">
+            <span class="forensic-pill-tag" id="forensic-state-tag">EVALUATION SUMMARY</span>
+            <h3 class="forensic-headline" id="forensic-headline">AI Analysis &amp; Explanation</h3>
+            <p class="forensic-summary" id="forensic-summary">Detailed explanation is being generated...</p>
+          </div>
+
+          <div class="forensic-details-grid">
+            <!-- Col 1: Voice vs Face -->
+            <div class="forensic-col-card">
+              <div class="fcol-head">
+                <span class="fcol-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><circle cx="12" cy="18" r="3"/></svg>
+                </span>
+                <strong>Voice vs. Face</strong>
+              </div>
+              <p class="fcol-text" id="forensic-voice-face">—</p>
+            </div>
+
+            <!-- Col 2: Sarcasm & Tone Check -->
+            <div class="forensic-col-card">
+              <div class="fcol-head">
+                <span class="fcol-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>
+                </span>
+                <strong>Sarcasm &amp; Tone Check</strong>
+              </div>
+              <p class="fcol-text" id="forensic-sarcasm">—</p>
+            </div>
+
+            <!-- Col 3: Why the AI Thinks This -->
+            <div class="forensic-col-card">
+              <div class="fcol-head">
+                <span class="fcol-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </span>
+                <strong>Why the AI Thinks This</strong>
+              </div>
+              <p class="fcol-text" id="forensic-rationale">—</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tone, speech & meaning + BERT transcript -->
         <div class="glass-card sarc-card" data-reveal>
           <div class="sarc-head">
             <span class="sarc-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-5A8 8 0 1 1 21 12z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.5 10.5c.6-1 2-1 2.5 0M13 10.5c.5-1 2-1 2.5 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
-            <strong>Tone &amp; meaning</strong>
+            <strong>Tone, speech &amp; meaning</strong>
+            <span class="mono-tag result-bert-tag">Whisper · BERT NLP</span>
             <button class="info-btn" data-guide="g-sarc" aria-expanded="false" aria-label="What is the sarcasm reading?" style="margin-left:auto">
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <p class="interpret" id="interpret">—</p>
-          <div class="meter"><span class="meter-marker" id="sarc-marker"></span></div>
-          <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
-          <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b class="ok">tone, not authenticity</b>. A real person can be sarcastic, and a fake can sound sincere — so this is read separately from the deepfake score. It uses the words and the voice to judge whether the speech is meant literally.</p></div></div>
-        </div>
 
-        <!-- dominant emotion mismatch -->
-        <div class="glass-card mismatch-card" data-reveal>
-          <div class="row-between">
-            <strong id="dom-title">Biggest emotion gap · —</strong>
+          <!-- Spoken Transcript Analyzed by BERT -->
+          <div class="result-transcript-box">
+            <span class="result-transcript-label">WHAT WAS SAID IN THIS CLIP</span>
+            <p class="result-transcript-text" id="result-transcript-text">“—”</p>
           </div>
-          <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
-          <p class="hint" id="dom-desc">—</p>
+
+          <div class="meter"><span class="meter-marker" id="sarc-marker"><span class="meter-val" id="sarc-val"></span></span></div>
+          <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
+          <div class="guide-note" id="g-sarc"><div><p>Measures sarcastic tone. This keeps the AI from mistaking dry jokes or poker faces for deepfakes.</p></div></div>
         </div>
 
         <!-- two emotion reads -->
         <div class="grid-2">
           <div class="glass-card" data-reveal>
-            <div class="card-head"><strong>Voice emotion</strong><span class="hint">what the voice expresses</span></div>
+            <div class="card-head">
+              <div class="card-head-modality">
+                <strong class="modality-title">Voice emotion</strong>
+                <span class="hint">feeling heard in the voice</span>
+              </div>
+            </div>
+            <div class="head-dominant-banner" id="head-a-top"></div>
             <div class="dist" id="head-a"></div>
           </div>
           <div class="glass-card" data-reveal>
-            <div class="card-head"><strong>Face emotion</strong><span class="hint">what the face shows</span></div>
+            <div class="card-head">
+              <div class="card-head-modality">
+                <strong class="modality-title">Face emotion</strong>
+                <span class="hint">feeling seen on the face</span>
+              </div>
+            </div>
+            <div class="head-dominant-banner" id="head-b-top"></div>
             <div class="dist" id="head-b"></div>
           </div>
         </div>
 
-        <!-- delta per class -->
-        <div class="glass-card" data-reveal>
+        <!-- Unified Emotion Discrepancy (Δ) Card -->
+        <div class="glass-card discrepancy-unified-card" data-reveal>
           <div class="card-head">
-            <strong>Emotion gap per feeling <span class="step-tech">(Δ)</span></strong>
+            <div class="card-head-modality">
+              <strong class="modality-title">Emotion Discrepancy Breakdown <span class="step-tech">(Δ)</span></strong>
+              <span class="hint">Cross-modal difference per emotion (0% = match, 100% = clash)</span>
+            </div>
             <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <div class="dist dist-delta" id="delta-list"></div>
-          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures, for each emotion, how much the voice and the face disagree — from 0 (perfect agreement) to 1 (total disagreement). Authentic clips stay <b class="ok">low</b> across the board; a big spike on any emotion is a classic sign of a stitched-together fake.</p></div></div>
+
+          <!-- Dominant / Biggest Gap Highlight Banner -->
+          <div class="discrepancy-dominant-banner" id="dom-banner">
+            <div class="row-between" style="margin-bottom: 8px;">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="dom-tag-label">PRIMARY GAP</span>
+                <strong id="dom-title">Biggest emotion gap · —</strong>
+              </div>
+              <span class="gap-val" id="gap-val">—</span>
+            </div>
+            <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
+            <p class="hint" id="dom-desc" style="margin-top: 8px; margin-bottom: 0;">—</p>
+          </div>
+
+          <!-- Itemized 6-Emotion Breakdown -->
+          <div class="dist dist-delta" id="delta-list" style="margin-top: 18px;"></div>
+          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures the affective divergence between voice and facial expressions for each of the 6 emotions. Authentic videos maintain low discrepancy across all categories, whereas synthetic faces or spliced audio produce sharp localized spikes.</p></div></div>
         </div>
 
         <div class="results-foot">
@@ -248,10 +608,38 @@
           </div>
           <p class="hint" data-reveal>The full paper is confidential and available on request.</p>
         </div>
-        <div class="thesis-right" data-reveal>
           <p class="lede">
             Advances in artificial intelligence have made deepfakes, synthetic media that manipulate a person's face, voice, or both that are increasingly realistic. Existing detectors perform well in controlled settings but depend on the visual artifacts left by generative models, leaving them prone to obsolescence as those models improve. This study proposes a multimodal detection framework that instead uses cross-modal emotional inconsistency as its primary signal. Genuine human emotion is biologically coordinated across facial expression, vocal tone, and linguistic content: a coherence that current deepfake pipelines cannot reproduce, since each modality is synthesized independently. Three encoders extract features: Vision Transformer (facial expression), Wav2Vec 2.0 (vocal prosody), and BERT (linguistic sentiment), that are fused through bilinear pooling to capture pairwise interactions between modalities. Trained on CREMA-D, MELD, and CMU-MOSEI with synthetic deepfake augmentation, and benchmarked on DFDC, WildDeepfake, FakeAVCeleb, and DigiFakeAV, the model is evaluated by accuracy, precision, recall, F1-score, and AUC. The study assesses how reliably audio–visual emotional mismatch separates genuine from deepfake content across generation methods and real-world recording conditions.
           </p>
+          <div class="scope-card glass-card" style="margin-top:20px" data-reveal>
+            <div class="scope-header">
+              <span class="scope-tag">SCOPE &amp; KNOWN LIMITATIONS</span>
+              <span class="scope-sub">Outside operational scope:</span>
+            </div>
+            <div class="scope-grid">
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>Unobstructed Face</strong>
+                  <p>Face and mouth must stay visible. Masks, coverings, or hands over the face are outside scope.</p>
+                </div>
+              </div>
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>Spoken Dialogue Required</strong>
+                  <p>Requires audible speech. Silent videos, background music only, or whispering are outside scope.</p>
+                </div>
+              </div>
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>English Speech Optimized</strong>
+                  <p>Optimized for English speech. Other languages may yield less accurate emotion reads.</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -261,7 +649,7 @@
       <div class="stage stage-wide doc">
         <p class="eyebrow" data-reveal>// RESEARCHERS</p>
         <h1 class="doc-title" data-reveal>The team behind <em>DeepSentinel</em></h1>
-        <p class="lede" data-reveal>Four researchers from the Polytechnic University of the Philippines. Select a card to read their profile.</p>
+        <p class="lede" data-reveal>Four Computer Science researchers from the Polytechnic University of the Philippines.</p>
         <div class="team-row" id="team-grid" data-reveal></div>
         <p class="team-hint hint" data-reveal>Select a card to expand it.</p>
         <p class="team-desc" data-reveal>
@@ -272,9 +660,163 @@
         </p>
       </div>
     </section>
+
+    <!-- ── Benchmarks ─────────────────────────────────────────────────────── -->
+    <section class="view" data-view="benchmarks">
+      <div class="stage stage-wide bm-stage">
+
+        <!-- 1. Header -->
+        <p class="eyebrow" data-reveal>// SOTA BENCHMARKS · FAKEAVCELEB v1.2</p>
+        <h1 class="doc-title" data-reveal>DeepSentinel leads every baseline<br>by <em>+25.95 AUC points</em></h1>
+        <p class="lede bm-lede" data-reveal>
+          Strict cross-dataset evaluation — zero fine-tuning on FakeAVCeleb. 700 balanced clips (350 Real, 350 Fake).
+          All differences are statistically significant (DeLong test, <em>p</em>&nbsp;&lt;&nbsp;0.001).
+        </p>
+
+        <!-- 2. Headline stat cards -->
+        <div class="bm-stat-row" data-reveal>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">Balanced Accuracy</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">82.14%</span>
+            <span class="bm-stat-sub">vs 64.00% next-best</span>
+          </div>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">AUC-ROC</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">0.9020</span>
+            <span class="bm-stat-sub">[95% CI: 0.877–0.924]</span>
+          </div>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">F1-Score</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">0.8299</span>
+            <span class="bm-stat-sub">vs 0.5909 next-best</span>
+          </div>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">MCC</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">+0.646</span>
+            <span class="bm-stat-sub">vs +0.288 next-best</span>
+          </div>
+        </div>
+
+        <!-- 3. Master comparison table -->
+        <div class="glass-card bm-table-card" data-reveal>
+          <div class="bm-table-header">
+            <strong>Master Benchmark Comparison</strong>
+            <span class="mono-tag hint">N = 700 clips · FakeAVCeleb v1.2</span>
+          </div>
+          <div class="bm-table-scroll">
+            <table class="bm-table" id="sota-table">
+              <thead>
+                <tr>
+                  <th>Architecture</th>
+                  <th>Modality</th>
+                  <th>Acc</th>
+                  <th>BalAcc</th>
+                  <th>Spec</th>
+                  <th>Rec (Fake)</th>
+                  <th>F1</th>
+                  <th>MCC</th>
+                  <th>AUC-ROC [95% CI]</th>
+                  <th>DeLong vs Ours</th>
+                </tr>
+              </thead>
+              <tbody id="sota-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 4. ROC curve chart -->
+        <div class="glass-card bm-chart-card" data-reveal>
+          <div class="bm-chart-header">
+            <strong>ROC Curves — All Models</strong>
+            <span class="hint mono-tag">Higher &amp; further left = better</span>
+          </div>
+          <div class="bm-chart-wrap">
+            <canvas id="roc-canvas" class="bm-canvas"></canvas>
+          </div>
+          <div class="bm-legend" id="roc-legend"></div>
+        </div>
+
+        <!-- 5. Per-manipulation stress-test bar chart -->
+        <div class="glass-card bm-chart-card" data-reveal>
+          <div class="bm-chart-header">
+            <strong>Per-Manipulation Stress Test</strong>
+            <span class="hint mono-tag">Accuracy % by generation method</span>
+          </div>
+          <div class="bm-chart-wrap bm-chart-wrap-bar">
+            <canvas id="manip-canvas" class="bm-canvas"></canvas>
+          </div>
+          <div class="bm-legend" id="manip-legend"></div>
+        </div>
+
+        <!-- 6. Key Findings -->
+        <p class="eyebrow" data-reveal>// KEY FINDINGS</p>
+        <div class="bm-findings" data-reveal>
+
+          <div class="glass-card bm-finding-card">
+            <div class="bm-finding-head">
+              <span class="bm-finding-ic ic-copper">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 4v6l4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <strong>A. The "Generalization Collapse" of Standard Baselines</strong>
+            </div>
+            <p>
+              <strong>MesoNet-4 (AUC: 0.5389)</strong> and <strong>XceptionNet (AUC: 0.5002)</strong> perform around
+              random chance on unseen FakeAVCeleb clips. Standard CNN detectors overfit to dataset-specific pixel
+              artifacts and camera fingerprints of their training domains (FaceForensics++). When presented with newer
+              generative models — FSGAN, Wav2Lip — these pixel-level artifacts vanish, causing severe domain collapse.
+            </p>
+          </div>
+
+          <div class="glass-card bm-finding-card">
+            <div class="bm-finding-head">
+              <span class="bm-finding-ic ic-teal">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M3 12h2l2-5 3 12 3-16 3 13 2-4h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <strong>B. The Failure of Low-Level Audio-Visual Sync</strong>
+            </div>
+            <p>
+              <strong>Multimodal ResNet-AV (AUC: 0.4629)</strong> and <strong>LipForensics (AUC: 0.5132)</strong> fail
+              to reliably detect multimodal fakes when audio and video are independently spliced or synthesized.
+              Concatenating raw visual embeddings and audio MFCC features without higher-level affective semantic
+              modelling leads to negative transfer — performance falls below random on combined fakes.
+            </p>
+          </div>
+
+          <div class="glass-card bm-finding-card">
+            <div class="bm-finding-head">
+              <span class="bm-finding-ic ic-blue">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/></svg>
+              </span>
+              <strong>C. Superiority of Emotion Incongruence Detection</strong>
+            </div>
+            <p>
+              <strong>DeepSentinel achieves 0.9020 AUC and 82.14% Balanced Accuracy</strong>, outperforming the
+              closest baseline (AceNet at 0.6425 AUC) by <strong>+25.95 AUC points</strong> (<em>p</em> = 0.0002).
+              On complex cross-modal attacks like <code>fsgan-wav2lip</code> — where both face and audio are
+              manipulated — DeepSentinel achieves <strong>98.5% accuracy</strong>, because generative models cannot
+              synchronise the micro-emotional expressions of the face with the prosodic emotional valence of the voice.
+            </p>
+          </div>
+
+        </div>
+
+        <!-- 7. Closing CTA -->
+        <div class="results-foot bm-foot" data-reveal>
+          <div class="cta-row">
+            <a href="/upload" data-link class="btn btn-primary magnetic">
+              <span>Start Detecting</span>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <a href="/about/thesis" data-link class="btn btn-glass magnetic">Read the thesis</a>
+          </div>
+          <p class="disclaimer">Benchmark dataset: FakeAVCeleb v1.2 · Strict cross-dataset zero-shot protocol · N = 700 · All baselines trained on FaceForensics++.</p>
+        </div>
+
+      </div>
+    </section>
+
   </main>
 
-
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=18"></script>
 </body>
 </html>

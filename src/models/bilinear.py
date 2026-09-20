@@ -58,8 +58,10 @@ class CompactBilinearFusion(nn.Module):
     def _sketch(self, x: torch.Tensor, h: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
         """Count Sketch projection: (B, d) → (B, output_dim)."""
         B = x.shape[0]
-        y = torch.zeros(B, self.output_dim, device=x.device, dtype=x.dtype)
-        y.scatter_add_(1, h.unsqueeze(0).expand(B, -1), x * s)
+        x_fp32 = x.float()
+        s_fp32 = s.float()
+        y = torch.zeros(B, self.output_dim, device=x.device, dtype=torch.float32)
+        y.scatter_add_(1, h.unsqueeze(0).expand(B, -1), x_fp32 * s_fp32)
         return y
 
     def forward(self, z_at: torch.Tensor, z_v: torch.Tensor) -> torch.Tensor:
@@ -70,6 +72,7 @@ class CompactBilinearFusion(nn.Module):
         Returns:
             fused: (B, output_dim) — compact bilinear representation
         """
+        orig_dtype = z_at.dtype
         psi_at = self._sketch(z_at, self.h_at, self.s_at)  # (B, output_dim)
         psi_v  = self._sketch(z_v,  self.h_v,  self.s_v)   # (B, output_dim)
 
@@ -78,13 +81,9 @@ class CompactBilinearFusion(nn.Module):
         fused = torch.fft.irfft(fft_at * fft_v, n=self.output_dim)  # (B, output_dim)
 
         # Signed square-root + L2 normalization (Fukui et al., 2016).
-        # Without this the CBP output magnitude is unbounded (norm ~380 here),
-        # which drives the classifier logits to the hundreds -> sigmoid saturates
-        # to exactly 0/1. These two steps bound the representation so probabilities
-        # stay meaningful and the model can express uncertainty.
         fused = torch.sign(fused) * torch.sqrt(torch.abs(fused) + 1e-12)
         fused = torch.nn.functional.normalize(fused, p=2, dim=-1)
-        return fused
+        return fused.to(orig_dtype)
 
 
 # Backward-compatible alias
