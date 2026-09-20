@@ -74,8 +74,8 @@ def inspect_video_stream(video_path: Path) -> VideoInspection:
         raise InputValidationError(
             code="ERR_EMPTY_FILE",
             title="Empty or Corrupted File",
-            message="The uploaded file is empty or cannot be read.",
-            suggestion="Please ensure the video was exported properly and is at least a few kilobytes in size.",
+            message="The uploaded video file is empty or cannot be opened.",
+            suggestion="Please choose a valid video file that plays normally.",
         )
 
     # Check file size limit (500 MB)
@@ -85,8 +85,8 @@ def inspect_video_stream(video_path: Path) -> VideoInspection:
         raise InputValidationError(
             code="ERR_FILE_TOO_LARGE",
             title="Video File Too Large",
-            message=f"The video file size ({file_bytes / (1024 * 1024):.1f} MB) exceeds the 500 MB limit.",
-            suggestion="Please compress the video or upload a smaller clip under 500 MB.",
+            message=f"File size ({file_bytes / (1024 * 1024):.1f} MB) exceeds the 500 MB limit.",
+            suggestion="Please compress or trim the video to under 500 MB.",
             details={"size_bytes": file_bytes, "max_bytes": max_bytes},
         )
 
@@ -95,8 +95,8 @@ def inspect_video_stream(video_path: Path) -> VideoInspection:
         raise InputValidationError(
             code="ERR_UNREADABLE_CONTAINER",
             title="Unreadable Video Format",
-            message="The video stream could not be decoded by the media pipeline.",
-            suggestion="Please convert or re-export the video to standard MP4 (H.264 / AAC) and try again.",
+            message="The video stream could not be decoded.",
+            suggestion="Please upload a standard MP4, MOV, or WEBM video.",
         )
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
@@ -108,9 +108,9 @@ def inspect_video_stream(video_path: Path) -> VideoInspection:
         cap.release()
         raise InputValidationError(
             code="ERR_VIDEO_RESOLUTION_TOO_LOW",
-            title="Video Dimensions Too Small",
-            message=f"Video resolution ({width}x{height}) is too tiny to locate human faces.",
-            suggestion="Please upload a video with standard resolution (at least 360p or 480p).",
+            title="Video Resolution Too Low",
+            message=f"Video size ({width}x{height}) is too small to locate faces.",
+            suggestion="Please upload a video with standard resolution (at least 360p).",
             details={"width": width, "height": height, "min_required": 64},
         )
 
@@ -173,9 +173,9 @@ def validate_container(inspection: VideoInspection, min_duration: float = 2.0, m
     if inspection.frame_count < 15:
         raise InputValidationError(
             code="ERR_TOO_FEW_FRAMES",
-            title="Insufficient Video Frames",
-            message=f"The video contains only {inspection.frame_count} frames. At least 15 frames are required for analysis.",
-            suggestion="Please upload a longer video clip with continuous motion.",
+            title="Video Too Short",
+            message=f"Video contains only {inspection.frame_count} frames (at least 15 frames are required).",
+            suggestion="Please upload a longer clip with steady motion.",
             details={"frame_count": inspection.frame_count},
         )
 
@@ -183,7 +183,7 @@ def validate_container(inspection: VideoInspection, min_duration: float = 2.0, m
         raise InputValidationError(
             code="ERR_LOW_FRAMERATE",
             title="Frame Rate Too Low",
-            message=f"The video frame rate ({inspection.fps:.1f} FPS) is too low for facial micro-expression analysis.",
+            message=f"Frame rate ({inspection.fps:.1f} FPS) is too low to track facial expressions.",
             suggestion="Please provide a standard video recorded at 15 FPS or higher.",
             details={"fps": inspection.fps},
         )
@@ -191,17 +191,17 @@ def validate_container(inspection: VideoInspection, min_duration: float = 2.0, m
     if inspection.duration < min_duration - 0.2:
         raise InputValidationError(
             code="ERR_DURATION_TOO_SHORT",
-            title="Video Too Short",
-            message=f"Selected video duration ({inspection.duration:.1f}s) is below the minimum required ({min_duration:.1f}s).",
-            suggestion=f"Please upload or trim a clip that is at least {min_duration:.1f} seconds long.",
+            title="Clip Too Short",
+            message=f"Video duration ({inspection.duration:.1f}s) is below the {min_duration:.0f}s minimum.",
+            suggestion=f"Please upload or trim a clip that is at least {int(min_duration)} seconds long.",
             details={"duration": inspection.duration, "min_required": min_duration},
         )
 
     if inspection.duration > max_duration + 1.0:
         raise InputValidationError(
             code="ERR_DURATION_TOO_LONG",
-            title="Video Too Long",
-            message=f"Video duration ({inspection.duration / 60.0:.1f} min) exceeds the maximum limit ({max_duration / 60.0:.1f} min).",
+            title="Clip Too Long",
+            message=f"Video duration ({inspection.duration / 60.0:.1f} min) exceeds the {int(max_duration / 60)} min limit.",
             suggestion=f"Please trim the video to under {int(max_duration / 60)} minutes.",
             details={"duration": inspection.duration, "max_allowed": max_duration},
         )
@@ -209,18 +209,18 @@ def validate_container(inspection: VideoInspection, min_duration: float = 2.0, m
     if inspection.mean_luminance < 15.0:
         raise InputValidationError(
             code="ERR_PITCH_BLACK",
-            title="Video Severely Underexposed",
-            message="The video is pitch black or severely underexposed. Facial features cannot be discerned.",
-            suggestion="Please provide a video recorded in adequate lighting conditions.",
+            title="Video Too Dark",
+            message="The video is pitch black or underexposed; facial features cannot be seen.",
+            suggestion="Please provide a video recorded with better lighting.",
             details={"mean_luminance": inspection.mean_luminance},
         )
 
     if inspection.mean_luminance > 245.0:
         raise InputValidationError(
             code="ERR_OVEREXPOSED",
-            title="Video Severely Overexposed",
-            message="The video is washed out / completely overexposed. Facial features are blown out.",
-            suggestion="Please provide a video with normal exposure and lighting.",
+            title="Video Too Bright",
+            message="The video is completely washed out or overexposed.",
+            suggestion="Please provide a video with balanced lighting.",
             details={"mean_luminance": inspection.mean_luminance},
         )
 
@@ -230,17 +230,17 @@ def validate_audio_track(inspection: VideoInspection, wav_path: Path) -> None:
     if not inspection.has_audio_stream:
         raise InputValidationError(
             code="ERR_NO_AUDIO_TRACK",
-            title="No Audio Track Found",
-            message="This video doesn't have any sound. DeepSentinel needs to hear the speaker's voice to compare their tone of voice with their facial expressions.",
-            suggestion="Please upload a video where the person is speaking out loud.",
+            title="No Sound Track Found",
+            message="This video has no audio track. DeepSentinel needs to hear the speaker's voice.",
+            suggestion="Please upload a video with sound where the person is speaking.",
         )
 
     if not wav_path.exists() or wav_path.stat().st_size < 1000:
         raise InputValidationError(
             code="ERR_AUDIO_EXTRACTION_FAILED",
-            title="Could Not Read Audio",
-            message="We couldn't extract the audio from this video file.",
-            suggestion="Please try converting or re-exporting your video with a standard audio format (like AAC or MP3).",
+            title="Audio Extraction Error",
+            message="Could not read audio from this video file.",
+            suggestion="Please re-export your video with standard AAC or MP3 audio.",
         )
 
     # Calculate RMS energy and peak amplitude
@@ -259,9 +259,9 @@ def validate_audio_track(inspection: VideoInspection, wav_path: Path) -> None:
         if peak < 0.005 or db_rms < -48.0:
             raise InputValidationError(
                 code="ERR_SILENT_AUDIO",
-                title="Audio Is Muted or Completely Silent",
-                message="The audio in this video is completely quiet or muted. The AI needs to hear vocal tone to detect emotion.",
-                suggestion="Please unmute the audio or pick a section of the video where someone is talking.",
+                title="Audio Is Muted or Silent",
+                message="The audio in this video is silent or muted. Speech tone is required to detect emotion.",
+                suggestion="Please unmute the clip or choose a section with audible talking.",
                 details={"peak": peak, "db_rms": db_rms},
             )
     except InputValidationError:
@@ -279,8 +279,8 @@ def validate_speech_presence(transcript: str, min_words: int = 1) -> None:
         raise InputValidationError(
             code="ERR_NO_HUMAN_SPEECH",
             title="No Spoken Words Heard",
-            message="The speech recognizer couldn't hear any clear spoken words in this clip (only background noise, music, or silence).",
-            suggestion="Please select a part of the video where the person is speaking clearly so their voice can be analyzed.",
+            message="No clear speech was heard in this clip (only silence, background noise, or music).",
+            suggestion="Please pick a section where the person is speaking clearly.",
             details={"transcript": cleaned},
         )
 
@@ -306,8 +306,8 @@ def validate_face_and_visual_quality(
         raise InputValidationError(
             code="ERR_NO_FACE_DETECTED",
             title="No Face Clearly Visible",
-            message=f"A clear face was found in only {detection_ratio * 100:.0f}% of the video (at least {min_face_ratio * 100:.0f}% is needed).",
-            suggestion="Please make sure the person is facing the camera with their face clearly visible throughout the clip.",
+            message=f"A face was visible in only {detection_ratio * 100:.0f}% of the clip (at least {min_face_ratio * 100:.0f}% is required).",
+            suggestion="Ensure the person faces the camera with their face clearly in view.",
             details={"detected_frames": valid_face_count, "total_frames": total_frames, "ratio": detection_ratio},
         )
 
@@ -330,17 +330,17 @@ def validate_face_and_visual_quality(
     if small_count > (valid_face_count * 0.70):
         raise InputValidationError(
             code="ERR_FACE_TOO_SMALL",
-            title="Face Is Too Far Away or Small",
-            message="The person's face is too small in the frame to clearly read their facial expressions.",
-            suggestion="Please crop closer to the person's face or pick a closer video.",
+            title="Face Too Small or Far",
+            message="The person's face is too small in the frame to detect facial expressions reliably.",
+            suggestion="Please crop closer or use a closer video of the speaker.",
             details={"min_resolution": min_resolution},
         )
 
     if mean_sharpness < min_sharpness:
         raise InputValidationError(
             code="ERR_FACE_BLURRED",
-            title="Video Is Too Blurry",
-            message="The video has heavy motion blur or is out of focus, making facial expressions hard to see.",
-            suggestion="Please use a clearer, steady video with good focus and lighting.",
+            title="Face Is Too Blurry",
+            message="Heavy blur or focus issues make facial expressions hard to read.",
+            suggestion="Please use a clearer, steady video with good focus.",
             details={"mean_sharpness": mean_sharpness, "threshold": min_sharpness},
         )

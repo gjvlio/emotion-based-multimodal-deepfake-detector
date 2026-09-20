@@ -243,35 +243,35 @@
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
               <span>SYSTEM SCOPE &amp; LIMITATIONS</span>
             </span>
-            <span class="scope-sub">Conditions outside the detector's operational scope:</span>
+            <span class="scope-sub">Outside operational scope:</span>
           </div>
           <div class="scope-grid">
             <div class="scope-item">
               <span class="scope-dot"></span>
               <div>
                 <strong>Single Speaker Only</strong>
-                <p>Designed for one primary talking subject. Crowd scenes or overlapping voices are outside scope.</p>
+                <p>Designed for one main speaker. Crowd noise or group voices are outside scope.</p>
               </div>
             </div>
             <div class="scope-item">
               <span class="scope-dot"></span>
               <div>
                 <strong>Unobstructed Face</strong>
-                <p>Requires visible mouth and facial muscles. Masks, scarves, or hands covering the mouth are outside scope.</p>
+                <p>Face and mouth must stay visible. Masks, coverings, or hands over the face are outside scope.</p>
               </div>
             </div>
             <div class="scope-item">
               <span class="scope-dot"></span>
               <div>
                 <strong>Spoken Dialogue Required</strong>
-                <p>Needs clear vocal speech. Silent videos, background music, or instrumental tracks cannot be evaluated.</p>
+                <p>Requires audible speech. Silent videos, background music only, or whispering are outside scope.</p>
               </div>
             </div>
             <div class="scope-item">
               <span class="scope-dot"></span>
               <div>
                 <strong>English Speech Optimized</strong>
-                <p>Linguistic sentiment analysis (BERT) and acoustic prosody are optimized for English speech.</p>
+                <p>Optimized for English speech. Other languages may yield less accurate emotion reads.</p>
               </div>
             </div>
           </div>
@@ -432,7 +432,7 @@
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <div class="guide-note" id="g-verdict"><div><p>This percentage shows how likely the video is an <b>AI deepfake</b>. Above 50% means the video shows signs of AI manipulation; below 50% means it looks authentic and natural.</p></div></div>
+          <div class="guide-note" id="g-verdict"><div><p>Chance that this video is an <b>AI deepfake</b>. 50% or more means likely fake; under 50% means authentic.</p></div></div>
         </div>
 
         <!-- Forensic Multi-Tier Interpretation Card -->
@@ -499,7 +499,7 @@
           <p class="interpret" id="interpret">—</p>
           <div class="meter"><span class="meter-marker" id="sarc-marker"><span class="meter-val" id="sarc-val"></span></span></div>
           <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
-          <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b>how someone speaks</b>, not whether they are real or fake. Real people often make sarcastic jokes, and AI fakes can sound serious. Checking for sarcasm makes sure the AI doesn't accuse someone of being fake just because they told a dry joke with a straight face.</p></div></div>
+          <div class="guide-note" id="g-sarc"><div><p>Measures sarcastic tone. This keeps the AI from mistaking dry jokes or poker faces for deepfakes.</p></div></div>
         </div>
 
         <!-- two emotion reads -->
@@ -539,7 +539,7 @@
           </div>
           <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
           <p class="hint" id="dom-desc">—</p>
-          <div class="guide-note" id="g-gap"><div><p>This highlights the single emotion where the voice and face disagree the most. A large gap is a strong sign that someone replaced the audio or face with an AI tool.</p></div></div>
+          <div class="guide-note" id="g-gap"><div><p>The emotion where voice and face clash most. A large gap usually means audio or video was swapped.</p></div></div>
         </div>
 
         <!-- delta per class — detailed itemized breakdown below summary -->
@@ -551,7 +551,7 @@
             </button>
           </div>
           <div class="dist dist-delta" id="delta-list"></div>
-          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> shows the difference between the voice and face for each emotion (from 0% = perfect match to 100% = total clash). Real videos stay <b class="ok">low</b> across all emotions; a large spike is a classic tell of an AI deepfake.</p></div></div>
+          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> is the difference between voice and face per emotion (0% = match, 100% = clash). Real clips stay low; a big spike flags a deepfake.</p></div></div>
         </div>
 
         <div class="results-foot">
@@ -581,35 +581,35 @@
           <div class="scope-card glass-card" style="margin-top:20px" data-reveal>
             <div class="scope-header">
               <span class="scope-tag">SCOPE &amp; KNOWN LIMITATIONS</span>
-              <span class="scope-sub">Operating boundaries of this research:</span>
+              <span class="scope-sub">Outside operational scope:</span>
             </div>
             <div class="scope-grid">
               <div class="scope-item">
                 <span class="scope-dot"></span>
                 <div>
-                  <strong>Single Speaker Focus</strong>
-                  <p>Evaluates primary talking head; multi-speaker conversations and crowd audio fall outside scope.</p>
+                  <strong>Single Speaker Only</strong>
+                  <p>Designed for one main speaker. Crowd noise or group voices are outside scope.</p>
                 </div>
               </div>
               <div class="scope-item">
                 <span class="scope-dot"></span>
                 <div>
                   <strong>Unobstructed Face</strong>
-                  <p>Requires visible lower-face Action Units; physical masks, scarves, or hand occlusions are outside scope.</p>
+                  <p>Face and mouth must stay visible. Masks, coverings, or hands over the face are outside scope.</p>
                 </div>
               </div>
               <div class="scope-item">
                 <span class="scope-dot"></span>
                 <div>
-                  <strong>Spoken Dialogue</strong>
-                  <p>Vocal prosody and linguistic sentiment require intelligible speech; silent or pure instrumental clips cannot be evaluated.</p>
+                  <strong>Spoken Dialogue Required</strong>
+                  <p>Requires audible speech. Silent videos, background music only, or whispering are outside scope.</p>
                 </div>
               </div>
               <div class="scope-item">
                 <span class="scope-dot"></span>
                 <div>
-                  <strong>Language Scope</strong>
-                  <p>Model backbones (BERT sentiment &amp; Wav2Vec 2.0 prosody) are benchmarked and optimized for English speech.</p>
+                  <strong>English Speech Optimized</strong>
+                  <p>Optimized for English speech. Other languages may yield less accurate emotion reads.</p>
                 </div>
               </div>
             </div>
@@ -637,6 +637,6 @@
   </main>
 
 
-  <script src="/static/js/app.js?v=14"></script>
+  <script src="/static/js/app.js?v=15"></script>
 </body>
 </html>

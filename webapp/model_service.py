@@ -309,190 +309,6 @@ class ModelService:
 
         return probs
 
-    @staticmethod
-    def _generate_forensic_interpretation(
-        verdict: str,
-        emo_a: str,
-        emo_b: str,
-        p_fake: float,
-        p_sarc: float,
-        cos_sim: float,
-        d_js: float,
-    ) -> ForensicInterpretation:
-        """
-        Exhaustive 8-State Forensic Outcome Interpretation Matrix.
-        Evaluates Verdict (Real/Fake) × Emotion Congruence (Match/Mismatch) × Sarcasm (Present/Absent).
-        """
-        is_fake = (verdict.upper() == "FAKE")
-        emotions_match = (emo_a.lower() == emo_b.lower())
-        sarcastic = (p_sarc >= 0.50)
-
-        if not is_fake:
-            if emotions_match and not sarcastic:
-                state_id = "STATE_REAL_HARMONY"
-                state_tag = "NATURAL MATCH · VOICE & FACE AGREE"
-                headline = "Looks Real: Voice and Face Match Naturally"
-                summary = (
-                    "The speaker's voice, words, and facial expressions all agree on the same feeling. "
-                    "Everything looks and sounds like normal, genuine human speech."
-                )
-                vf = (
-                    f"Both the voice and the face clearly express '{emo_a}'. What you hear and what you see line up "
-                    "naturally without any emotional clash."
-                )
-                sarc = (
-                    f"No sarcasm detected ({p_sarc * 100:.0f}%). The person is speaking sincerely and straightforwardly."
-                )
-                rat = (
-                    "The timing between the voice and mouth movements is smooth and organic. "
-                    "The AI found no signs of voice cloning, face replacement, or digital editing."
-                )
-            elif emotions_match and sarcastic:
-                state_id = "STATE_REAL_CONGRUENT_SARCASM"
-                state_tag = "SARCASTIC SPEECH · MATCHING EXPRESSION"
-                headline = "Looks Real: Playful Sarcasm with Matching Expression"
-                summary = (
-                    "The speaker is being sarcastic or playful on purpose. Both their tone of voice and facial expression "
-                    "match that sarcastic attitude."
-                )
-                vf = (
-                    f"The voice and face both express '{emo_a}' together, showing a coordinated, playful expression."
-                )
-                sarc = (
-                    f"Sarcasm detected ({p_sarc * 100:.0f}%). The speaker's tone and word choices show they are making "
-                    "an ironic remark or joke."
-                )
-                rat = (
-                    "Even though the speaker is being sarcastic, their voice inflection, facial muscles, and mouth timing "
-                    "remain completely in sync like a real person."
-                )
-            elif not emotions_match and sarcastic:
-                state_id = "STATE_REAL_DEADPAN_IRONY"
-                state_tag = "DEADPAN JOKE · INTENTIONAL POKER FACE"
-                headline = "Looks Real: Deadpan Humor (Serious Face with Sarcastic Tone)"
-                summary = (
-                    "The voice sounds expressive while the face stays serious, but this is a classic deadpan joke "
-                    "(dry humor), not an AI deepfake."
-                )
-                vf = (
-                    f"The voice sounds '{emo_a}' while the face stays '{emo_b}'. Keeping a straight poker face while "
-                    "speaking sarcastically is common human humor."
-                )
-                sarc = (
-                    f"High sarcasm detected ({p_sarc * 100:.0f}%). The AI recognized the sarcastic joke and didn't "
-                    "mistake the straight face for an AI error."
-                )
-                rat = (
-                    "Many AI detectors mistakenly flag deadpan jokes because the face and voice differ. "
-                    "DeepSentinel understands sarcasm context and correctly confirms this is a real human."
-                )
-            else:  # not emotions_match and not sarcastic
-                state_id = "STATE_REAL_MIXED_EMOTION"
-                state_tag = "NATURAL MIXED FEELINGS · AUTHENTIC"
-                headline = "Looks Real: Normal Mixed Human Feelings"
-                summary = (
-                    "The voice and face show slightly different emotions, but this is normal in everyday human conversation "
-                    "(like staying composed while talking about something emotional)."
-                )
-                vf = (
-                    f"The voice conveys '{emo_a}' while the face shows '{emo_b}'. Having subtle differences between "
-                    "voice tone and facial composure is completely normal for real people."
-                )
-                sarc = (
-                    f"No noticeable sarcasm detected ({p_sarc * 100:.0f}%). The speaker is speaking sincerely."
-                )
-                rat = (
-                    "Even though the voice and face express slightly different feelings, the natural micro-movements "
-                    "of the skin, eyes, and speech rhythm show no signs of AI tampering."
-                )
-        else:  # is_fake
-            if not emotions_match and not sarcastic:
-                state_id = "STATE_FAKE_EMOTION_DESYNC"
-                state_tag = "EMOTIONS CLASH · LIKELY DEEPFAKE"
-                headline = "Likely Deepfake: Voice and Face Emotions Contradict Each Other"
-                summary = (
-                    "The emotion in the voice and the expression on the face clash heavily. This almost always happens "
-                    "when an AI replaces someone's voice or stitches on a new face."
-                )
-                vf = (
-                    f"The voice clearly sounds '{emo_a}', but the face looks '{emo_b}'. Real humans do not display "
-                    "such sharp, disconnected contradictions when speaking sincerely."
-                )
-                sarc = (
-                    f"No sarcasm detected ({p_sarc * 100:.0f}%). This emotional contradiction is not a joke or deadpan "
-                    "humor; it is an AI generation flaw."
-                )
-                rat = (
-                    "The emotional difference between the audio and video is unnaturally high. "
-                    "AI deepfake tools usually manipulate either the audio or the face separately, creating this obvious emotional clash."
-                )
-            elif not emotions_match and sarcastic:
-                state_id = "STATE_FAKE_MANIPULATED_DISSONANCE"
-                state_tag = "UNNATURAL SPEECH & FACE · LIKELY DEEPFAKE"
-                headline = "Likely Deepfake: Distorted Voice and Unnatural Face Movements"
-                summary = (
-                    "The video shows both an unnatural clash between voice and face emotions, as well as robotic speech "
-                    "patterns that fail human realism tests."
-                )
-                vf = (
-                    f"The tone of the voice ('{emo_a}') does not match the expression on the face ('{emo_b}')."
-                )
-                sarc = (
-                    f"Unusual vocal patterns detected ({p_sarc * 100:.0f}%), but these are caused by distorted AI pitch changes "
-                    "and robotic dubbing rather than real human sarcasm."
-                )
-                rat = (
-                    "The AI found clear signs of synthetic audio and modified lip movements that do not sync naturally "
-                    "with how real people talk."
-                )
-            elif emotions_match and not sarcastic:
-                state_id = "STATE_FAKE_SYNTHESIS_ARTIFACTS"
-                state_tag = "AI GLITCHES DETECTED · LIKELY DEEPFAKE"
-                headline = "Likely Deepfake: AI Visual or Audio Glitches Detected"
-                summary = (
-                    "Even though the voice and face appear to have similar emotions, the AI found subtle digital seams, "
-                    "blurring, or robotic audio typical of AI face generation."
-                )
-                vf = (
-                    f"Both voice and face nominally read '{emo_a}', but a closer look at the facial features reveals "
-                    "unnatural digital distortions."
-                )
-                sarc = f"No sarcasm detected ({p_sarc * 100:.0f}%)."
-                rat = (
-                    "The AI checks deeper than just surface emotion: it spotted digital seams around the jaw, unnatural "
-                    "blinking, or synthetic voice textures typical of AI face-swaps."
-                )
-            else:  # emotions_match and sarcastic
-                state_id = "STATE_FAKE_SYNTHETIC_SMIRK"
-                state_tag = "ARTIFICIAL FACE WARPING · LIKELY DEEPFAKE"
-                headline = "Likely Deepfake: Exaggerated AI Facial Warping & Audio Glitches"
-                summary = (
-                    "The video contains artificial face movements and distorted audio meant to mimic expressive speech, "
-                    "but it shows clear signs of AI manipulation."
-                )
-                vf = (
-                    f"The face tries to show '{emo_a}', but the mouth movements appear stiff, rubbery, or warped."
-                )
-                sarc = (
-                    f"The high tone anomaly score ({p_sarc * 100:.0f}%) comes from robotic voice jumps and stretched "
-                    "mouth movements, not genuine human humor."
-                )
-                rat = (
-                    "The AI detected visual glitches around the mouth and unnatural delays between the spoken sounds "
-                    "and lip shapes, confirming the video was altered."
-                )
-
-        return ForensicInterpretation(
-            state_id=state_id,
-            state_tag=state_tag,
-            headline=headline,
-            summary=summary,
-            voice_face_analysis=vf,
-            sarcasm_analysis=sarc,
-            technical_rationale=rat,
-            forensic_rationale=rat,
-        )
-
     def _fuse_and_calibrate_verdict(
         self,
         raw_logit: torch.Tensor,
@@ -659,91 +475,107 @@ class ModelService:
         fake_pct = int(round(p_fake * 100))
 
         if not is_fake and emotions_match and not sarcastic:
+            rat = "Voice and mouth timing are in sync with no signs of AI editing."
             return ForensicInterpretation(
                 state_id="STATE_REAL_HARMONY",
-                state_tag="NATURAL MATCH — VOICE & FACE AGREE",
-                headline="Looks Real: Voice tone and facial expression completely match",
-                summary=f"Both the voice and the face express {ea_title}. When vocal emotion and facial expressions naturally agree without contradictions, the video is very likely authentic.",
-                voice_face_analysis=f"The speaker's voice sounds {ea_title}, and their facial expression also shows {eb_title}. There is no awkward clash between what you hear and what you see.",
-                sarcasm_analysis=f"No sarcasm detected ({sarc_pct}%). The speaker is talking normally and sincerely.",
-                technical_rationale=f"The emotion gap between voice and face is tiny ({cos_sim*100:.0f}% match). There are no signs that the audio or face were swapped from different sources.",
+                state_tag="REAL · NATURAL MATCH",
+                headline="Looks Real: Voice and face emotions match naturally",
+                summary=f"Voice tone and facial expression agree on {ea_title}. What you hear and see align naturally.",
+                voice_face_analysis=f"Both voice and face show {ea_title} with no emotional clash.",
+                sarcasm_analysis=f"No sarcasm detected ({sarc_pct}%). Delivery is sincere and straightforward.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         elif not is_fake and emotions_match and sarcastic:
+            rat = "Voice inflection and facial muscles stay synchronized like a real speaker."
             return ForensicInterpretation(
                 state_id="STATE_REAL_CONGRUENT_SARCASM",
-                state_tag="PLAYFUL SARCASM — GENUINE CLIP",
-                headline="Looks Real: The speaker is being sarcastic, but the clip is genuine",
-                summary=f"The speaker is using sarcasm ({sarc_pct}%), but both their voice tone and face mirror the same ironic feeling ({ea_title}). This is natural human sarcasm, not an AI fake.",
-                voice_face_analysis=f"The speaker's sarcastic voice ({ea_title}) matches their facial expression ({eb_title}). They are deliberately joking or being ironic.",
-                sarcasm_analysis=f"High sarcasm detected ({sarc_pct}%). Because real people frequently use sarcasm, DeepSentinel avoids mistaking humor or irony for a deepfake.",
-                technical_rationale="In deepfakes, sarcasm often causes glitches because AI swaps voices onto serious faces. Here, the voice and face express the sarcasm together naturally.",
+                state_tag="REAL · PLAYFUL SARCASM",
+                headline="Looks Real: Playful sarcasm with matching expression",
+                summary=f"The speaker is using sarcasm ({sarc_pct}%), and their facial expression matches that playful tone.",
+                voice_face_analysis=f"Voice and face both express {ea_title} together in a coordinated delivery.",
+                sarcasm_analysis=f"Sarcasm detected ({sarc_pct}%). DeepSentinel recognized intentional humor rather than an AI error.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         elif not is_fake and not emotions_match and sarcastic:
+            rat = "The irony filter accounts for dry humor so intentional poker faces are not flagged as fakes."
             return ForensicInterpretation(
                 state_id="STATE_REAL_DEADPAN_IRONY",
-                state_tag="DEADPAN JOKE — INTENTIONAL MISMATCH",
-                headline="Looks Real: Deadpan delivery — serious face with sarcastic speech",
-                summary=f"The voice expresses {ea_title} while the face stays {eb_title}, but this mismatch is caused by organic deadpan humor ({sarc_pct}% sarcasm), not a deepfake.",
-                voice_face_analysis=f"The voice sounds {ea_title}, but the speaker maintains a {eb_title} poker face. This is classic human deadpan humor.",
-                sarcasm_analysis=f"High sarcasm detected ({sarc_pct}%). The model recognized that the speaker is deliberately keeping a straight face while saying something sarcastic.",
-                technical_rationale="The Multimodal Sarcasm Filter recognized intentional irony. This prevents false alarms when people tell jokes with a straight face.",
+                state_tag="REAL · DEADPAN HUMOR",
+                headline="Looks Real: Deadpan joke (serious face with sarcastic voice)",
+                summary=f"Voice sounds {ea_title} while the face stays {eb_title}, but this is dry deadpan humor ({sarc_pct}% sarcasm), not an AI fake.",
+                voice_face_analysis=f"Voice sounds {ea_title} while the face keeps a {eb_title} poker face.",
+                sarcasm_analysis=f"High sarcasm ({sarc_pct}%). The model recognized dry humor, avoiding a false deepfake alert.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         elif not is_fake and not emotions_match and not sarcastic:
+            rat = "Audio-visual sync is strong with no signs of face-swapping or dubbing."
             return ForensicInterpretation(
                 state_id="STATE_REAL_MIXED_EMOTION",
-                state_tag="NATURAL COMPLEX EMOTION — REAL CLIP",
-                headline="Looks Real: Natural human mixed feelings",
-                summary=f"The voice leans {ea_title} while the face shows hints of {eb_title}. Real humans frequently show subtle mixed emotions, and this clip flows naturally without AI manipulation.",
-                voice_face_analysis=f"Voice sounds {ea_title} while face leans {eb_title}. The transition between feelings is smooth and organic.",
+                state_tag="REAL · MIXED FEELINGS",
+                headline="Looks Real: Normal mixed human feelings",
+                summary=f"Voice leans {ea_title} while the face shows {eb_title}. This subtle emotional mix is normal in authentic conversation.",
+                voice_face_analysis=f"Voice conveys {ea_title} while face shows {eb_title}, transitioning smoothly.",
                 sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speaker is speaking sincerely.",
-                technical_rationale=f"While the coarse emotion labels differ slightly, the underlying audio-visual sync is strong ({cos_sim*100:.0f}% match) and shows none of the sharp cuts typical of AI synthesis.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         elif is_fake and not emotions_match and not sarcastic:
+            rat = "Deepfake tools usually replace voice or face separately, leaving an obvious emotional seam."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_EMOTION_DESYNC",
-                state_tag="EMOTIONAL CLASH — LIKELY DEEPFAKE",
-                headline="Likely Deepfake: Voice and face have totally contradictory emotions",
-                summary=f"The voice sounds {ea_title}, but the face looks {eb_title}. This extreme emotional clash almost always happens when someone's voice is stitched onto another person's video.",
-                voice_face_analysis=f"Big contradiction: You hear {ea_title} in the voice, but see {eb_title} on the face. A real person speaking sincerely does not project these opposite feelings simultaneously.",
-                sarcasm_analysis=f"Sarcasm is very low ({sarc_pct}%), so this is NOT a joke or deadpan humor. The emotional disagreement is an unnatural error.",
-                technical_rationale="The emotion disagreement gap is abnormally high. Deepfake tools usually replace only the face or voice, leaving a clear emotional seam between the two.",
+                state_tag="FAKE · EMOTION CLASH",
+                headline="Likely Deepfake: Voice and face emotions contradict each other",
+                summary=f"Voice sounds {ea_title}, but the face looks {eb_title}. This sharp contradiction happens when voice or video is swapped.",
+                voice_face_analysis=f"Sharp contradiction: Hearing {ea_title} while seeing {eb_title} does not happen in sincere human speech.",
+                sarcasm_analysis=f"Sarcasm is low ({sarc_pct}%), confirming this clash is an AI flaw, not a joke.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         elif is_fake and not emotions_match and sarcastic:
+            rat = f"High fake probability ({fake_pct}%). Natural facial micro-expressions are missing."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_MANIPULATED_DISSONANCE",
-                state_tag="UNNATURAL GLITCH — LIKELY DEEPFAKE",
+                state_tag="FAKE · VOICE & FACE CLASH",
                 headline="Likely Deepfake: Sarcastic speech pasted onto an incompatible face",
-                summary=f"Although the words contain sarcasm ({sarc_pct}%), the face does not react naturally. The facial movements look stiff or out of sync with the speech.",
-                voice_face_analysis=f"The sarcastic voice ({ea_title}) clashes unnaturally with the facial expression ({eb_title}). The timing and facial muscles look artificial.",
-                sarcasm_analysis=f"Sarcasm is present in the audio ({sarc_pct}%), but the face completely fails to respond to it, revealing that the audio was likely pasted from elsewhere.",
-                technical_rationale=f"The model detected high fake probability ({fake_pct}%). When authentic humans speak sarcastically, micro-expressions appear around the eyes and mouth; here, they are missing.",
+                summary=f"The audio has sarcastic tone ({sarc_pct}%), but the face stays {eb_title} and fails to react naturally.",
+                voice_face_analysis=f"The tone ({ea_title}) clashes with the stiff or unreactive facial expression ({eb_title}).",
+                sarcasm_analysis=f"Sarcastic speech ({sarc_pct}%) without matching facial cues shows pasted audio.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         elif is_fake and emotions_match and not sarcastic:
+            rat = f"Detected AI generation artifacts ({fake_pct}% fake score) such as blurring or lip-sync lag."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_SYNTHESIS_ARTIFACTS",
-                state_tag="AI GENERATION ARTIFACTS — LIKELY DEEPFAKE",
-                headline="Likely Deepfake: Matching emotion, but visible AI video/voice glitches",
-                summary=f"Even though both the voice and face read as {ea_title}, the AI detector found micro-glitches in how the face was generated or how the mouth moves.",
-                voice_face_analysis=f"Both the voice and face show {ea_title}, but the facial movement around the mouth and eyes looks generated or synthetic.",
-                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The tone is delivered straight.",
-                technical_rationale=f"The neural vision backbone detected generative boundary artifacts ({fake_pct}% fake confidence), such as subtle face blurring, warping, or robotic lip-sync.",
+                state_tag="FAKE · AI GLITCHES DETECTED",
+                headline="Likely Deepfake: Matching emotion, but digital AI glitches detected",
+                summary=f"Even though voice and face show {ea_title}, the AI found digital glitches in how the face was generated.",
+                voice_face_analysis=f"Both voice and face show {ea_title}, but facial movements look artificially generated.",
+                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speech is delivered straight.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
         else:  # is_fake and emotions_match and sarcastic
+            rat = f"Detected artificial boundary warping ({fake_pct}% fake score), confirming AI manipulation."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_SYNTHETIC_SMIRK",
-                state_tag="ARTIFICIAL MIMICRY — LIKELY DEEPFAKE",
-                headline="Likely Deepfake: Forced artificial smirk or unnatural parody",
-                summary=f"The clip attempts to look sarcastic ({sarc_pct}%), but the facial expressions appear mechanically pasted on or animated by AI.",
-                voice_face_analysis=f"Voice and face both attempt {ea_title}, but the facial action units show robotic, frozen, or unnaturally exaggerated movements.",
-                sarcasm_analysis=f"High sarcasm score ({sarc_pct}%), typical of satirical or mocking deepfake clips.",
-                technical_rationale=f"The multimodal classifier caught clear generative boundaries ({fake_pct}% fake score), distinguishing AI puppeteering from real human expressions.",
+                state_tag="FAKE · ARTIFICIAL WARPING",
+                headline="Likely Deepfake: Unnatural artificial expressions and mouth warping",
+                summary=f"The video mimics an expressive or sarcastic look ({sarc_pct}%), but facial movements appear artificially warped.",
+                voice_face_analysis=f"Voice and face attempt {ea_title}, but mouth movement looks robotic or unnatural.",
+                sarcasm_analysis=f"High sarcasm score ({sarc_pct}%), typical of exaggerated parody deepfakes.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
             )
 
     # ── Inference ──────────────────────────────────────────────────────────────
