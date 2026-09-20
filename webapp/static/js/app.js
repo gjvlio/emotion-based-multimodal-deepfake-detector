@@ -61,6 +61,15 @@
       emotion_mismatch: { neutral: 0.08, happy: 0.61, sad: 0.68, angry: 0.42, fear: 0.21, disgust: 0.17 },
       p_sarcasm: 0.12,
       transcript: "I am absolutely thrilled to be here.",
+      forensic_interpretation: {
+        state_id: "STATE_FAKE_EMOTION_DESYNC",
+        state_tag: "FAKE · EMOTION CLASH",
+        headline: "Likely Deepfake: Voice and face emotions contradict each other",
+        summary: "Voice sounds Happy (61%), but the face looks Sad (64%). This sharp contradiction happens when voice or video is swapped.",
+        voice_face_analysis: "Sharp contradiction: Hearing happiness while seeing sadness does not happen in sincere human speech.",
+        sarcasm_analysis: "Sarcasm is low (12%), confirming this clash is an AI flaw, not a joke.",
+        technical_rationale: "Deepfake tools usually replace voice or face separately, leaving an obvious emotional seam.",
+      },
       served_by: demoServedBy,
     }),
     () => ({
@@ -80,6 +89,15 @@
       emotion_mismatch: { neutral: 0.04, happy: 0.03, sad: 0.02, angry: 0.03, fear: 0.02, disgust: 0.02 },
       p_sarcasm: 0.09,
       transcript: "The clip is stable and the emotions line up across modalities.",
+      forensic_interpretation: {
+        state_id: "STATE_REAL_HARMONY",
+        state_tag: "REAL · NATURAL MATCH",
+        headline: "Looks Real: Voice and face emotions match naturally",
+        summary: "Voice tone and facial expression agree on Neutral. What you hear and see align naturally.",
+        voice_face_analysis: "Both voice and face show Neutral (74% / 77%) with no emotional clash.",
+        sarcasm_analysis: "No sarcasm detected (9%). Delivery is sincere and straightforward.",
+        technical_rationale: "Voice and mouth timing are in sync with no signs of AI editing.",
+      },
       served_by: demoServedBy,
     }),
     () => ({
@@ -99,6 +117,15 @@
       emotion_mismatch: { neutral: 0.05, happy: 0.04, sad: 0.03, angry: 0.03, fear: 0.03, disgust: 0.02 },
       p_sarcasm: 0.81,
       transcript: "Sure, that was the best surprise ever.",
+      forensic_interpretation: {
+        state_id: "STATE_REAL_DEADPAN_IRONY",
+        state_tag: "REAL · DEADPAN HUMOR",
+        headline: "Looks Real: Deadpan joke (serious face with sarcastic voice)",
+        summary: "The speaker is using sarcasm (81%) with a calm poker face. This is dry deadpan humor, not an AI fake.",
+        voice_face_analysis: "Voice and face stay subdued (57% / 61% Neutral) while delivering an ironic comment.",
+        sarcasm_analysis: "High sarcasm (81%). The model recognized dry humor, avoiding a false deepfake alert.",
+        technical_rationale: "The irony filter accounts for dry humor so intentional poker faces are not flagged as fakes.",
+      },
       served_by: demoServedBy,
     }),
   ];
@@ -610,7 +637,13 @@
   function pickFile(file) {
     if (!file) return;
     if (!ALLOWED.some((ext) => file.name.toLowerCase().endsWith(ext))) {
-      return showError(`Unsupported file. Use ${ALLOWED.join(", ")}.`);
+      return showError(`Unsupported file format. Please use ${ALLOWED.join(", ")}.`);
+    }
+    if (file.size > 500 * 1024 * 1024) {
+      return showError(`Video file exceeds 500 MB limit (${fmtSize(file.size)}). Please select a smaller clip.`);
+    }
+    if (file.size < 1000) {
+      return showError("File is empty or corrupted (< 1 KB). Please select a valid video file.");
     }
     hideError();
 
@@ -1419,9 +1452,98 @@
     navigate(routePath("/results"));
   }
 
+  // ── Diagnostic Error Card for Input Modality / Quality Failures ───────────
+  function showDiagnosticError(rawErr) {
+    stopAnalyzingHUD();
+    const v = document.getElementById("analyzing-video");
+    if (v) { v.pause(); }
+
+    let errObj = {};
+    if (rawErr && typeof rawErr === "object") {
+      if (rawErr.detail && typeof rawErr.detail === "object") {
+        errObj = rawErr.detail;
+      } else {
+        errObj = rawErr;
+      }
+    } else if (typeof rawErr === "string") {
+      try {
+        errObj = JSON.parse(rawErr);
+      } catch (e) {
+        errObj = { message: rawErr };
+      }
+    }
+
+    const statusCard = document.querySelector(".analyzing-status-card");
+    const errorCard = document.getElementById("analyzing-error-card");
+    if (statusCard) statusCard.hidden = true;
+    if (errorCard) errorCard.hidden = false;
+
+    const badgeEl = document.getElementById("diag-error-badge");
+    const titleEl = document.getElementById("diag-error-title");
+    const msgEl = document.getElementById("diag-error-message");
+    const listEl = document.getElementById("diag-suggestions-list");
+
+    const badgeText = errObj.code ? `MODALITY ERROR: ${errObj.code}` : "INPUT VERIFICATION FAILED";
+    const titleText = errObj.title || "Input Verification Failed";
+    const msgText = errObj.message || "DeepSentinel was unable to inspect this clip because essential multimodal requirements were not met.";
+
+    let suggestions = [];
+    if (Array.isArray(errObj.suggestions) && errObj.suggestions.length > 0) {
+      suggestions = errObj.suggestions;
+    } else if (errObj.suggestion) {
+      suggestions = [errObj.suggestion];
+    } else {
+      suggestions = [
+        "Verify that the uploaded video contains an audible speaking voice.",
+        "Ensure the face is clearly visible, well-lit, and not obstructed by a mask or heavy blur.",
+        "Use the timeline selector to choose an active segment where the subject speaks."
+      ];
+    }
+
+    if (badgeEl) badgeEl.textContent = badgeText;
+    if (titleEl) titleEl.textContent = titleText;
+    if (msgEl) msgEl.textContent = msgText;
+
+    if (listEl) {
+      listEl.innerHTML = suggestions.map((s) => `
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>${s}</span>
+        </li>
+      `).join("");
+    }
+
+    const reselectBtn = document.getElementById("diag-reselect-btn");
+    const restartBtn = document.getElementById("diag-restart-btn");
+
+    if (reselectBtn) {
+      reselectBtn.onclick = () => {
+        if (errorCard) errorCard.hidden = true;
+        if (statusCard) statusCard.hidden = false;
+        navigate(routePath("/upload"));
+      };
+    }
+
+    if (restartBtn) {
+      restartBtn.onclick = () => {
+        if (errorCard) errorCard.hidden = true;
+        if (statusCard) statusCard.hidden = false;
+        resetUpload();
+        navigate(routePath("/upload"));
+      };
+    }
+  }
+
   // ── Live Stream Execution Tied to Real Backend Architecture ────────────────
   async function runAnalysis() {
     if (!selectedFile) return;
+
+    // Reset error card visibility
+    const errCard = document.getElementById("analyzing-error-card");
+    const statusCard = document.querySelector(".analyzing-status-card");
+    if (errCard) errCard.hidden = true;
+    if (statusCard) statusCard.hidden = false;
+
     const fileEl = document.getElementById("analyzing-file");
     if (fileEl) {
       fileEl.replaceChildren();
@@ -1503,11 +1625,12 @@
       // Connect to real-time Server-Sent Event stream
       const res = await fetch("/detect/stream", { method: "POST", body: form });
       if (!res.ok) {
-        // Fallback to standard /detect endpoint if streaming fails
+        // Fallback to standard /detect endpoint if streaming endpoint is unavailable
         const fbRes = await fetch("/detect", { method: "POST", body: form });
         if (!fbRes.ok) {
           const err = await fbRes.json().catch(() => ({}));
-          throw new Error(err.detail || `Server error (${fbRes.status})`);
+          showDiagnosticError(err.detail || `Server error (${fbRes.status})`);
+          return;
         }
         lastResult = await fbRes.json();
         if (lastResult?.transcript) streamLiveTranscript(lastResult.transcript);
@@ -1541,7 +1664,10 @@
           if (!line.startsWith("data:")) continue;
           try {
             const ev = JSON.parse(line.slice(5).trim());
-            if (ev.error) throw new Error(ev.error);
+            if (ev.error) {
+              showDiagnosticError(ev.error);
+              return;
+            }
 
             if (typeof ev.step === "number") {
               markStep(ev.step, ev.status);
@@ -1599,9 +1725,7 @@
         throw new Error("No result returned from model detection.");
       }
     } catch (err) {
-      stopAnalyzingHUD();
-      navigate(routePath("/upload"));
-      showError(err.message || "Analysis failed.");
+      showDiagnosticError(err);
     }
   }
 
@@ -1638,7 +1762,7 @@
     bannerEl.innerHTML = `
       <div class="dom-icon-box">${svg}</div>
       <div class="dom-text-box">
-        <span class="dom-tag">Dominant emotion</span>
+        <span class="dom-tag">Strongest feeling</span>
         <span class="dom-name">${label}</span>
       </div>
     `;
@@ -1691,12 +1815,12 @@
 
     if (isFake) {
       document.getElementById("verdict-sub").textContent = emotionsMatch
-        ? "Multimodal synthesis artifacts detected despite similar emotional tone."
-        : "The voice and the face show conflicting emotional cues.";
+        ? "The face or voice shows signs of AI editing even though the general feelings seem similar."
+        : "The feelings in the voice and the face contradict each other.";
     } else {
       document.getElementById("verdict-sub").textContent = emotionsMatch
-        ? "The voice and the face express consistent emotion."
-        : "Multimodal emotional cues are consistent with authentic delivery.";
+        ? "The voice and facial expressions match naturally."
+        : "The voice and face show normal, natural human variation.";
     }
     countUp(document.getElementById("verdict-pct"), pct);
 
@@ -1714,18 +1838,19 @@
     let sentence;
     if (!isFake && !sarcastic) {
       sentence = emotionsMatch
-        ? `This looks ${auth} and sincerely delivered — the voice and the face agree.`
-        : `This looks ${auth} — natural multimodal dynamics align with authentic human expression.`;
+        ? `This clip looks ${auth} and sincere — the speaker's voice and face agree.`
+        : `This clip looks ${auth} — the emotions show natural, authentic human variation.`;
     } else if (!isFake && sarcastic) {
-      sentence = `This looks ${auth}, but it is delivered <b>sarcastically</b> — the words may not be meant literally.`;
+      sentence = `This clip looks ${auth}, but it is delivered <b>sarcastically</b> (meant as a joke or dry wit).`;
     } else if (isFake && !sarcastic) {
       sentence = emotionsMatch
-        ? `This looks ${auth} — synthetic facial or acoustic generation cues detected despite matching emotion.`
-        : `This looks ${auth} — the emotion in the voice and the face do not line up.`;
+        ? `This clip looks ${auth} — AI editing flaws detected around the face or voice.`
+        : `This clip looks ${auth} — the feelings in the voice and on the face clash.`;
     } else {
-      sentence = `This looks ${auth}, with sharp emotional divergence and sarcastic speech cues.`;
+      sentence = `This clip looks ${auth}, with clashing emotions and robotic speech patterns.`;
     }
-    document.getElementById("interpret").innerHTML = sentence;
+    const interpretEl = document.getElementById("interpret");
+    if (interpretEl) interpretEl.innerHTML = sentence;
     const marker = document.getElementById("sarc-marker");
     document.getElementById("sarc-val").textContent = Math.round(pSarc * 100) + "%";
     marker.style.left = "0%";
@@ -1737,13 +1862,13 @@
     document.getElementById("dom-title").textContent = `Biggest emotion gap · ${EMO_LABEL[domKey]}`;
     document.getElementById("gap-val").textContent = Math.round(domVal * 100) + "%";
     if (isFake) {
-      const sig = domVal > 0.5 ? "high" : domVal > 0.3 ? "moderate" : "low";
+      const sig = domVal > 0.5 ? "strong" : domVal > 0.3 ? "moderate" : "slight";
       document.getElementById("dom-desc").textContent =
-        `the voice reads ${emoA}, the face reads ${emoB} · ${sig} fake signal`;
+        `voice sounds ${emoA}, but face looks ${emoB} · ${sig} sign of AI editing`;
     } else {
       document.getElementById("dom-desc").textContent = emotionsMatch
-        ? `the voice and face both read ${emoA} · consistent across modalities`
-        : `the voice reads ${emoA}, the face reads ${emoB} · localized variance within authentic range`;
+        ? `voice and face both express ${emoA} · consistent across both`
+        : `voice sounds ${emoA} while face looks ${emoB} · normal human variation`;
     }
     const domBar = document.getElementById("dom-bar");
     domBar.style.width = "0%";
@@ -1760,6 +1885,29 @@
     distRows(document.getElementById("head-a"), r.audio_text_emotion?.distribution || {});
     distRows(document.getElementById("head-b"), r.visual_emotion?.distribution || {});
     deltaRows(document.getElementById("delta-list"), delta);
+
+    // ── Forensic Interpretation Multi-Tier Card ──────────────────────────────
+    const fiCard = document.getElementById("forensic-interpretation-card");
+    const fi = r.forensic_interpretation;
+    if (fiCard && fi) {
+      fiCard.hidden = false;
+      fiCard.classList.toggle("is-fake", isFake);
+      fiCard.classList.toggle("is-real", !isFake);
+
+      const stateTagEl = document.getElementById("forensic-state-tag");
+      const headlineEl = document.getElementById("forensic-headline");
+      const summaryEl = document.getElementById("forensic-summary");
+      const vfEl = document.getElementById("forensic-voice-face");
+      const sarcEl = document.getElementById("forensic-sarcasm");
+      const ratEl = document.getElementById("forensic-rationale");
+
+      if (stateTagEl) stateTagEl.textContent = fi.state_tag ? fi.state_tag : (isFake ? "LIKELY DEEPFAKE" : "LIKELY AUTHENTIC");
+      if (headlineEl) headlineEl.textContent = fi.headline || "Analysis Complete";
+      if (summaryEl) summaryEl.textContent = fi.summary || "";
+      if (vfEl) vfEl.textContent = fi.voice_face_analysis || "Voice and face expressions evaluated.";
+      if (sarcEl) sarcEl.textContent = fi.sarcasm_analysis || "Tone of voice and spoken words checked for sarcasm.";
+      if (ratEl) ratEl.textContent = fi.technical_rationale || fi.forensic_rationale || "DeepSentinel found no inconsistencies.";
+    }
 
     const sb = r.served_by || {};
     document.getElementById("served-by").textContent =

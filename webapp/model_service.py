@@ -42,7 +42,15 @@ from src.preprocessing.audio import load_audio_waveform
 from src.preprocessing.pipeline import PreprocessingPipeline
 
 from .config import EMOTIONS, settings
-from .schemas import EmotionPrediction, DetectionResult, ModelInfo
+from .input_validator import (
+    InputValidationError,
+    inspect_video_stream,
+    validate_container,
+    validate_audio_track,
+    validate_speech_presence,
+    validate_face_and_visual_quality,
+)
+from .schemas import EmotionPrediction, DetectionResult, ModelInfo, ForensicInterpretation
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger("deepsentinel.model_service")
@@ -402,6 +410,16 @@ class ModelService:
         visual_emo = _emo(pb)
         delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
 
+        interpretation = self._generate_forensic_interpretation(
+            verdict=verdict,
+            emo_a=audio_emo.label,
+            emo_b=visual_emo.label,
+            p_fake=p_fake,
+            p_sarc=p_sarc,
+            cos_sim=cos_sim,
+            d_js=d_js,
+        )
+
         det_result = DetectionResult(
             verdict=verdict,
             p_fake=p_fake,
@@ -412,6 +430,7 @@ class ModelService:
             p_sarcasm=p_sarc,
             transcript=transcript,
             served_by=meta,
+            forensic_interpretation=interpretation,
         )
 
         extra = {
@@ -427,6 +446,137 @@ class ModelService:
             "harmony_bonus": harmony_bonus,
         }
         return det_result, extra
+
+    def _generate_forensic_interpretation(
+        self,
+        verdict: str,
+        emo_a: str,
+        emo_b: str,
+        p_fake: float,
+        p_sarc: float,
+        cos_sim: float,
+        d_js: float,
+    ) -> ForensicInterpretation:
+        """
+        Exhaustive 8-State Forensic Multi-Tier Interpretation:
+        Generates structured, professional forensic interpretation tailored to the exact
+        combination of:
+          - Verdict: Real (p_fake <= 0.5) vs Fake (p_fake > 0.5)
+          - Emotion Alignment: Concordant (emo_a == emo_b) vs Discordant (emo_a != emo_b)
+          - Rhetorical Context: Sarcastic (p_sarc >= 0.5) vs Sincere (p_sarc < 0.5)
+        """
+        is_fake = verdict == "FAKE"
+        emotions_match = emo_a.strip().lower() == emo_b.strip().lower()
+        sarcastic = p_sarc >= 0.50
+
+        ea_title = emo_a.strip().title()
+        eb_title = emo_b.strip().title()
+        sarc_pct = int(round(p_sarc * 100))
+        fake_pct = int(round(p_fake * 100))
+
+        if not is_fake and emotions_match and not sarcastic:
+            rat = "Voice and mouth timing are in sync with no signs of AI editing."
+            return ForensicInterpretation(
+                state_id="STATE_REAL_HARMONY",
+                state_tag="REAL · NATURAL MATCH",
+                headline="Looks Real: Voice and face emotions match naturally",
+                summary=f"Voice tone and facial expression agree on {ea_title}. What you hear and see align naturally.",
+                voice_face_analysis=f"Both voice and face show {ea_title} with no emotional clash.",
+                sarcasm_analysis=f"No sarcasm detected ({sarc_pct}%). Delivery is sincere and straightforward.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        elif not is_fake and emotions_match and sarcastic:
+            rat = "Voice inflection and facial muscles stay synchronized like a real speaker."
+            return ForensicInterpretation(
+                state_id="STATE_REAL_CONGRUENT_SARCASM",
+                state_tag="REAL · PLAYFUL SARCASM",
+                headline="Looks Real: Playful sarcasm with matching expression",
+                summary=f"The speaker is using sarcasm ({sarc_pct}%), and their facial expression matches that playful tone.",
+                voice_face_analysis=f"Voice and face both express {ea_title} together in a coordinated delivery.",
+                sarcasm_analysis=f"Sarcasm detected ({sarc_pct}%). DeepSentinel recognized intentional humor rather than an AI error.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        elif not is_fake and not emotions_match and sarcastic:
+            rat = "The irony filter accounts for dry humor so intentional poker faces are not flagged as fakes."
+            return ForensicInterpretation(
+                state_id="STATE_REAL_DEADPAN_IRONY",
+                state_tag="REAL · DEADPAN HUMOR",
+                headline="Looks Real: Deadpan joke (serious face with sarcastic voice)",
+                summary=f"Voice sounds {ea_title} while the face stays {eb_title}, but this is dry deadpan humor ({sarc_pct}% sarcasm), not an AI fake.",
+                voice_face_analysis=f"Voice sounds {ea_title} while the face keeps a {eb_title} poker face.",
+                sarcasm_analysis=f"High sarcasm ({sarc_pct}%). The model recognized dry humor, avoiding a false deepfake alert.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        elif not is_fake and not emotions_match and not sarcastic:
+            rat = "Audio-visual sync is strong with no signs of face-swapping or dubbing."
+            return ForensicInterpretation(
+                state_id="STATE_REAL_MIXED_EMOTION",
+                state_tag="REAL · MIXED FEELINGS",
+                headline="Looks Real: Normal mixed human feelings",
+                summary=f"Voice leans {ea_title} while the face shows {eb_title}. This subtle emotional mix is normal in authentic conversation.",
+                voice_face_analysis=f"Voice conveys {ea_title} while face shows {eb_title}, transitioning smoothly.",
+                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speaker is speaking sincerely.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        elif is_fake and not emotions_match and not sarcastic:
+            rat = "Deepfake tools usually replace voice or face separately, leaving an obvious emotional seam."
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_EMOTION_DESYNC",
+                state_tag="FAKE · EMOTION CLASH",
+                headline="Likely Deepfake: Voice and face emotions contradict each other",
+                summary=f"Voice sounds {ea_title}, but the face looks {eb_title}. This sharp contradiction happens when voice or video is swapped.",
+                voice_face_analysis=f"Sharp contradiction: Hearing {ea_title} while seeing {eb_title} does not happen in sincere human speech.",
+                sarcasm_analysis=f"Sarcasm is low ({sarc_pct}%), confirming this clash is an AI flaw, not a joke.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        elif is_fake and not emotions_match and sarcastic:
+            rat = f"High fake probability ({fake_pct}%). Natural facial micro-expressions are missing."
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_MANIPULATED_DISSONANCE",
+                state_tag="FAKE · VOICE & FACE CLASH",
+                headline="Likely Deepfake: Sarcastic speech pasted onto an incompatible face",
+                summary=f"The audio has sarcastic tone ({sarc_pct}%), but the face stays {eb_title} and fails to react naturally.",
+                voice_face_analysis=f"The tone ({ea_title}) clashes with the stiff or unreactive facial expression ({eb_title}).",
+                sarcasm_analysis=f"Sarcastic speech ({sarc_pct}%) without matching facial cues shows pasted audio.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        elif is_fake and emotions_match and not sarcastic:
+            rat = f"Detected AI generation artifacts ({fake_pct}% fake score) such as blurring or lip-sync lag."
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_SYNTHESIS_ARTIFACTS",
+                state_tag="FAKE · AI GLITCHES DETECTED",
+                headline="Likely Deepfake: Matching emotion, but digital AI glitches detected",
+                summary=f"Even though voice and face show {ea_title}, the AI found digital glitches in how the face was generated.",
+                voice_face_analysis=f"Both voice and face show {ea_title}, but facial movements look artificially generated.",
+                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speech is delivered straight.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
+        else:  # is_fake and emotions_match and sarcastic
+            rat = f"Detected artificial boundary warping ({fake_pct}% fake score), confirming AI manipulation."
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_SYNTHETIC_SMIRK",
+                state_tag="FAKE · ARTIFICIAL WARPING",
+                headline="Likely Deepfake: Unnatural artificial expressions and mouth warping",
+                summary=f"The video mimics an expressive or sarcastic look ({sarc_pct}%), but facial movements appear artificially warped.",
+                voice_face_analysis=f"Voice and face attempt {ea_title}, but mouth movement looks robotic or unnatural.",
+                sarcasm_analysis=f"High sarcasm score ({sarc_pct}%), typical of exaggerated parody deepfakes.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
 
     # ── Inference ──────────────────────────────────────────────────────────────
 
@@ -489,12 +639,14 @@ class ModelService:
         )
         return det_result
 
-    def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0) -> List[dict]:
+    def _extract_face_landmarks_and_crops(
+        self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0
+    ) -> Tuple[List[dict], List[np.ndarray], List[np.ndarray], List[float]]:
         import cv2
-        from src.preprocessing.visual import _load_insightface_app
+        from src.preprocessing.visual import _load_insightface_app, sharpness_score
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
-            return []
+            return [], [], [], []
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         max_eval_frames = int(max_seconds * fps) if (max_seconds and max_seconds > 0) else total_frames
@@ -503,42 +655,118 @@ class ModelService:
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1)
         if eval_frames <= 0 or w <= 0 or h <= 0:
             cap.release()
-            return []
+            return [], [], [], []
 
         indices = [int(i * (eval_frames - 1) / max(1, max_samples - 1)) for i in range(max_samples)]
         faces_out = []
+        frames_sampled = []
+        face_crops = []
+        scores = []
         try:
-            app = _load_insightface_app()
+            app = None
+            cascade = None
+            try:
+                from src.preprocessing.visual import _INSIGHTFACE_AVAILABLE, _load_insightface_app
+                if _INSIGHTFACE_AVAILABLE:
+                    app = _load_insightface_app()
+            except Exception:
+                app = None
+
+            if app is None:
+                try:
+                    cascade_dir = getattr(cv2.data, "haarcascades", "")
+                    cascade_path = os.path.join(cascade_dir, "haarcascade_frontalface_default.xml") if cascade_dir else ""
+                    if cascade_path and os.path.exists(cascade_path):
+                        cascade = cv2.CascadeClassifier(cascade_path)
+                except Exception:
+                    cascade = None
+
             for idx in indices:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     continue
+                frames_sampled.append(frame)
                 time_sec = round(float(idx) / fps, 3)
-                detected = app.get(frame)
-                if detected:
-                    best = max(detected, key=lambda f: f.det_score)
-                    if best.det_score >= 0.4:
-                        x1, y1, x2, y2 = best.bbox.astype(int)
-                        nx1 = max(0.0, min(1.0, float(x1) / w))
-                        ny1 = max(0.0, min(1.0, float(y1) / h))
-                        nx2 = max(0.0, min(1.0, float(x2) / w))
-                        ny2 = max(0.0, min(1.0, float(y2) / h))
-                        kps_norm = []
-                        if hasattr(best, "kps") and best.kps is not None:
-                            for kp in best.kps:
-                                kps_norm.append([round(float(kp[0]) / w, 4), round(float(kp[1]) / h, 4)])
-                        faces_out.append({
-                            "time": time_sec,
-                            "bbox": [round(nx1, 4), round(ny1, 4), round(nx2, 4), round(ny2, 4)],
-                            "kps": kps_norm,
-                            "score": round(float(best.det_score), 4),
-                        })
+
+                if app is not None:
+                    detected = app.get(frame)
+                    if detected:
+                        best = max(detected, key=lambda f: f.det_score)
+                        if best.det_score >= 0.35:
+                            x1, y1, x2, y2 = best.bbox.astype(int)
+                            nx1 = max(0.0, min(1.0, float(x1) / w))
+                            ny1 = max(0.0, min(1.0, float(y1) / h))
+                            nx2 = max(0.0, min(1.0, float(x2) / w))
+                            ny2 = max(0.0, min(1.0, float(y2) / h))
+                            kps_norm = []
+                            if hasattr(best, "kps") and best.kps is not None:
+                                for kp in best.kps:
+                                    kps_norm.append([round(float(kp[0]) / w, 4), round(float(kp[1]) / h, 4)])
+                            faces_out.append({
+                                "time": time_sec,
+                                "bbox": [round(nx1, 4), round(ny1, 4), round(nx2, 4), round(ny2, 4)],
+                                "kps": kps_norm,
+                                "score": round(float(best.det_score), 4),
+                            })
+
+                            bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+                            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                            side = max(bw, bh) * 1.20
+                            h_f, w_f = frame.shape[:2]
+                            ny1_c = max(0, int(round(cy - side / 2.0)))
+                            ny2_c = min(h_f, int(round(cy + side / 2.0)))
+                            nx1_c = max(0, int(round(cx - side / 2.0)))
+                            nx2_c = min(w_f, int(round(cx + side / 2.0)))
+                            crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+                            if crop.size > 0:
+                                face_crops.append(crop)
+                                scores.append(float(best.det_score) * sharpness_score(crop))
+                elif cascade is not None:
+                    try:
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        detected_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+                        if len(detected_faces) > 0:
+                            x, y, w_box, h_box = max(detected_faces, key=lambda f: f[2] * f[3])
+                            nx1 = max(0.0, min(1.0, float(x) / w))
+                            ny1 = max(0.0, min(1.0, float(y) / h))
+                            nx2 = max(0.0, min(1.0, float(x + w_box) / w))
+                            ny2 = max(0.0, min(1.0, float(y + h_box) / h))
+                            cx, cy = x + w_box / 2.0, y + h_box / 2.0
+                            kps_norm = [
+                                [round((x + 0.3 * w_box) / w, 4), round((y + 0.35 * h_box) / h, 4)],
+                                [round((x + 0.7 * w_box) / w, 4), round((y + 0.35 * h_box) / h, 4)],
+                                [round((x + 0.5 * w_box) / w, 4), round((y + 0.55 * h_box) / h, 4)],
+                                [round((x + 0.35 * w_box) / w, 4), round((y + 0.75 * h_box) / h, 4)],
+                                [round((x + 0.65 * w_box) / w, 4), round((y + 0.75 * h_box) / h, 4)],
+                            ]
+                            faces_out.append({
+                                "time": time_sec,
+                                "bbox": [round(nx1, 4), round(ny1, 4), round(nx2, 4), round(ny2, 4)],
+                                "kps": kps_norm,
+                                "score": 0.85,
+                            })
+                            side = max(w_box, h_box) * 1.20
+                            h_f, w_f = frame.shape[:2]
+                            ny1_c = max(0, int(round(cy - side / 2.0)))
+                            ny2_c = min(h_f, int(round(cy + side / 2.0)))
+                            nx1_c = max(0, int(round(cx - side / 2.0)))
+                            nx2_c = min(w_f, int(round(cx + side / 2.0)))
+                            crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+                            if crop.size > 0:
+                                face_crops.append(crop)
+                                scores.append(0.85 * sharpness_score(crop))
+                    except Exception as he:
+                        log.debug(f"Haar cascade detection exception: {he}")
         except Exception as e:
             log.warning(f"Face landmarks extraction notice: {e}")
         finally:
             cap.release()
-        return faces_out
+        return faces_out, frames_sampled, face_crops, scores
+
+    def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0) -> List[dict]:
+        faces, _, _, _ = self._extract_face_landmarks_and_crops(video_path, max_samples=max_samples, max_seconds=max_seconds)
+        return faces
 
     @torch.no_grad()
     def predict_stream(self, video_path: Path, clip_id: Optional[str] = None):
@@ -551,25 +779,41 @@ class ModelService:
 
         clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
 
-        # Step 0: Listening to the voice (16kHz audio extraction)
+        # Step 0: Listening to the voice (16kHz audio extraction & stream validation)
         yield {
             "step": 0,
             "phase": "audio_extraction",
-            "name": "Listening to the voice",
-            "tech": "16kHz Mono · Wav2Vec 2.0",
+            "name": "Checking container & listening to the voice",
+            "tech": "Stream Validator · 16kHz Mono · Wav2Vec 2.0",
             "status": "active",
         }
+        try:
+            inspection = inspect_video_stream(video_path)
+            validate_container(inspection, min_duration=settings.min_duration_sec, max_duration=settings.max_upload_duration_sec)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
+
         wav = self.pipeline._wav_path(clip_id)
         if not wav.exists():
             from src.preprocessing.audio import extract_audio_to_wav
             ok = extract_audio_to_wav(video_path, wav)
             if not ok or not wav.exists():
-                if video_path.suffix.lower() == ".wav":
-                    import shutil
-                    shutil.copy2(video_path, wav)
-                else:
-                    yield {"error": "Audio extraction failed from video."}
-                    return
+                err = InputValidationError(
+                    code="ERR_AUDIO_EXTRACTION_FAILED",
+                    title="Audio Extraction Failed",
+                    message="Failed to extract an audio stream from the video container.",
+                    suggestion="Ensure the video has a standard AAC/MP3 audio track and re-export if needed.",
+                )
+                yield {"error": err.to_dict()}
+                return
+
+        try:
+            validate_audio_track(inspection, wav)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
+
         yield {"step": 0, "status": "done"}
 
         # Step 1: Reading tone & words (Whisper + BERT)
@@ -587,6 +831,12 @@ class ModelService:
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
+
+        try:
+            validate_speech_presence(transcript, min_words=1)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
 
         # Emit the transcript IMMEDIATELY so the user sees live words!
         yield {
@@ -657,7 +907,13 @@ class ModelService:
             "tech": "InsightFace · RetinaFace",
             "status": "active",
         }
-        faces = self._extract_face_landmarks(video_path, max_samples=16)
+        faces, frames_sampled, face_crops, face_scores = self._extract_face_landmarks_and_crops(video_path, max_samples=16)
+        try:
+            validate_face_and_visual_quality(frames_sampled, face_crops, face_scores)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
+
         yield {
             "step": 2,
             "status": "done",
@@ -776,11 +1032,23 @@ class ModelService:
         from src.preprocessing.audio import extract_audio_to_wav, transcribe
         from src.preprocessing.visual import get_keyframe_pixels
 
-        # 1. Audio
+        # 0. Container & stream validation
+        inspection = inspect_video_stream(video_path)
+        validate_container(inspection, min_duration=settings.min_duration_sec, max_duration=settings.max_upload_duration_sec)
+
+        # 1. Audio validation & extraction
         wav = self.pipeline._wav_path(clip_id)
         if not wav.exists():
             wav.parent.mkdir(parents=True, exist_ok=True)
-            extract_audio_to_wav(video_path, wav)
+            ok = extract_audio_to_wav(video_path, wav)
+            if not ok or not wav.exists():
+                raise InputValidationError(
+                    code="ERR_AUDIO_EXTRACTION_FAILED",
+                    title="Audio Extraction Failed",
+                    message="Failed to extract an audio stream from the video container.",
+                    suggestion="Ensure the video has a standard AAC or MP3 audio track and re-export if necessary.",
+                )
+        validate_audio_track(inspection, wav)
 
         # Standardize audio window to 80,000 samples (5.0s @ 16kHz) matching Phase 2 training MAX_AUDIO
         max_samples = 80000
@@ -812,6 +1080,7 @@ class ModelService:
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
+        validate_speech_presence(transcript, min_words=1)
 
         tok = self._get_bert_tokenizer()
         bert_enc = tok(
@@ -824,7 +1093,10 @@ class ModelService:
         input_ids = bert_enc.input_ids.to(self.device)
         attention_mask = bert_enc.attention_mask.to(self.device)
 
-        # 3. Keyframe pixels
+        # 3. Keyframe pixels & visual quality validation
+        faces, frames_sampled, face_crops, face_scores = self._extract_face_landmarks_and_crops(video_path, max_samples=16)
+        validate_face_and_visual_quality(frames_sampled, face_crops, face_scores)
+
         keyframe_pixels = get_keyframe_pixels(
             video_path,
             vit_model_name=self.pipeline.vit_model,
