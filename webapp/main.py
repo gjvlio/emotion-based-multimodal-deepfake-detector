@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
+from .input_validator import InputValidationError
 from .schemas import DetectionResult, HealthResponse, ModelInfo
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -134,37 +135,60 @@ def model_reload():
 def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]) -> Path:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
-        raise HTTPException(
-            status_code=415,
-            detail=f"Unsupported file type '{suffix}'. Allowed: {sorted(ALLOWED_SUFFIXES)}",
+        raise InputValidationError(
+            code="ERR_UNSUPPORTED_FORMAT",
+            title="Unsupported Video Format",
+            message=f"The file extension '{suffix}' is not supported.",
+            suggestion=f"Please upload a supported video format: {', '.join(sorted(ALLOWED_SUFFIXES))}.",
+            details={"suffix": suffix},
         )
 
-    # Persist upload (no auto-delete — user manages webapp/uploads/).
+    # Persist upload
     dest = settings.upload_dir / file.filename
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # Pre-check overall video duration (limit to max_upload_duration_sec, default 10 minutes)
+    file_bytes = dest.stat().st_size
+    if file_bytes < 1000:
+        raise InputValidationError(
+            code="ERR_EMPTY_FILE",
+            title="Empty or Corrupted File",
+            message="The uploaded video is empty or smaller than 1 KB.",
+            suggestion="Please check that the video file is valid and re-export if needed.",
+            details={"bytes": file_bytes},
+        )
+    if file_bytes > 500 * 1024 * 1024:
+        raise InputValidationError(
+            code="ERR_FILE_TOO_LARGE",
+            title="File Exceeds 500MB Limit",
+            message=f"The uploaded video ({file_bytes / (1024 * 1024):.1f} MB) exceeds the 500 MB limit.",
+            suggestion="Please compress the video or select a smaller clip under 500 MB.",
+            details={"bytes": file_bytes, "max_bytes": 500 * 1024 * 1024},
+        )
+
+    # Pre-check overall video duration
     total_dur = None
-    if suffix in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
-        try:
-            import cv2
-            cap = cv2.VideoCapture(str(dest))
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-                total_dur = frame_count / fps if fps > 0 else 0
-                cap.release()
-                if total_dur > settings.max_upload_duration_sec:
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"Video exceeds the 10-minute maximum limit ({total_dur / 60.0:.1f} min). Please upload a video under 10 minutes.",
-                    )
-        except HTTPException:
-            raise
-        except Exception as e:
-            log.debug(f"Duration inspection bypassed: {e}")
+    try:
+        import cv2
+        cap = cv2.VideoCapture(str(dest))
+        if cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+            total_dur = frame_count / fps if fps > 0 else 0
+            cap.release()
+            if total_dur > settings.max_upload_duration_sec:
+                raise InputValidationError(
+                    code="ERR_DURATION_TOO_LONG",
+                    title="Video Exceeds Time Limit",
+                    message=f"Video duration ({total_dur / 60.0:.1f} min) exceeds the 10-minute maximum limit.",
+                    suggestion="Please upload or trim a video under 10 minutes.",
+                    details={"duration_sec": total_dur, "max_allowed": settings.max_upload_duration_sec},
+                )
+    except InputValidationError:
+        raise
+    except Exception as e:
+        log.debug(f"Duration inspection bypassed: {e}")
 
     # Clip extraction / trimming logic
     clip_to_eval = dest
@@ -176,16 +200,31 @@ def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]
         if t_end is None:
             t_end = t_start + settings.max_duration_sec
 
+        if t_end <= t_start:
+            raise InputValidationError(
+                code="ERR_INVALID_CROP_RANGE",
+                title="Invalid Selection Range",
+                message="Start time must be before end time.",
+                suggestion="Please drag the timeline handles to select a valid forward time window.",
+                details={"start_time": t_start, "end_time": t_end},
+            )
+
         slice_dur = t_end - t_start
         if slice_dur < settings.min_duration_sec - 0.2:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Selected clip duration is too short ({slice_dur:.1f}s). Evaluation clip must be at least {settings.min_duration_sec:.1f} seconds.",
+            raise InputValidationError(
+                code="ERR_CROP_TOO_SHORT",
+                title="Selected Clip Is Too Short",
+                message=f"Selected clip ({slice_dur:.1f}s) is shorter than the minimum {settings.min_duration_sec:.1f}s required.",
+                suggestion=f"Please drag the timeline scrubber to select at least {settings.min_duration_sec:.0f} seconds.",
+                details={"duration": slice_dur, "min_required": settings.min_duration_sec},
             )
         if slice_dur > settings.max_duration_sec + 0.5:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Selected clip duration is too long ({slice_dur:.1f}s). Evaluation clip must be at most {settings.max_duration_sec:.1f} seconds.",
+            raise InputValidationError(
+                code="ERR_CROP_TOO_LONG",
+                title="Selected Clip Is Too Long",
+                message=f"Selected clip ({slice_dur:.1f}s) exceeds the maximum {settings.max_duration_sec:.1f}s allowed.",
+                suggestion=f"Please drag the timeline scrubber to select at most {settings.max_duration_sec:.0f} seconds.",
+                details={"duration": slice_dur, "max_allowed": settings.max_duration_sec},
             )
 
         trimmed_name = f"trim_{int(t_start * 100)}_{int(t_end * 100)}_{file.filename}"
@@ -225,9 +264,11 @@ async def detect(
             status_code=503,
             detail="Live detection needs the ML stack (torch/transformers). Use Demo mode (/demo) for walkthrough.",
         )
-    clip_to_eval = _prepare_clip(file, start_time, end_time)
     try:
+        clip_to_eval = _prepare_clip(file, start_time, end_time)
         return svc.predict(clip_to_eval)
+    except InputValidationError as e:
+        raise HTTPException(status_code=422, detail=e.to_dict())
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
@@ -249,15 +290,39 @@ async def detect_stream(
             status_code=503,
             detail="Live detection needs the ML stack (torch/transformers).",
         )
-    clip_to_eval = _prepare_clip(file, start_time, end_time)
+
+    try:
+        clip_to_eval = _prepare_clip(file, start_time, end_time)
+    except InputValidationError as e:
+        def err_generator():
+            yield f"data: {json.dumps({'error': e.to_dict()})}\n\n"
+        return StreamingResponse(err_generator(), media_type="text/event-stream")
+    except Exception as e:
+        def err_generator():
+            err_dict = {
+                "code": "ERR_PREPARE_CLIP_FAILED",
+                "title": "Clip Preparation Error",
+                "message": str(e),
+                "suggestion": "Please check your video format and try again.",
+            }
+            yield f"data: {json.dumps({'error': err_dict})}\n\n"
+        return StreamingResponse(err_generator(), media_type="text/event-stream")
 
     def event_generator():
         try:
             for event in svc.predict_stream(clip_to_eval):
                 yield f"data: {json.dumps(event)}\n\n"
+        except InputValidationError as e:
+            yield f"data: {json.dumps({'error': e.to_dict()})}\n\n"
         except Exception as e:
             log.exception("Stream detection error")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            err_dict = {
+                "code": "ERR_INTERNAL",
+                "title": "Pipeline Processing Error",
+                "message": str(e),
+                "suggestion": "Please check the clip formatting or try another video.",
+            }
+            yield f"data: {json.dumps({'error': err_dict})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

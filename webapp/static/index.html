@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css?v=12" />
+  <link rel="stylesheet" href="/static/css/style.css?v=13" />
 </head>
 <body>
   <!-- ── Aurora background ─────────────────────────────────────────────────── -->
@@ -235,6 +235,47 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <p id="upload-error" class="error-text" hidden></p>
+
+        <!-- System Scope & Known Limitations Card -->
+        <div class="scope-card glass-card" data-reveal>
+          <div class="scope-header">
+            <span class="scope-tag">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>SYSTEM SCOPE &amp; LIMITATIONS</span>
+            </span>
+            <span class="scope-sub">Conditions outside the detector's operational scope:</span>
+          </div>
+          <div class="scope-grid">
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>Single Speaker Only</strong>
+                <p>Designed for one primary talking subject. Crowd scenes or overlapping voices are outside scope.</p>
+              </div>
+            </div>
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>Unobstructed Face</strong>
+                <p>Requires visible mouth and facial muscles. Masks, scarves, or hands covering the mouth are outside scope.</p>
+              </div>
+            </div>
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>Spoken Dialogue Required</strong>
+                <p>Needs clear vocal speech. Silent videos, background music, or instrumental tracks cannot be evaluated.</p>
+              </div>
+            </div>
+            <div class="scope-item">
+              <span class="scope-dot"></span>
+              <div>
+                <strong>English Speech Optimized</strong>
+                <p>Linguistic sentiment analysis (BERT) and acoustic prosody are optimized for English speech.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -338,6 +379,33 @@
                 <li data-step><span class="step-dot"></span>Reaching a verdict</li>
               </ul>
             </div>
+
+            <!-- Diagnostic Error Card (Halt pipeline on input modality / quality validation failure) -->
+            <div id="analyzing-error-card" class="analyzing-error-card glass-card" hidden>
+              <div class="diag-badge-wrapper">
+                <span class="diag-badge-pill" id="diag-error-badge">INPUT VERIFICATION FAILED</span>
+              </div>
+              <h2 class="diag-title" id="diag-error-title">Modality Error Detected</h2>
+              <p class="diag-message" id="diag-error-message">DeepSentinel halted analysis because this clip does not meet multimodal input requirements.</p>
+
+              <div class="diag-suggestions-box">
+                <span class="diag-box-label">RECOMMENDED ADJUSTMENTS</span>
+                <ul class="diag-checklist" id="diag-suggestions-list">
+                  <!-- Populated dynamically -->
+                </ul>
+              </div>
+
+              <div class="diag-actions-row">
+                <button type="button" class="btn btn-primary magnetic" id="diag-reselect-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  <span>Adjust Selection Range</span>
+                </button>
+                <button type="button" class="btn btn-glass magnetic" id="diag-restart-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  <span>Upload Different Video</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -350,7 +418,7 @@
         <!-- plain-language how-to -->
         <div class="howto glass" data-reveal>
           <span class="ht-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.1h6c0-.8.4-1.5 1-2.1A6 6 0 0 0 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <p><strong>How to read this.</strong> DeepSentinel compares the emotion in the <em>voice</em> with the emotion on the <em>face</em>. When they disagree, the clip is more likely manipulated. Every number below is a percentage.</p>
+          <p><strong>How this works:</strong> DeepSentinel checks if the emotion in the speaker's <em>voice</em> matches the emotion on their <em>face</em>. When they contradict each other, the video is likely an AI deepfake. Every score below is a percentage.</p>
         </div>
 
         <!-- headline verdict -->
@@ -364,7 +432,51 @@
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <div class="guide-note" id="g-verdict"><div><p>This percentage is how likely the clip is a <b>deepfake</b>, based on whether the emotions in the voice and face match. Above 50% leans fake; below 50% leans authentic. It is an estimate, not proof.</p></div></div>
+          <div class="guide-note" id="g-verdict"><div><p>This percentage shows how likely the video is an <b>AI deepfake</b>. Above 50% means the video shows signs of AI manipulation; below 50% means it looks authentic and natural.</p></div></div>
+        </div>
+
+        <!-- Forensic Multi-Tier Interpretation Card -->
+        <div class="glass-card forensic-card" id="forensic-interpretation-card" data-reveal>
+          <div class="forensic-head">
+            <span class="forensic-pill-tag" id="forensic-state-tag">EVALUATION SUMMARY</span>
+            <h3 class="forensic-headline" id="forensic-headline">AI Analysis &amp; Explanation</h3>
+            <p class="forensic-summary" id="forensic-summary">Detailed explanation is being generated...</p>
+          </div>
+
+          <div class="forensic-details-grid">
+            <!-- Col 1: Voice vs Face -->
+            <div class="forensic-col-card">
+              <div class="fcol-head">
+                <span class="fcol-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><circle cx="12" cy="18" r="3"/></svg>
+                </span>
+                <strong>Voice vs. Face</strong>
+              </div>
+              <p class="fcol-text" id="forensic-voice-face">—</p>
+            </div>
+
+            <!-- Col 2: Sarcasm & Tone Check -->
+            <div class="forensic-col-card">
+              <div class="fcol-head">
+                <span class="fcol-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>
+                </span>
+                <strong>Sarcasm &amp; Tone Check</strong>
+              </div>
+              <p class="fcol-text" id="forensic-sarcasm">—</p>
+            </div>
+
+            <!-- Col 3: Why the AI Thinks This -->
+            <div class="forensic-col-card">
+              <div class="fcol-head">
+                <span class="fcol-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </span>
+                <strong>Why the AI Thinks This</strong>
+              </div>
+              <p class="fcol-text" id="forensic-rationale">—</p>
+            </div>
+          </div>
         </div>
 
         <!-- sarcasm + plain-language interpretation + BERT transcript -->
@@ -380,14 +492,14 @@
 
           <!-- Spoken Transcript Analyzed by BERT -->
           <div class="result-transcript-box">
-            <span class="result-transcript-label">SPOKEN TRANSCRIPT (BERT LINGUISTIC STREAM)</span>
+            <span class="result-transcript-label">WHAT WAS SAID IN THIS CLIP</span>
             <p class="result-transcript-text" id="result-transcript-text">“—”</p>
           </div>
 
           <p class="interpret" id="interpret">—</p>
           <div class="meter"><span class="meter-marker" id="sarc-marker"><span class="meter-val" id="sarc-val"></span></span></div>
           <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
-          <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b class="ok">tone, not authenticity</b>. A real person can be sarcastic, and a fake can sound sincere — so this is read separately from the deepfake score. It uses the words (via BERT) and the voice (via Wav2Vec 2.0) to judge whether the speech is meant literally.</p></div></div>
+          <div class="guide-note" id="g-sarc"><div><p>Sarcasm is about <b>how someone speaks</b>, not whether they are real or fake. Real people often make sarcastic jokes, and AI fakes can sound serious. Checking for sarcasm makes sure the AI doesn't accuse someone of being fake just because they told a dry joke with a straight face.</p></div></div>
         </div>
 
         <!-- two emotion reads -->
@@ -396,7 +508,7 @@
             <div class="card-head">
               <div class="card-head-modality">
                 <strong class="modality-title">Voice emotion</strong>
-                <span class="hint">what the voice expresses</span>
+                <span class="hint">feeling heard in the voice</span>
               </div>
             </div>
             <div class="head-dominant-banner" id="head-a-top"></div>
@@ -406,7 +518,7 @@
             <div class="card-head">
               <div class="card-head-modality">
                 <strong class="modality-title">Face emotion</strong>
-                <span class="hint">what the face shows</span>
+                <span class="hint">feeling seen on the face</span>
               </div>
             </div>
             <div class="head-dominant-banner" id="head-b-top"></div>
@@ -427,7 +539,7 @@
           </div>
           <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
           <p class="hint" id="dom-desc">—</p>
-          <div class="guide-note" id="g-gap"><div><p>The single feeling where the voice and the face disagree most. A long bar here means a big gap — a strong sign the clip was stitched together from different sources.</p></div></div>
+          <div class="guide-note" id="g-gap"><div><p>This highlights the single emotion where the voice and face disagree the most. A large gap is a strong sign that someone replaced the audio or face with an AI tool.</p></div></div>
         </div>
 
         <!-- delta per class — detailed itemized breakdown below summary -->
@@ -439,7 +551,7 @@
             </button>
           </div>
           <div class="dist dist-delta" id="delta-list"></div>
-          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures, for each emotion, how much the voice and the face disagree — from 0 (perfect agreement) to 1 (total disagreement). Authentic clips stay <b class="ok">low</b> across the board; a big spike on any emotion is a classic sign of a stitched-together fake.</p></div></div>
+          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> shows the difference between the voice and face for each emotion (from 0% = perfect match to 100% = total clash). Real videos stay <b class="ok">low</b> across all emotions; a large spike is a classic tell of an AI deepfake.</p></div></div>
         </div>
 
         <div class="results-foot">
@@ -463,10 +575,45 @@
           </div>
           <p class="hint" data-reveal>The full paper is confidential and available on request.</p>
         </div>
-        <div class="thesis-right" data-reveal>
           <p class="lede">
             Advances in artificial intelligence have made deepfakes, synthetic media that manipulate a person's face, voice, or both that are increasingly realistic. Existing detectors perform well in controlled settings but depend on the visual artifacts left by generative models, leaving them prone to obsolescence as those models improve. This study proposes a multimodal detection framework that instead uses cross-modal emotional inconsistency as its primary signal. Genuine human emotion is biologically coordinated across facial expression, vocal tone, and linguistic content: a coherence that current deepfake pipelines cannot reproduce, since each modality is synthesized independently. Three encoders extract features: Vision Transformer (facial expression), Wav2Vec 2.0 (vocal prosody), and BERT (linguistic sentiment), that are fused through bilinear pooling to capture pairwise interactions between modalities. Trained on CREMA-D, MELD, and CMU-MOSEI with synthetic deepfake augmentation, and benchmarked on DFDC, WildDeepfake, FakeAVCeleb, and DigiFakeAV, the model is evaluated by accuracy, precision, recall, F1-score, and AUC. The study assesses how reliably audio–visual emotional mismatch separates genuine from deepfake content across generation methods and real-world recording conditions.
           </p>
+          <div class="scope-card glass-card" style="margin-top:20px" data-reveal>
+            <div class="scope-header">
+              <span class="scope-tag">SCOPE &amp; KNOWN LIMITATIONS</span>
+              <span class="scope-sub">Operating boundaries of this research:</span>
+            </div>
+            <div class="scope-grid">
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>Single Speaker Focus</strong>
+                  <p>Evaluates primary talking head; multi-speaker conversations and crowd audio fall outside scope.</p>
+                </div>
+              </div>
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>Unobstructed Face</strong>
+                  <p>Requires visible lower-face Action Units; physical masks, scarves, or hand occlusions are outside scope.</p>
+                </div>
+              </div>
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>Spoken Dialogue</strong>
+                  <p>Vocal prosody and linguistic sentiment require intelligible speech; silent or pure instrumental clips cannot be evaluated.</p>
+                </div>
+              </div>
+              <div class="scope-item">
+                <span class="scope-dot"></span>
+                <div>
+                  <strong>Language Scope</strong>
+                  <p>Model backbones (BERT sentiment &amp; Wav2Vec 2.0 prosody) are benchmarked and optimized for English speech.</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -490,6 +637,6 @@
   </main>
 
 
-  <script src="/static/js/app.js?v=10"></script>
+  <script src="/static/js/app.js?v=14"></script>
 </body>
 </html>

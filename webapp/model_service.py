@@ -42,7 +42,15 @@ from src.preprocessing.audio import load_audio_waveform
 from src.preprocessing.pipeline import PreprocessingPipeline
 
 from .config import EMOTIONS, settings
-from .schemas import EmotionPrediction, DetectionResult, ModelInfo
+from .input_validator import (
+    InputValidationError,
+    inspect_video_stream,
+    validate_container,
+    validate_audio_track,
+    validate_speech_presence,
+    validate_face_and_visual_quality,
+)
+from .schemas import EmotionPrediction, DetectionResult, ModelInfo, ForensicInterpretation
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger("deepsentinel.model_service")
@@ -301,6 +309,190 @@ class ModelService:
 
         return probs
 
+    @staticmethod
+    def _generate_forensic_interpretation(
+        verdict: str,
+        emo_a: str,
+        emo_b: str,
+        p_fake: float,
+        p_sarc: float,
+        cos_sim: float,
+        d_js: float,
+    ) -> ForensicInterpretation:
+        """
+        Exhaustive 8-State Forensic Outcome Interpretation Matrix.
+        Evaluates Verdict (Real/Fake) × Emotion Congruence (Match/Mismatch) × Sarcasm (Present/Absent).
+        """
+        is_fake = (verdict.upper() == "FAKE")
+        emotions_match = (emo_a.lower() == emo_b.lower())
+        sarcastic = (p_sarc >= 0.50)
+
+        if not is_fake:
+            if emotions_match and not sarcastic:
+                state_id = "STATE_REAL_HARMONY"
+                state_tag = "NATURAL MATCH · VOICE & FACE AGREE"
+                headline = "Looks Real: Voice and Face Match Naturally"
+                summary = (
+                    "The speaker's voice, words, and facial expressions all agree on the same feeling. "
+                    "Everything looks and sounds like normal, genuine human speech."
+                )
+                vf = (
+                    f"Both the voice and the face clearly express '{emo_a}'. What you hear and what you see line up "
+                    "naturally without any emotional clash."
+                )
+                sarc = (
+                    f"No sarcasm detected ({p_sarc * 100:.0f}%). The person is speaking sincerely and straightforwardly."
+                )
+                rat = (
+                    "The timing between the voice and mouth movements is smooth and organic. "
+                    "The AI found no signs of voice cloning, face replacement, or digital editing."
+                )
+            elif emotions_match and sarcastic:
+                state_id = "STATE_REAL_CONGRUENT_SARCASM"
+                state_tag = "SARCASTIC SPEECH · MATCHING EXPRESSION"
+                headline = "Looks Real: Playful Sarcasm with Matching Expression"
+                summary = (
+                    "The speaker is being sarcastic or playful on purpose. Both their tone of voice and facial expression "
+                    "match that sarcastic attitude."
+                )
+                vf = (
+                    f"The voice and face both express '{emo_a}' together, showing a coordinated, playful expression."
+                )
+                sarc = (
+                    f"Sarcasm detected ({p_sarc * 100:.0f}%). The speaker's tone and word choices show they are making "
+                    "an ironic remark or joke."
+                )
+                rat = (
+                    "Even though the speaker is being sarcastic, their voice inflection, facial muscles, and mouth timing "
+                    "remain completely in sync like a real person."
+                )
+            elif not emotions_match and sarcastic:
+                state_id = "STATE_REAL_DEADPAN_IRONY"
+                state_tag = "DEADPAN JOKE · INTENTIONAL POKER FACE"
+                headline = "Looks Real: Deadpan Humor (Serious Face with Sarcastic Tone)"
+                summary = (
+                    "The voice sounds expressive while the face stays serious, but this is a classic deadpan joke "
+                    "(dry humor), not an AI deepfake."
+                )
+                vf = (
+                    f"The voice sounds '{emo_a}' while the face stays '{emo_b}'. Keeping a straight poker face while "
+                    "speaking sarcastically is common human humor."
+                )
+                sarc = (
+                    f"High sarcasm detected ({p_sarc * 100:.0f}%). The AI recognized the sarcastic joke and didn't "
+                    "mistake the straight face for an AI error."
+                )
+                rat = (
+                    "Many AI detectors mistakenly flag deadpan jokes because the face and voice differ. "
+                    "DeepSentinel understands sarcasm context and correctly confirms this is a real human."
+                )
+            else:  # not emotions_match and not sarcastic
+                state_id = "STATE_REAL_MIXED_EMOTION"
+                state_tag = "NATURAL MIXED FEELINGS · AUTHENTIC"
+                headline = "Looks Real: Normal Mixed Human Feelings"
+                summary = (
+                    "The voice and face show slightly different emotions, but this is normal in everyday human conversation "
+                    "(like staying composed while talking about something emotional)."
+                )
+                vf = (
+                    f"The voice conveys '{emo_a}' while the face shows '{emo_b}'. Having subtle differences between "
+                    "voice tone and facial composure is completely normal for real people."
+                )
+                sarc = (
+                    f"No noticeable sarcasm detected ({p_sarc * 100:.0f}%). The speaker is speaking sincerely."
+                )
+                rat = (
+                    "Even though the voice and face express slightly different feelings, the natural micro-movements "
+                    "of the skin, eyes, and speech rhythm show no signs of AI tampering."
+                )
+        else:  # is_fake
+            if not emotions_match and not sarcastic:
+                state_id = "STATE_FAKE_EMOTION_DESYNC"
+                state_tag = "EMOTIONS CLASH · LIKELY DEEPFAKE"
+                headline = "Likely Deepfake: Voice and Face Emotions Contradict Each Other"
+                summary = (
+                    "The emotion in the voice and the expression on the face clash heavily. This almost always happens "
+                    "when an AI replaces someone's voice or stitches on a new face."
+                )
+                vf = (
+                    f"The voice clearly sounds '{emo_a}', but the face looks '{emo_b}'. Real humans do not display "
+                    "such sharp, disconnected contradictions when speaking sincerely."
+                )
+                sarc = (
+                    f"No sarcasm detected ({p_sarc * 100:.0f}%). This emotional contradiction is not a joke or deadpan "
+                    "humor; it is an AI generation flaw."
+                )
+                rat = (
+                    "The emotional difference between the audio and video is unnaturally high. "
+                    "AI deepfake tools usually manipulate either the audio or the face separately, creating this obvious emotional clash."
+                )
+            elif not emotions_match and sarcastic:
+                state_id = "STATE_FAKE_MANIPULATED_DISSONANCE"
+                state_tag = "UNNATURAL SPEECH & FACE · LIKELY DEEPFAKE"
+                headline = "Likely Deepfake: Distorted Voice and Unnatural Face Movements"
+                summary = (
+                    "The video shows both an unnatural clash between voice and face emotions, as well as robotic speech "
+                    "patterns that fail human realism tests."
+                )
+                vf = (
+                    f"The tone of the voice ('{emo_a}') does not match the expression on the face ('{emo_b}')."
+                )
+                sarc = (
+                    f"Unusual vocal patterns detected ({p_sarc * 100:.0f}%), but these are caused by distorted AI pitch changes "
+                    "and robotic dubbing rather than real human sarcasm."
+                )
+                rat = (
+                    "The AI found clear signs of synthetic audio and modified lip movements that do not sync naturally "
+                    "with how real people talk."
+                )
+            elif emotions_match and not sarcastic:
+                state_id = "STATE_FAKE_SYNTHESIS_ARTIFACTS"
+                state_tag = "AI GLITCHES DETECTED · LIKELY DEEPFAKE"
+                headline = "Likely Deepfake: AI Visual or Audio Glitches Detected"
+                summary = (
+                    "Even though the voice and face appear to have similar emotions, the AI found subtle digital seams, "
+                    "blurring, or robotic audio typical of AI face generation."
+                )
+                vf = (
+                    f"Both voice and face nominally read '{emo_a}', but a closer look at the facial features reveals "
+                    "unnatural digital distortions."
+                )
+                sarc = f"No sarcasm detected ({p_sarc * 100:.0f}%)."
+                rat = (
+                    "The AI checks deeper than just surface emotion: it spotted digital seams around the jaw, unnatural "
+                    "blinking, or synthetic voice textures typical of AI face-swaps."
+                )
+            else:  # emotions_match and sarcastic
+                state_id = "STATE_FAKE_SYNTHETIC_SMIRK"
+                state_tag = "ARTIFICIAL FACE WARPING · LIKELY DEEPFAKE"
+                headline = "Likely Deepfake: Exaggerated AI Facial Warping & Audio Glitches"
+                summary = (
+                    "The video contains artificial face movements and distorted audio meant to mimic expressive speech, "
+                    "but it shows clear signs of AI manipulation."
+                )
+                vf = (
+                    f"The face tries to show '{emo_a}', but the mouth movements appear stiff, rubbery, or warped."
+                )
+                sarc = (
+                    f"The high tone anomaly score ({p_sarc * 100:.0f}%) comes from robotic voice jumps and stretched "
+                    "mouth movements, not genuine human humor."
+                )
+                rat = (
+                    "The AI detected visual glitches around the mouth and unnatural delays between the spoken sounds "
+                    "and lip shapes, confirming the video was altered."
+                )
+
+        return ForensicInterpretation(
+            state_id=state_id,
+            state_tag=state_tag,
+            headline=headline,
+            summary=summary,
+            voice_face_analysis=vf,
+            sarcasm_analysis=sarc,
+            technical_rationale=rat,
+            forensic_rationale=rat,
+        )
+
     def _fuse_and_calibrate_verdict(
         self,
         raw_logit: torch.Tensor,
@@ -402,6 +594,16 @@ class ModelService:
         visual_emo = _emo(pb)
         delta_dict = {EMOTIONS[i]: float(delta[i].item()) for i in range(len(EMOTIONS))}
 
+        interpretation = self._generate_forensic_interpretation(
+            verdict=verdict,
+            emo_a=audio_emo.label,
+            emo_b=visual_emo.label,
+            p_fake=p_fake,
+            p_sarc=p_sarc,
+            cos_sim=cos_sim,
+            d_js=d_js,
+        )
+
         det_result = DetectionResult(
             verdict=verdict,
             p_fake=p_fake,
@@ -412,6 +614,7 @@ class ModelService:
             p_sarcasm=p_sarc,
             transcript=transcript,
             served_by=meta,
+            forensic_interpretation=interpretation,
         )
 
         extra = {
@@ -427,6 +630,121 @@ class ModelService:
             "harmony_bonus": harmony_bonus,
         }
         return det_result, extra
+
+    def _generate_forensic_interpretation(
+        self,
+        verdict: str,
+        emo_a: str,
+        emo_b: str,
+        p_fake: float,
+        p_sarc: float,
+        cos_sim: float,
+        d_js: float,
+    ) -> ForensicInterpretation:
+        """
+        Exhaustive 8-State Forensic Multi-Tier Interpretation:
+        Generates structured, professional forensic interpretation tailored to the exact
+        combination of:
+          - Verdict: Real (p_fake <= 0.5) vs Fake (p_fake > 0.5)
+          - Emotion Alignment: Concordant (emo_a == emo_b) vs Discordant (emo_a != emo_b)
+          - Rhetorical Context: Sarcastic (p_sarc >= 0.5) vs Sincere (p_sarc < 0.5)
+        """
+        is_fake = verdict == "FAKE"
+        emotions_match = emo_a.strip().lower() == emo_b.strip().lower()
+        sarcastic = p_sarc >= 0.50
+
+        ea_title = emo_a.strip().title()
+        eb_title = emo_b.strip().title()
+        sarc_pct = int(round(p_sarc * 100))
+        fake_pct = int(round(p_fake * 100))
+
+        if not is_fake and emotions_match and not sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_REAL_HARMONY",
+                state_tag="NATURAL MATCH — VOICE & FACE AGREE",
+                headline="Looks Real: Voice tone and facial expression completely match",
+                summary=f"Both the voice and the face express {ea_title}. When vocal emotion and facial expressions naturally agree without contradictions, the video is very likely authentic.",
+                voice_face_analysis=f"The speaker's voice sounds {ea_title}, and their facial expression also shows {eb_title}. There is no awkward clash between what you hear and what you see.",
+                sarcasm_analysis=f"No sarcasm detected ({sarc_pct}%). The speaker is talking normally and sincerely.",
+                technical_rationale=f"The emotion gap between voice and face is tiny ({cos_sim*100:.0f}% match). There are no signs that the audio or face were swapped from different sources.",
+            )
+
+        elif not is_fake and emotions_match and sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_REAL_CONGRUENT_SARCASM",
+                state_tag="PLAYFUL SARCASM — GENUINE CLIP",
+                headline="Looks Real: The speaker is being sarcastic, but the clip is genuine",
+                summary=f"The speaker is using sarcasm ({sarc_pct}%), but both their voice tone and face mirror the same ironic feeling ({ea_title}). This is natural human sarcasm, not an AI fake.",
+                voice_face_analysis=f"The speaker's sarcastic voice ({ea_title}) matches their facial expression ({eb_title}). They are deliberately joking or being ironic.",
+                sarcasm_analysis=f"High sarcasm detected ({sarc_pct}%). Because real people frequently use sarcasm, DeepSentinel avoids mistaking humor or irony for a deepfake.",
+                technical_rationale="In deepfakes, sarcasm often causes glitches because AI swaps voices onto serious faces. Here, the voice and face express the sarcasm together naturally.",
+            )
+
+        elif not is_fake and not emotions_match and sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_REAL_DEADPAN_IRONY",
+                state_tag="DEADPAN JOKE — INTENTIONAL MISMATCH",
+                headline="Looks Real: Deadpan delivery — serious face with sarcastic speech",
+                summary=f"The voice expresses {ea_title} while the face stays {eb_title}, but this mismatch is caused by organic deadpan humor ({sarc_pct}% sarcasm), not a deepfake.",
+                voice_face_analysis=f"The voice sounds {ea_title}, but the speaker maintains a {eb_title} poker face. This is classic human deadpan humor.",
+                sarcasm_analysis=f"High sarcasm detected ({sarc_pct}%). The model recognized that the speaker is deliberately keeping a straight face while saying something sarcastic.",
+                technical_rationale="The Multimodal Sarcasm Filter recognized intentional irony. This prevents false alarms when people tell jokes with a straight face.",
+            )
+
+        elif not is_fake and not emotions_match and not sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_REAL_MIXED_EMOTION",
+                state_tag="NATURAL COMPLEX EMOTION — REAL CLIP",
+                headline="Looks Real: Natural human mixed feelings",
+                summary=f"The voice leans {ea_title} while the face shows hints of {eb_title}. Real humans frequently show subtle mixed emotions, and this clip flows naturally without AI manipulation.",
+                voice_face_analysis=f"Voice sounds {ea_title} while face leans {eb_title}. The transition between feelings is smooth and organic.",
+                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speaker is speaking sincerely.",
+                technical_rationale=f"While the coarse emotion labels differ slightly, the underlying audio-visual sync is strong ({cos_sim*100:.0f}% match) and shows none of the sharp cuts typical of AI synthesis.",
+            )
+
+        elif is_fake and not emotions_match and not sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_EMOTION_DESYNC",
+                state_tag="EMOTIONAL CLASH — LIKELY DEEPFAKE",
+                headline="Likely Deepfake: Voice and face have totally contradictory emotions",
+                summary=f"The voice sounds {ea_title}, but the face looks {eb_title}. This extreme emotional clash almost always happens when someone's voice is stitched onto another person's video.",
+                voice_face_analysis=f"Big contradiction: You hear {ea_title} in the voice, but see {eb_title} on the face. A real person speaking sincerely does not project these opposite feelings simultaneously.",
+                sarcasm_analysis=f"Sarcasm is very low ({sarc_pct}%), so this is NOT a joke or deadpan humor. The emotional disagreement is an unnatural error.",
+                technical_rationale="The emotion disagreement gap is abnormally high. Deepfake tools usually replace only the face or voice, leaving a clear emotional seam between the two.",
+            )
+
+        elif is_fake and not emotions_match and sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_MANIPULATED_DISSONANCE",
+                state_tag="UNNATURAL GLITCH — LIKELY DEEPFAKE",
+                headline="Likely Deepfake: Sarcastic speech pasted onto an incompatible face",
+                summary=f"Although the words contain sarcasm ({sarc_pct}%), the face does not react naturally. The facial movements look stiff or out of sync with the speech.",
+                voice_face_analysis=f"The sarcastic voice ({ea_title}) clashes unnaturally with the facial expression ({eb_title}). The timing and facial muscles look artificial.",
+                sarcasm_analysis=f"Sarcasm is present in the audio ({sarc_pct}%), but the face completely fails to respond to it, revealing that the audio was likely pasted from elsewhere.",
+                technical_rationale=f"The model detected high fake probability ({fake_pct}%). When authentic humans speak sarcastically, micro-expressions appear around the eyes and mouth; here, they are missing.",
+            )
+
+        elif is_fake and emotions_match and not sarcastic:
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_SYNTHESIS_ARTIFACTS",
+                state_tag="AI GENERATION ARTIFACTS — LIKELY DEEPFAKE",
+                headline="Likely Deepfake: Matching emotion, but visible AI video/voice glitches",
+                summary=f"Even though both the voice and face read as {ea_title}, the AI detector found micro-glitches in how the face was generated or how the mouth moves.",
+                voice_face_analysis=f"Both the voice and face show {ea_title}, but the facial movement around the mouth and eyes looks generated or synthetic.",
+                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The tone is delivered straight.",
+                technical_rationale=f"The neural vision backbone detected generative boundary artifacts ({fake_pct}% fake confidence), such as subtle face blurring, warping, or robotic lip-sync.",
+            )
+
+        else:  # is_fake and emotions_match and sarcastic
+            return ForensicInterpretation(
+                state_id="STATE_FAKE_SYNTHETIC_SMIRK",
+                state_tag="ARTIFICIAL MIMICRY — LIKELY DEEPFAKE",
+                headline="Likely Deepfake: Forced artificial smirk or unnatural parody",
+                summary=f"The clip attempts to look sarcastic ({sarc_pct}%), but the facial expressions appear mechanically pasted on or animated by AI.",
+                voice_face_analysis=f"Voice and face both attempt {ea_title}, but the facial action units show robotic, frozen, or unnaturally exaggerated movements.",
+                sarcasm_analysis=f"High sarcasm score ({sarc_pct}%), typical of satirical or mocking deepfake clips.",
+                technical_rationale=f"The multimodal classifier caught clear generative boundaries ({fake_pct}% fake score), distinguishing AI puppeteering from real human expressions.",
+            )
 
     # ── Inference ──────────────────────────────────────────────────────────────
 
@@ -489,12 +807,14 @@ class ModelService:
         )
         return det_result
 
-    def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0) -> List[dict]:
+    def _extract_face_landmarks_and_crops(
+        self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0
+    ) -> Tuple[List[dict], List[np.ndarray], List[np.ndarray], List[float]]:
         import cv2
-        from src.preprocessing.visual import _load_insightface_app
+        from src.preprocessing.visual import _load_insightface_app, sharpness_score
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
-            return []
+            return [], [], [], []
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         max_eval_frames = int(max_seconds * fps) if (max_seconds and max_seconds > 0) else total_frames
@@ -503,10 +823,13 @@ class ModelService:
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1)
         if eval_frames <= 0 or w <= 0 or h <= 0:
             cap.release()
-            return []
+            return [], [], [], []
 
         indices = [int(i * (eval_frames - 1) / max(1, max_samples - 1)) for i in range(max_samples)]
         faces_out = []
+        frames_sampled = []
+        face_crops = []
+        scores = []
         try:
             app = _load_insightface_app()
             for idx in indices:
@@ -514,11 +837,12 @@ class ModelService:
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     continue
+                frames_sampled.append(frame)
                 time_sec = round(float(idx) / fps, 3)
                 detected = app.get(frame)
                 if detected:
                     best = max(detected, key=lambda f: f.det_score)
-                    if best.det_score >= 0.4:
+                    if best.det_score >= 0.35:
                         x1, y1, x2, y2 = best.bbox.astype(int)
                         nx1 = max(0.0, min(1.0, float(x1) / w))
                         ny1 = max(0.0, min(1.0, float(y1) / h))
@@ -534,11 +858,28 @@ class ModelService:
                             "kps": kps_norm,
                             "score": round(float(best.det_score), 4),
                         })
+
+                        bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+                        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                        side = max(bw, bh) * 1.20
+                        h_f, w_f = frame.shape[:2]
+                        ny1_c = max(0, int(round(cy - side / 2.0)))
+                        ny2_c = min(h_f, int(round(cy + side / 2.0)))
+                        nx1_c = max(0, int(round(cx - side / 2.0)))
+                        nx2_c = min(w_f, int(round(cx + side / 2.0)))
+                        crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+                        if crop.size > 0:
+                            face_crops.append(crop)
+                            scores.append(float(best.det_score) * sharpness_score(crop))
         except Exception as e:
             log.warning(f"Face landmarks extraction notice: {e}")
         finally:
             cap.release()
-        return faces_out
+        return faces_out, frames_sampled, face_crops, scores
+
+    def _extract_face_landmarks(self, video_path: Path, max_samples: int = 16, max_seconds: float = 5.0) -> List[dict]:
+        faces, _, _, _ = self._extract_face_landmarks_and_crops(video_path, max_samples=max_samples, max_seconds=max_seconds)
+        return faces
 
     @torch.no_grad()
     def predict_stream(self, video_path: Path, clip_id: Optional[str] = None):
@@ -551,25 +892,41 @@ class ModelService:
 
         clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
 
-        # Step 0: Listening to the voice (16kHz audio extraction)
+        # Step 0: Listening to the voice (16kHz audio extraction & stream validation)
         yield {
             "step": 0,
             "phase": "audio_extraction",
-            "name": "Listening to the voice",
-            "tech": "16kHz Mono · Wav2Vec 2.0",
+            "name": "Checking container & listening to the voice",
+            "tech": "Stream Validator · 16kHz Mono · Wav2Vec 2.0",
             "status": "active",
         }
+        try:
+            inspection = inspect_video_stream(video_path)
+            validate_container(inspection, min_duration=settings.min_duration_sec, max_duration=settings.max_upload_duration_sec)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
+
         wav = self.pipeline._wav_path(clip_id)
         if not wav.exists():
             from src.preprocessing.audio import extract_audio_to_wav
             ok = extract_audio_to_wav(video_path, wav)
             if not ok or not wav.exists():
-                if video_path.suffix.lower() == ".wav":
-                    import shutil
-                    shutil.copy2(video_path, wav)
-                else:
-                    yield {"error": "Audio extraction failed from video."}
-                    return
+                err = InputValidationError(
+                    code="ERR_AUDIO_EXTRACTION_FAILED",
+                    title="Audio Extraction Failed",
+                    message="Failed to extract an audio stream from the video container.",
+                    suggestion="Ensure the video has a standard AAC/MP3 audio track and re-export if needed.",
+                )
+                yield {"error": err.to_dict()}
+                return
+
+        try:
+            validate_audio_track(inspection, wav)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
+
         yield {"step": 0, "status": "done"}
 
         # Step 1: Reading tone & words (Whisper + BERT)
@@ -587,6 +944,12 @@ class ModelService:
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
+
+        try:
+            validate_speech_presence(transcript, min_words=1)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
 
         # Emit the transcript IMMEDIATELY so the user sees live words!
         yield {
@@ -657,7 +1020,13 @@ class ModelService:
             "tech": "InsightFace · RetinaFace",
             "status": "active",
         }
-        faces = self._extract_face_landmarks(video_path, max_samples=16)
+        faces, frames_sampled, face_crops, face_scores = self._extract_face_landmarks_and_crops(video_path, max_samples=16)
+        try:
+            validate_face_and_visual_quality(frames_sampled, face_crops, face_scores)
+        except InputValidationError as e:
+            yield {"error": e.to_dict()}
+            return
+
         yield {
             "step": 2,
             "status": "done",
@@ -776,11 +1145,23 @@ class ModelService:
         from src.preprocessing.audio import extract_audio_to_wav, transcribe
         from src.preprocessing.visual import get_keyframe_pixels
 
-        # 1. Audio
+        # 0. Container & stream validation
+        inspection = inspect_video_stream(video_path)
+        validate_container(inspection, min_duration=settings.min_duration_sec, max_duration=settings.max_upload_duration_sec)
+
+        # 1. Audio validation & extraction
         wav = self.pipeline._wav_path(clip_id)
         if not wav.exists():
             wav.parent.mkdir(parents=True, exist_ok=True)
-            extract_audio_to_wav(video_path, wav)
+            ok = extract_audio_to_wav(video_path, wav)
+            if not ok or not wav.exists():
+                raise InputValidationError(
+                    code="ERR_AUDIO_EXTRACTION_FAILED",
+                    title="Audio Extraction Failed",
+                    message="Failed to extract an audio stream from the video container.",
+                    suggestion="Ensure the video has a standard AAC or MP3 audio track and re-export if necessary.",
+                )
+        validate_audio_track(inspection, wav)
 
         # Standardize audio window to 80,000 samples (5.0s @ 16kHz) matching Phase 2 training MAX_AUDIO
         max_samples = 80000
@@ -812,6 +1193,7 @@ class ModelService:
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
+        validate_speech_presence(transcript, min_words=1)
 
         tok = self._get_bert_tokenizer()
         bert_enc = tok(
@@ -824,7 +1206,10 @@ class ModelService:
         input_ids = bert_enc.input_ids.to(self.device)
         attention_mask = bert_enc.attention_mask.to(self.device)
 
-        # 3. Keyframe pixels
+        # 3. Keyframe pixels & visual quality validation
+        faces, frames_sampled, face_crops, face_scores = self._extract_face_landmarks_and_crops(video_path, max_samples=16)
+        validate_face_and_visual_quality(frames_sampled, face_crops, face_scores)
+
         keyframe_pixels = get_keyframe_pixels(
             video_path,
             vit_model_name=self.pipeline.vit_model,
