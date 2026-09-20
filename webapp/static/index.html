@@ -249,13 +249,6 @@
             <div class="scope-item">
               <span class="scope-dot"></span>
               <div>
-                <strong>Single Speaker Only</strong>
-                <p>Designed for one main speaker. Crowd noise or group voices are outside scope.</p>
-              </div>
-            </div>
-            <div class="scope-item">
-              <span class="scope-dot"></span>
-              <div>
                 <strong>Unobstructed Face</strong>
                 <p>Face and mouth must stay visible. Masks, coverings, or hands over the face are outside scope.</p>
               </div>
@@ -415,12 +408,6 @@
     <section class="view" data-view="results">
       <div class="stage stage-wide">
 
-        <!-- plain-language how-to -->
-        <div class="howto glass" data-reveal>
-          <span class="ht-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.1h6c0-.8.4-1.5 1-2.1A6 6 0 0 0 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <p><strong>How this works:</strong> DeepSentinel checks if the emotion in the speaker's <em>voice</em> matches the emotion on their <em>face</em>. When they contradict each other, the video is likely an AI deepfake. Every score below is a percentage.</p>
-        </div>
-
         <!-- headline verdict -->
         <div class="verdict-card glass-card" id="verdict-card" data-reveal>
           <span class="verdict-tag" id="verdict-tag">—</span>
@@ -479,7 +466,7 @@
           </div>
         </div>
 
-        <!-- sarcasm + plain-language interpretation + BERT transcript -->
+        <!-- Tone, speech & meaning + BERT transcript -->
         <div class="glass-card sarc-card" data-reveal>
           <div class="sarc-head">
             <span class="sarc-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-5A8 8 0 1 1 21 12z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.5 10.5c.6-1 2-1 2.5 0M13 10.5c.5-1 2-1 2.5 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
@@ -496,7 +483,6 @@
             <p class="result-transcript-text" id="result-transcript-text">“—”</p>
           </div>
 
-          <p class="interpret" id="interpret">—</p>
           <div class="meter"><span class="meter-marker" id="sarc-marker"><span class="meter-val" id="sarc-val"></span></span></div>
           <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
           <div class="guide-note" id="g-sarc"><div><p>Measures sarcastic tone. This keeps the AI from mistaking dry jokes or poker faces for deepfakes.</p></div></div>
@@ -526,32 +512,34 @@
           </div>
         </div>
 
-        <!-- biggest emotion gap — headline summary first for enhanced readability -->
-        <div class="glass-card mismatch-card" data-reveal>
-          <div class="row-between">
-            <strong id="dom-title">Biggest emotion gap · —</strong>
-            <span style="display:flex;align-items:center;gap:8px">
-              <span class="gap-val" id="gap-val">—</span>
-              <button class="info-btn" data-guide="g-gap" aria-expanded="false" aria-label="What is the biggest emotion gap?">
-                <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
-              </button>
-            </span>
-          </div>
-          <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
-          <p class="hint" id="dom-desc">—</p>
-          <div class="guide-note" id="g-gap"><div><p>The emotion where voice and face clash most. A large gap usually means audio or video was swapped.</p></div></div>
-        </div>
-
-        <!-- delta per class — detailed itemized breakdown below summary -->
-        <div class="glass-card" data-reveal>
+        <!-- Unified Emotion Discrepancy (Δ) Card -->
+        <div class="glass-card discrepancy-unified-card" data-reveal>
           <div class="card-head">
-            <strong>Emotion gap per feeling <span class="step-tech">(Δ)</span></strong>
+            <div class="card-head-modality">
+              <strong class="modality-title">Emotion Discrepancy Breakdown <span class="step-tech">(Δ)</span></strong>
+              <span class="hint">Cross-modal difference per emotion (0% = match, 100% = clash)</span>
+            </div>
             <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <div class="dist dist-delta" id="delta-list"></div>
-          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> is the difference between voice and face per emotion (0% = match, 100% = clash). Real clips stay low; a big spike flags a deepfake.</p></div></div>
+
+          <!-- Dominant / Biggest Gap Highlight Banner -->
+          <div class="discrepancy-dominant-banner" id="dom-banner">
+            <div class="row-between" style="margin-bottom: 8px;">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="dom-tag-label">PRIMARY GAP</span>
+                <strong id="dom-title">Biggest emotion gap · —</strong>
+              </div>
+              <span class="gap-val" id="gap-val">—</span>
+            </div>
+            <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
+            <p class="hint" id="dom-desc" style="margin-top: 8px; margin-bottom: 0;">—</p>
+          </div>
+
+          <!-- Itemized 6-Emotion Breakdown -->
+          <div class="dist dist-delta" id="delta-list" style="margin-top: 18px;"></div>
+          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures the affective divergence between voice and facial expressions for each of the 6 emotions. Authentic videos maintain low discrepancy across all categories, whereas synthetic faces or spliced audio produce sharp localized spikes.</p></div></div>
         </div>
 
         <div class="results-foot">
@@ -584,13 +572,6 @@
               <span class="scope-sub">Outside operational scope:</span>
             </div>
             <div class="scope-grid">
-              <div class="scope-item">
-                <span class="scope-dot"></span>
-                <div>
-                  <strong>Single Speaker Only</strong>
-                  <p>Designed for one main speaker. Crowd noise or group voices are outside scope.</p>
-                </div>
-              </div>
               <div class="scope-item">
                 <span class="scope-dot"></span>
                 <div>

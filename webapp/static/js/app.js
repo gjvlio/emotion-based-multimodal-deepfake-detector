@@ -1846,7 +1846,8 @@
     } else {
       sentence = `This clip looks ${auth}, with clashing emotions and robotic speech patterns.`;
     }
-    document.getElementById("interpret").innerHTML = sentence;
+    const interpretEl = document.getElementById("interpret");
+    if (interpretEl) interpretEl.innerHTML = sentence;
     const marker = document.getElementById("sarc-marker");
     document.getElementById("sarc-val").textContent = Math.round(pSarc * 100) + "%";
     marker.style.left = "0%";
