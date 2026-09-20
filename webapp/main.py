@@ -22,7 +22,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import json
+import re
 import subprocess
+import time
+import uuid
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -40,6 +43,27 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("deepsentinel.api")
 
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wav"}
+
+
+def _cleanup_old_uploads(max_files: int = 50, max_age_hours: float = 2.0) -> None:
+    """Prune stale uploaded clips to prevent server disk exhaustion."""
+    try:
+        if not settings.upload_dir.exists():
+            return
+        now = time.time()
+        files = sorted(settings.upload_dir.glob("*"), key=lambda p: p.stat().st_mtime)
+        # Delete if older than max_age_hours
+        for p in files:
+            if p.is_file() and (now - p.stat().st_mtime) > (max_age_hours * 3600):
+                p.unlink(missing_ok=True)
+        # If count still exceeds max_files, prune oldest
+        remaining = sorted(settings.upload_dir.glob("*"), key=lambda p: p.stat().st_mtime)
+        if len(remaining) > max_files:
+            for p in remaining[: len(remaining) - max_files]:
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+    except Exception as e:
+        log.debug(f"Upload cleanup notice: {e}")
 
 # The model backend (torch/transformers/...) is OPTIONAL. A lightweight checkout
 # with only FastAPI installed still serves the full UI and the /demo flow — only
@@ -143,8 +167,16 @@ def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]
             details={"suffix": suffix},
         )
 
+    # Periodic cleanup of old uploads
+    _cleanup_old_uploads()
+
+    # Sanitize and create collision-resistant unique filename
+    raw_name = Path(file.filename or "upload.mp4").name
+    clean_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw_name)
+    unique_name = f"{uuid.uuid4().hex[:8]}_{clean_name}"
+
     # Persist upload
-    dest = settings.upload_dir / file.filename
+    dest = settings.upload_dir / unique_name
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -227,7 +259,7 @@ def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]
                 details={"duration": slice_dur, "max_allowed": settings.max_duration_sec},
             )
 
-        trimmed_name = f"trim_{int(t_start * 100)}_{int(t_end * 100)}_{file.filename}"
+        trimmed_name = f"trim_{int(t_start * 100)}_{int(t_end * 100)}_{unique_name}"
         trimmed_dest = settings.upload_dir / trimmed_name
 
         cmd = [

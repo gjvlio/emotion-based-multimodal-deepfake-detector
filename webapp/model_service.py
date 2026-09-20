@@ -663,7 +663,24 @@ class ModelService:
         face_crops = []
         scores = []
         try:
-            app = _load_insightface_app()
+            app = None
+            cascade = None
+            try:
+                from src.preprocessing.visual import _INSIGHTFACE_AVAILABLE, _load_insightface_app
+                if _INSIGHTFACE_AVAILABLE:
+                    app = _load_insightface_app()
+            except Exception:
+                app = None
+
+            if app is None:
+                try:
+                    cascade_dir = getattr(cv2.data, "haarcascades", "")
+                    cascade_path = os.path.join(cascade_dir, "haarcascade_frontalface_default.xml") if cascade_dir else ""
+                    if cascade_path and os.path.exists(cascade_path):
+                        cascade = cv2.CascadeClassifier(cascade_path)
+                except Exception:
+                    cascade = None
+
             for idx in indices:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
@@ -671,38 +688,76 @@ class ModelService:
                     continue
                 frames_sampled.append(frame)
                 time_sec = round(float(idx) / fps, 3)
-                detected = app.get(frame)
-                if detected:
-                    best = max(detected, key=lambda f: f.det_score)
-                    if best.det_score >= 0.35:
-                        x1, y1, x2, y2 = best.bbox.astype(int)
-                        nx1 = max(0.0, min(1.0, float(x1) / w))
-                        ny1 = max(0.0, min(1.0, float(y1) / h))
-                        nx2 = max(0.0, min(1.0, float(x2) / w))
-                        ny2 = max(0.0, min(1.0, float(y2) / h))
-                        kps_norm = []
-                        if hasattr(best, "kps") and best.kps is not None:
-                            for kp in best.kps:
-                                kps_norm.append([round(float(kp[0]) / w, 4), round(float(kp[1]) / h, 4)])
-                        faces_out.append({
-                            "time": time_sec,
-                            "bbox": [round(nx1, 4), round(ny1, 4), round(nx2, 4), round(ny2, 4)],
-                            "kps": kps_norm,
-                            "score": round(float(best.det_score), 4),
-                        })
 
-                        bw, bh = max(1, x2 - x1), max(1, y2 - y1)
-                        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                        side = max(bw, bh) * 1.20
-                        h_f, w_f = frame.shape[:2]
-                        ny1_c = max(0, int(round(cy - side / 2.0)))
-                        ny2_c = min(h_f, int(round(cy + side / 2.0)))
-                        nx1_c = max(0, int(round(cx - side / 2.0)))
-                        nx2_c = min(w_f, int(round(cx + side / 2.0)))
-                        crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
-                        if crop.size > 0:
-                            face_crops.append(crop)
-                            scores.append(float(best.det_score) * sharpness_score(crop))
+                if app is not None:
+                    detected = app.get(frame)
+                    if detected:
+                        best = max(detected, key=lambda f: f.det_score)
+                        if best.det_score >= 0.35:
+                            x1, y1, x2, y2 = best.bbox.astype(int)
+                            nx1 = max(0.0, min(1.0, float(x1) / w))
+                            ny1 = max(0.0, min(1.0, float(y1) / h))
+                            nx2 = max(0.0, min(1.0, float(x2) / w))
+                            ny2 = max(0.0, min(1.0, float(y2) / h))
+                            kps_norm = []
+                            if hasattr(best, "kps") and best.kps is not None:
+                                for kp in best.kps:
+                                    kps_norm.append([round(float(kp[0]) / w, 4), round(float(kp[1]) / h, 4)])
+                            faces_out.append({
+                                "time": time_sec,
+                                "bbox": [round(nx1, 4), round(ny1, 4), round(nx2, 4), round(ny2, 4)],
+                                "kps": kps_norm,
+                                "score": round(float(best.det_score), 4),
+                            })
+
+                            bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+                            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                            side = max(bw, bh) * 1.20
+                            h_f, w_f = frame.shape[:2]
+                            ny1_c = max(0, int(round(cy - side / 2.0)))
+                            ny2_c = min(h_f, int(round(cy + side / 2.0)))
+                            nx1_c = max(0, int(round(cx - side / 2.0)))
+                            nx2_c = min(w_f, int(round(cx + side / 2.0)))
+                            crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+                            if crop.size > 0:
+                                face_crops.append(crop)
+                                scores.append(float(best.det_score) * sharpness_score(crop))
+                elif cascade is not None:
+                    try:
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        detected_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+                        if len(detected_faces) > 0:
+                            x, y, w_box, h_box = max(detected_faces, key=lambda f: f[2] * f[3])
+                            nx1 = max(0.0, min(1.0, float(x) / w))
+                            ny1 = max(0.0, min(1.0, float(y) / h))
+                            nx2 = max(0.0, min(1.0, float(x + w_box) / w))
+                            ny2 = max(0.0, min(1.0, float(y + h_box) / h))
+                            cx, cy = x + w_box / 2.0, y + h_box / 2.0
+                            kps_norm = [
+                                [round((x + 0.3 * w_box) / w, 4), round((y + 0.35 * h_box) / h, 4)],
+                                [round((x + 0.7 * w_box) / w, 4), round((y + 0.35 * h_box) / h, 4)],
+                                [round((x + 0.5 * w_box) / w, 4), round((y + 0.55 * h_box) / h, 4)],
+                                [round((x + 0.35 * w_box) / w, 4), round((y + 0.75 * h_box) / h, 4)],
+                                [round((x + 0.65 * w_box) / w, 4), round((y + 0.75 * h_box) / h, 4)],
+                            ]
+                            faces_out.append({
+                                "time": time_sec,
+                                "bbox": [round(nx1, 4), round(ny1, 4), round(nx2, 4), round(ny2, 4)],
+                                "kps": kps_norm,
+                                "score": 0.85,
+                            })
+                            side = max(w_box, h_box) * 1.20
+                            h_f, w_f = frame.shape[:2]
+                            ny1_c = max(0, int(round(cy - side / 2.0)))
+                            ny2_c = min(h_f, int(round(cy + side / 2.0)))
+                            nx1_c = max(0, int(round(cx - side / 2.0)))
+                            nx2_c = min(w_f, int(round(cx + side / 2.0)))
+                            crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+                            if crop.size > 0:
+                                face_crops.append(crop)
+                                scores.append(0.85 * sharpness_score(crop))
+                    except Exception as he:
+                        log.debug(f"Haar cascade detection exception: {he}")
         except Exception as e:
             log.warning(f"Face landmarks extraction notice: {e}")
         finally:
