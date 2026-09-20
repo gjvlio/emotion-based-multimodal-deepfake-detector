@@ -30,6 +30,7 @@
     </a>
     <nav class="nav" id="nav">
       <a href="/" data-link class="nav-link"><span>Home</span></a>
+      <a href="/benchmarks" data-link class="nav-link"><span>Benchmarks</span></a>
       <div class="nav-dropdown">
         <button class="nav-link nav-dropdown-toggle" aria-haspopup="true" aria-expanded="false">
           <span>About</span>
@@ -487,8 +488,162 @@
         </p>
       </div>
     </section>
-  </main>
 
+    <!-- ── Benchmarks ─────────────────────────────────────────────────────── -->
+    <section class="view" data-view="benchmarks">
+      <div class="stage stage-wide bm-stage">
+
+        <!-- 1. Header -->
+        <p class="eyebrow" data-reveal>// SOTA BENCHMARKS · FAKEAVCELEB v1.2</p>
+        <h1 class="doc-title" data-reveal>DeepSentinel leads every baseline<br>by <em>+25.95 AUC points</em></h1>
+        <p class="lede bm-lede" data-reveal>
+          Strict cross-dataset evaluation — zero fine-tuning on FakeAVCeleb. 700 balanced clips (350 Real, 350 Fake).
+          All differences are statistically significant (DeLong test, <em>p</em>&nbsp;&lt;&nbsp;0.001).
+        </p>
+
+        <!-- 2. Headline stat cards -->
+        <div class="bm-stat-row" data-reveal>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">Balanced Accuracy</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">82.14%</span>
+            <span class="bm-stat-sub">vs 64.00% next-best</span>
+          </div>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">AUC-ROC</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">0.9020</span>
+            <span class="bm-stat-sub">[95% CI: 0.877–0.924]</span>
+          </div>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">F1-Score</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">0.8299</span>
+            <span class="bm-stat-sub">vs 0.5909 next-best</span>
+          </div>
+          <div class="glass-card bm-stat-card">
+            <span class="bm-stat-label">MCC</span>
+            <span class="bm-stat-num" style="background:var(--grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent">+0.646</span>
+            <span class="bm-stat-sub">vs +0.288 next-best</span>
+          </div>
+        </div>
+
+        <!-- 3. Master comparison table -->
+        <div class="glass-card bm-table-card" data-reveal>
+          <div class="bm-table-header">
+            <strong>Master Benchmark Comparison</strong>
+            <span class="mono-tag hint">N = 700 clips · FakeAVCeleb v1.2</span>
+          </div>
+          <div class="bm-table-scroll">
+            <table class="bm-table" id="sota-table">
+              <thead>
+                <tr>
+                  <th>Architecture</th>
+                  <th>Modality</th>
+                  <th>Acc</th>
+                  <th>BalAcc</th>
+                  <th>Spec</th>
+                  <th>Rec (Fake)</th>
+                  <th>F1</th>
+                  <th>MCC</th>
+                  <th>AUC-ROC [95% CI]</th>
+                  <th>DeLong vs Ours</th>
+                </tr>
+              </thead>
+              <tbody id="sota-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 4. ROC curve chart -->
+        <div class="glass-card bm-chart-card" data-reveal>
+          <div class="bm-chart-header">
+            <strong>ROC Curves — All Models</strong>
+            <span class="hint mono-tag">Higher &amp; further left = better</span>
+          </div>
+          <div class="bm-chart-wrap">
+            <canvas id="roc-canvas" class="bm-canvas"></canvas>
+          </div>
+          <div class="bm-legend" id="roc-legend"></div>
+        </div>
+
+        <!-- 5. Per-manipulation stress-test bar chart -->
+        <div class="glass-card bm-chart-card" data-reveal>
+          <div class="bm-chart-header">
+            <strong>Per-Manipulation Stress Test</strong>
+            <span class="hint mono-tag">Accuracy % by generation method</span>
+          </div>
+          <div class="bm-chart-wrap bm-chart-wrap-bar">
+            <canvas id="manip-canvas" class="bm-canvas"></canvas>
+          </div>
+          <div class="bm-legend" id="manip-legend"></div>
+        </div>
+
+        <!-- 6. Key Findings -->
+        <p class="eyebrow" data-reveal>// KEY FINDINGS</p>
+        <div class="bm-findings" data-reveal>
+
+          <div class="glass-card bm-finding-card">
+            <div class="bm-finding-head">
+              <span class="bm-finding-ic ic-copper">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 4v6l4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <strong>A. The "Generalization Collapse" of Standard Baselines</strong>
+            </div>
+            <p>
+              <strong>MesoNet-4 (AUC: 0.5389)</strong> and <strong>XceptionNet (AUC: 0.5002)</strong> perform around
+              random chance on unseen FakeAVCeleb clips. Standard CNN detectors overfit to dataset-specific pixel
+              artifacts and camera fingerprints of their training domains (FaceForensics++). When presented with newer
+              generative models — FSGAN, Wav2Lip — these pixel-level artifacts vanish, causing severe domain collapse.
+            </p>
+          </div>
+
+          <div class="glass-card bm-finding-card">
+            <div class="bm-finding-head">
+              <span class="bm-finding-ic ic-teal">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M3 12h2l2-5 3 12 3-16 3 13 2-4h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <strong>B. The Failure of Low-Level Audio-Visual Sync</strong>
+            </div>
+            <p>
+              <strong>Multimodal ResNet-AV (AUC: 0.4629)</strong> and <strong>LipForensics (AUC: 0.5132)</strong> fail
+              to reliably detect multimodal fakes when audio and video are independently spliced or synthesized.
+              Concatenating raw visual embeddings and audio MFCC features without higher-level affective semantic
+              modelling leads to negative transfer — performance falls below random on combined fakes.
+            </p>
+          </div>
+
+          <div class="glass-card bm-finding-card">
+            <div class="bm-finding-head">
+              <span class="bm-finding-ic ic-blue">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/></svg>
+              </span>
+              <strong>C. Superiority of Emotion Incongruence Detection</strong>
+            </div>
+            <p>
+              <strong>DeepSentinel achieves 0.9020 AUC and 82.14% Balanced Accuracy</strong>, outperforming the
+              closest baseline (AceNet at 0.6425 AUC) by <strong>+25.95 AUC points</strong> (<em>p</em> = 0.0002).
+              On complex cross-modal attacks like <code>fsgan-wav2lip</code> — where both face and audio are
+              manipulated — DeepSentinel achieves <strong>98.5% accuracy</strong>, because generative models cannot
+              synchronise the micro-emotional expressions of the face with the prosodic emotional valence of the voice.
+            </p>
+          </div>
+
+        </div>
+
+        <!-- 7. Closing CTA -->
+        <div class="results-foot bm-foot" data-reveal>
+          <div class="cta-row">
+            <a href="/upload" data-link class="btn btn-primary magnetic">
+              <span>Start Detecting</span>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <a href="/about/thesis" data-link class="btn btn-glass magnetic">Read the thesis</a>
+          </div>
+          <p class="disclaimer">Benchmark dataset: FakeAVCeleb v1.2 · Strict cross-dataset zero-shot protocol · N = 700 · All baselines trained on FaceForensics++.</p>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
 
   <script src="/static/js/app.js?v=10"></script>
 </body>
