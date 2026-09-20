@@ -8,9 +8,53 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css?v=13" />
+  <link rel="stylesheet" href="/static/css/style.css?v=16" />
 </head>
 <body>
+  <!-- ── Model Warmup Loading Screen (Simple & Clean Mirrored Bar) ──────────────── -->
+  <aside class="warmup-screen" id="warmup-screen" aria-label="DeepSentinel Model Warmup">
+    <div class="warmup-container">
+      <div class="warmup-logo-box">
+        <img src="/static/img/logo.svg" alt="DeepSentinel" class="warmup-logo" />
+      </div>
+
+      <div class="warmup-meta">
+        <h1 class="warmup-title">DeepSentinel</h1>
+        <p class="warmup-subtitle">Warming models for detection</p>
+      </div>
+
+      <!-- Percentage Display -->
+      <div class="warmup-pct-wrap">
+        <span class="warmup-pct-num" id="warmup-pct-num">0</span><span class="warmup-pct-unit">%</span>
+      </div>
+
+      <!-- Mirrored Progress Bar -->
+      <div class="warmup-bar-container">
+        <div class="warmup-bar-track" id="warmup-bar-track">
+          <div class="warmup-bar-core"></div>
+          <div class="warmup-bar-wing wing-left" id="warmup-wing-left"></div>
+          <div class="warmup-bar-wing wing-right" id="warmup-wing-right"></div>
+        </div>
+      </div>
+
+      <!-- Simple Dynamic Status Console Line: fetching [ ... ] ... -->
+      <div class="warmup-status-box">
+        <div class="warmup-status-line" id="warmup-status-line">
+          <span class="w-status-action" id="warmup-action">fetching</span>
+          <span class="w-status-bracket">[</span>
+          <span class="w-status-target" id="warmup-target">Wav2Vec 2.0 Audio Backbone</span>
+          <span class="w-status-bracket">]</span>
+          <span class="w-status-dots"><span class="w-dot d1">.</span><span class="w-dot d2">.</span><span class="w-dot d3">.</span></span>
+        </div>
+      </div>
+
+      <!-- Quick skip button -->
+      <button class="warmup-skip-btn" id="warmup-skip-btn" type="button" aria-label="Skip warmup">
+        <span>Skip</span>
+      </button>
+    </div>
+  </aside>
+
   <!-- ── Aurora background ─────────────────────────────────────────────────── -->
   <div class="aurora" aria-hidden="true">
     <span class="silk"></span>
@@ -773,6 +817,6 @@
 
   </main>
 
-  <script src="/static/js/app.js?v=15"></script>
+  <script src="/static/js/app.js?v=18"></script>
 </body>
 </html>

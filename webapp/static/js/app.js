@@ -2315,8 +2315,178 @@
     }
   }
 
+  // ── Model Warmup Screen (Simple & Clean Mirrored Bar) ─────────────────────
+  function initWarmupScreen() {
+    const screenEl = document.getElementById("warmup-screen");
+    if (!screenEl) return;
+
+    // Only display when first accessing the page in this session (restart only)
+    const hasSeenWarmup = sessionStorage.getItem("ds_warmup_completed");
+    const path = location.pathname;
+    const isLanding = path === "/" || path === "/demo" || path === "/demo/";
+    if (hasSeenWarmup || !isLanding) {
+      screenEl.style.display = "none";
+      return;
+    }
+
+    // Main solid colors of the design: Verdigris, Wisteria, Rosy Copper, Linen, Gunmetal, Cyan, Warm Copper
+    const BRAND_SOLID_COLORS = [
+      "#1EA896", // Verdigris
+      "#72A1E5", // Wisteria Blue
+      "#DB5A42", // Rosy Copper
+      "#ECEBE4", // Soft Linen
+      "#3C3C3C", // Gunmetal
+      "#3FB6C0", // Sky Cyan
+      "#E08A5B", // Warm Copper
+    ];
+
+    // Randomize the order of the solid colors on every restart
+    const shuffled = [...BRAND_SOLID_COLORS].sort(() => Math.random() - 0.5);
+    const colorA = shuffled[0];
+    const colorB = shuffled[1];
+    const colorC = shuffled[2];
+    const angle = Math.floor(Math.random() * 70) + 110; // 110deg - 180deg
+
+    // Full background: simple gradient composed of solid colors in random order
+    screenEl.style.background = `linear-gradient(${angle}deg, ${colorA} 0%, ${colorB} 100%)`;
+
+    // Mirrored progress bar wings: gradient using randomized colors
+    const accentCol = (colorA === "#ECEBE4" || colorA === "#3C3C3C") ? colorB : colorA;
+    screenEl.style.setProperty("--warmup-bar-grad-left", `linear-gradient(270deg, ${colorA} 0%, ${colorC} 100%)`);
+    screenEl.style.setProperty("--warmup-bar-grad-right", `linear-gradient(90deg, ${colorA} 0%, ${colorC} 100%)`);
+    screenEl.style.setProperty("--warmup-accent", accentCol);
+
+    const pctNumEl = document.getElementById("warmup-pct-num");
+    const wingLeftEl = document.getElementById("warmup-wing-left");
+    const wingRightEl = document.getElementById("warmup-wing-right");
+    const actionEl = document.getElementById("warmup-action");
+    const targetEl = document.getElementById("warmup-target");
+    const skipBtnEl = document.getElementById("warmup-skip-btn");
+
+    const STAGES = [
+      { threshold: 14, action: "fetching", target: "Wav2Vec 2.0 Audio Backbone" },
+      { threshold: 34, action: "fetching", target: "Vision Transformer ViT-B/16" },
+      { threshold: 54, action: "fetching", target: "Whisper Speech Recognition Model" },
+      { threshold: 74, action: "fetching", target: "InsightFace 3D Landmarker & Alignment" },
+      { threshold: 88, action: "calibrating", target: "Information-Theoretic Synchrony Engine" },
+      { threshold: 96, action: "verifying", target: "Cross-Modal Affective Attention Heads" },
+      { threshold: 100, action: "ready", target: "DeepSentinel Operational" },
+    ];
+
+    let currentPct = 0;
+    let isDismissed = false;
+    let backendWarmed = false;
+
+    // Check live backend warmup status
+    fetch("/warmup/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        backendWarmed = !!data.warmed;
+      })
+      .catch(() => {
+        backendWarmed = true;
+      });
+
+    function dismiss() {
+      if (isDismissed) return;
+      isDismissed = true;
+      sessionStorage.setItem("ds_warmup_completed", "1");
+      currentPct = 100;
+      updateVisuals(100);
+      if (actionEl) {
+        actionEl.textContent = "ready";
+        actionEl.style.color = accentCol;
+      }
+      if (targetEl) targetEl.textContent = "DeepSentinel Operational";
+
+      setTimeout(() => {
+        screenEl.classList.add("dismissed");
+        setTimeout(() => {
+          screenEl.style.display = "none";
+        }, 550);
+      }, 300);
+    }
+
+    if (skipBtnEl) {
+      skipBtnEl.addEventListener("click", dismiss);
+    }
+
+    const keyListener = (e) => {
+      if (e.code === "Space" || e.code === "Escape") {
+        window.removeEventListener("keydown", keyListener);
+        dismiss();
+      }
+    };
+    window.addEventListener("keydown", keyListener);
+
+    function updateVisuals(pct) {
+      const pClamped = Math.min(100, Math.max(0, pct));
+      if (pctNumEl) pctNumEl.textContent = Math.round(pClamped);
+
+      // Mirrored center expansion: half-width extends left and right from 50%
+      const halfPct = pClamped / 2;
+      if (wingLeftEl) wingLeftEl.style.width = `${halfPct.toFixed(1)}%`;
+      if (wingRightEl) wingRightEl.style.width = `${halfPct.toFixed(1)}%`;
+
+      if (barTrackEl) {
+        if (pClamped > 1) barTrackEl.classList.add("active");
+        else barTrackEl.classList.remove("active");
+      }
+
+      // Update bracketed console line: fetching [ ... ] ...
+      const activeStage = STAGES.find((s) => pClamped <= s.threshold) || STAGES[STAGES.length - 1];
+      if (actionEl && actionEl.textContent !== activeStage.action) {
+        actionEl.textContent = activeStage.action;
+        if (activeStage.action === "ready") {
+          actionEl.style.color = "#1EA896";
+        } else if (activeStage.action === "calibrating") {
+          actionEl.style.color = "#DB5A42";
+        } else {
+          actionEl.style.color = "#1EA896";
+        }
+      }
+      if (targetEl && targetEl.textContent !== activeStage.target) {
+        targetEl.textContent = activeStage.target;
+      }
+    }
+
+    // Animation loop: smoothly advance towards 100% over ~2.2 seconds
+    const startTime = performance.now();
+    const duration = 2200; // 2.2 seconds for optimal cinematic feel
+
+    function tick(now) {
+      if (isDismissed) return;
+      const elapsed = now - startTime;
+      const progressRatio = Math.min(1, elapsed / duration);
+
+      // Smooth ease-in-out curve
+      const eased = progressRatio < 0.5
+        ? 2 * progressRatio * progressRatio
+        : 1 - Math.pow(-2 * progressRatio + 2, 2) / 2;
+
+      // Hold briefly at 92% if backend is still actively warming (safety guard)
+      let targetProgress = eased * 100;
+      if (!backendWarmed && targetProgress > 92) {
+        targetProgress = 92;
+      }
+
+      currentPct += (targetProgress - currentPct) * 0.25;
+      updateVisuals(currentPct);
+
+      if (progressRatio >= 1 && (backendWarmed || elapsed > 3500)) {
+        dismiss();
+      } else {
+        requestAnimationFrame(tick);
+      }
+    }
+
+    requestAnimationFrame(tick);
+  }
+
   // ── Boot ──────────────────────────────────────────────────────────────────
   makeSparkles();
+  initWarmupScreen();
   render();
   bindMagnetic();
   bindTilt();

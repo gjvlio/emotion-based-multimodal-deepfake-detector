@@ -136,6 +136,22 @@ def health():
     return HealthResponse(status="ok" if meta.loaded else "no_model", model=meta)
 
 
+@app.get("/warmup/status")
+def warmup_status():
+    svc = _service()
+    if not svc:
+        return {
+            "status": "ready",
+            "progress": 1.0,
+            "stage": "ready",
+            "target": "Demo Static Mode",
+            "device": "demo",
+            "warmed": True,
+            "checkpoint": "demo-mode",
+        }
+    return svc.warmup_status()
+
+
 @app.get("/model/info", response_model=ModelInfo)
 def model_info():
     svc = _service()

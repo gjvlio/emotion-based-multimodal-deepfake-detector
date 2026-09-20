@@ -90,6 +90,9 @@ class ModelService:
         self._stop = threading.Event()
         self._warmed = threading.Event()
         self._warm_thread: Optional[threading.Thread] = None
+        self._warmup_stage: str = "initializing"
+        self._warmup_target: str = "Core Preprocessing Pipeline"
+        self._warmup_progress: float = 0.05
 
         self._wav2vec_proc = None
         self._bert_tok = None
@@ -218,6 +221,19 @@ class ModelService:
 
     # ── Warmup (preload preprocessing models) ──────────────────────────────────
 
+    def warmup_status(self) -> dict:
+        with self._lock:
+            warmed = self._warmed.is_set()
+            return {
+                "status": "ready" if warmed else "warming",
+                "progress": 1.0 if warmed else self._warmup_progress,
+                "stage": "ready" if warmed else self._warmup_stage,
+                "target": "DeepSentinel Neural Engine" if warmed else self._warmup_target,
+                "device": self.device,
+                "warmed": warmed,
+                "checkpoint": getattr(self._meta, "checkpoint", "active"),
+            }
+
     def warmup(self) -> None:
         """Preload every model the inference path touches, so the first /detect
         pays only compute — not cold weight-loading. Idempotent; loaders cache
@@ -227,23 +243,45 @@ class ModelService:
 
         t0 = time.time()
         steps = [
-            ("wav2vec2", lambda: A._load_wav2vec(settings.wav2vec_model, device=self.device)),
-            ("bert",     lambda: A._load_bert(settings.bert_model, device=self.device)),
-            ("whisper",  lambda: A._load_whisper(settings.whisper_model, device=self.device)),
-            ("vit",      lambda: V._load_vit(settings.vit_model, device=self.device)),
-            ("insightface", V._load_insightface_app),
+            ("wav2vec2", "Wav2Vec 2.0 Audio Backbone", 0.22, lambda: A._load_wav2vec(settings.wav2vec_model, device=self.device)),
+            ("bert",     "BERT Contextual Prosody Tokenizer", 0.40, lambda: A._load_bert(settings.bert_model, device=self.device)),
+            ("whisper",  "Whisper Speech Recognition Model", 0.60, lambda: A._load_whisper(settings.whisper_model, device=self.device)),
+            ("vit",      "Vision Transformer ViT-B/16 Backbone", 0.80, lambda: V._load_vit(settings.vit_model, device=self.device)),
+            ("insightface", "InsightFace Facial Landmarker & Alignment", 0.94, V._load_insightface_app),
         ]
         if getattr(V, "_FEAT_AVAILABLE", False):
-            steps.append(("py-feat", V._load_feat_detector))
+            steps.append(("py-feat", "py-feat AU Saliency Detector", 0.97, V._load_feat_detector))
 
-        for name, fn in steps:
+        for key, name, prog, fn in steps:
             try:
+                with self._lock:
+                    self._warmup_stage = "fetching"
+                    self._warmup_target = name
+                    self._warmup_progress = prog
                 fn()
-                log.info(f"  warmup: {name} ready")
+                log.info(f"  warmup: {key} ready")
             except Exception as e:  # missing/failed model degrades to fallback, not fatal
-                log.warning(f"  warmup: {name} failed ({e}) — will use fallback at request time")
+                log.warning(f"  warmup: {key} failed ({e}) — will use fallback at request time")
 
-        self._warmed.set()
+        # Step 6: Dry-run PyTorch forward pass to compile CUDA kernels and allocate memory buffers
+        try:
+            with self._lock:
+                self._warmup_stage = "calibrating"
+                self._warmup_target = "Bilinear Fusion & Affective Attention"
+                self._warmup_progress = 0.98
+            dummy_at = torch.zeros(1, 1024, device=self.device)
+            dummy_v = torch.zeros(1, 768, device=self.device)
+            with torch.no_grad():
+                self.model._detect(dummy_at, dummy_v, has_speech=True)
+            log.info("  warmup: PyTorch CUDA execution graph & kernels pre-warmed")
+        except Exception as e:
+            log.warning(f"  warmup: dry-run forward pass notice: {e}")
+
+        with self._lock:
+            self._warmup_stage = "ready"
+            self._warmup_target = "DeepSentinel Neural Engine"
+            self._warmup_progress = 1.0
+            self._warmed.set()
         log.info(f"Warmup complete in {time.time() - t0:.1f}s — /detect now pays compute only.")
 
     def start_warmup(self) -> None:
