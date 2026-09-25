@@ -402,6 +402,7 @@ class ModelService:
 
             # Valence definitions: 1 (happy), -1 (sad, angry, fear, disgust), 0 (neutral)
             top_a_idx = int(torch.argmax(pa).item())
+            top_b_idx = int(torch.argmax(pb).item())
             val_a = 1 if top_a_idx == 1 else (-1 if top_a_idx in {2, 3, 4, 5} else 0)
             val_b = 1 if top_b_idx == 1 else (-1 if top_b_idx in {2, 3, 4, 5} else 0)
 
