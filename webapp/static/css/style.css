@@ -910,11 +910,11 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .bar-emo-fear, .bar-emo-fearful { background: var(--emo-fear-grad); }
 
 .drow.drow-top {
-  background: rgba(255, 255, 255, 0.55);
-  border-radius: 8px;
-  padding: 5px 8px;
-  margin: -3px -8px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.85), 0 2px 8px rgba(0,0,0,0.03);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
 }
 .drow.drow-top .dlabel { font-weight: 700; color: var(--gun); }
 .drow.drow-top .dval { font-weight: 700; color: var(--gun); }
@@ -1026,6 +1026,51 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
   padding: 3px 9px;
   border-radius: 999px;
   text-transform: uppercase;
+}
+
+.discrepancy-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.discrepancy-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delta-tag {
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--verdigris);
+  background: rgba(30, 168, 150, 0.12);
+  border: 1px solid rgba(30, 168, 150, 0.28);
+  padding: 1.5px 7px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dom-banner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.dom-gap-title {
+  display: block;
+  font-family: var(--f-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gun);
+  margin-bottom: 8px;
+  line-height: 1.3;
 }
 
 .results-foot { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 26px; }
@@ -2852,20 +2897,45 @@ body {
 
   .drow-head {
     display: grid !important;
-    grid-template-columns: 56px 1fr 36px !important;
+    grid-template-columns: 56px 1fr auto !important;
+    align-items: center !important;
     gap: 8px !important;
-    font-size: 9.5px !important;
+    font-size: 9px !important;
+    letter-spacing: 0.05em !important;
     padding-bottom: 3px !important;
-    margin-bottom: 2px !important;
+    margin-bottom: 4px !important;
+  }
+
+  .drow-head .dval-head {
+    text-align: right !important;
+    white-space: nowrap !important;
   }
 
   .drow {
     display: grid !important;
-    grid-template-columns: 56px 1fr 36px !important;
+    grid-template-columns: 56px 1fr 38px !important;
     align-items: center !important;
     gap: 8px !important;
     font-size: 12.5px !important;
     padding: 2.5px 0 !important;
+  }
+
+  .drow.drow-top {
+    background: transparent !important;
+    border-radius: 0 !important;
+    padding: 2.5px 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .drow.drow-top .dlabel {
+    font-weight: 700 !important;
+    color: var(--gun) !important;
+  }
+
+  .drow.drow-top .dval {
+    font-weight: 700 !important;
+    color: var(--gun) !important;
   }
 
   .drow .dlabel {
@@ -2887,18 +2957,50 @@ body {
     margin-bottom: 12px !important;
   }
 
+  .discrepancy-card-head {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .discrepancy-title-wrap {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .discrepancy-title-wrap .modality-title {
+    font-size: 15px !important;
+    line-height: 1.25 !important;
+  }
+
+  .delta-tag {
+    font-family: var(--f-mono) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: var(--verdigris) !important;
+    background: rgba(30, 168, 150, 0.12) !important;
+    border: 1px solid rgba(30, 168, 150, 0.28) !important;
+    padding: 1.5px 6px !important;
+    border-radius: 6px !important;
+    white-space: nowrap !important;
+  }
+
   .discrepancy-dominant-banner {
     padding: 11px 13px !important;
     margin: 10px 0 14px !important;
     border-radius: 13px !important;
   }
 
-  .discrepancy-dominant-banner .row-between {
+  .dom-banner-header {
     display: flex !important;
     align-items: center !important;
     justify-content: space-between !important;
     gap: 8px !important;
-    margin-bottom: 6px !important;
+    margin-bottom: 5px !important;
   }
 
   .dom-tag-label {
@@ -2906,8 +3008,13 @@ body {
     padding: 2px 6px !important;
   }
 
-  #dom-title {
-    font-size: 12.5px !important;
+  .dom-gap-title {
+    display: block !important;
+    font-size: 13.5px !important;
+    font-weight: 700 !important;
+    color: var(--gun) !important;
+    margin-bottom: 7px !important;
+    line-height: 1.3 !important;
   }
 
   .gap-val {

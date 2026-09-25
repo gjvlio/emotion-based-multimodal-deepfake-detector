@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css?v=21" />
+  <link rel="stylesheet" href="/static/css/style.css?v=22" />
   <script>
     window.DEEPSENTINEL_API_BASE = localStorage.getItem("ds_api_base") || "https://gjrvlio-deepsentinel-engine.hf.space";
   </script>
@@ -564,9 +564,12 @@
 
         <!-- Unified Emotion Discrepancy (Δ) Card -->
         <div class="glass-card discrepancy-unified-card" data-reveal>
-          <div class="card-head" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-            <strong class="modality-title" style="margin:0;">Emotion Discrepancy Breakdown <span class="step-tech">(Δ)</span></strong>
-            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?" style="margin:0;">
+          <div class="card-head discrepancy-card-head">
+            <div class="discrepancy-title-wrap">
+              <strong class="modality-title">Emotion Discrepancy</strong>
+              <span class="delta-tag">(Δ)</span>
+            </div>
+            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
@@ -576,15 +579,13 @@
 
           <!-- Dominant / Biggest Gap Highlight Banner -->
           <div class="discrepancy-dominant-banner" id="dom-banner">
-            <div class="row-between" style="margin-bottom: 8px;">
-              <div style="display:flex;align-items:center;gap:10px">
-                <span class="dom-tag-label">PRIMARY GAP</span>
-                <strong id="dom-title">Biggest emotion gap · —</strong>
-              </div>
+            <div class="dom-banner-header">
+              <span class="dom-tag-label">PRIMARY GAP</span>
               <span class="gap-val" id="gap-val">—</span>
             </div>
+            <strong id="dom-title" class="dom-gap-title">Biggest emotion gap · —</strong>
             <div class="bar bar-lg"><div class="bar-fill bar-grad" id="dom-bar"></div></div>
-            <p class="hint" id="dom-desc" style="margin-top: 8px; margin-bottom: 0;">—</p>
+            <p class="hint" id="dom-desc">—</p>
           </div>
 
           <!-- Itemized 6-Emotion Breakdown -->
@@ -825,6 +826,6 @@
 
   </main>
 
-  <script src="/static/js/app.js?v=21"></script>
+  <script src="/static/js/app.js?v=22"></script>
 </body>
 </html>
