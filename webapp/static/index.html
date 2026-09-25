@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#121820" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>DeepSentinel — Multimodal Deepfake Detection</title>
   <link rel="icon" href="/static/img/logo.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -327,10 +330,6 @@
               <div class="analyzing-player-header">
                 <span class="live-pill"><span class="live-dot"></span> LIVE INFERENCE</span>
                 <div class="analyzing-header-meta">
-                  <span class="analyzing-timer-badge mono-tag" id="analyzing-timer-badge" title="Elapsed / Estimated Evaluation Time">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                    <span id="analyzing-elapsed-header">00:00.0</span> / <span id="analyzing-est-header">~00:07.5</span>
-                  </span>
                   <span class="analyzing-chip mono-tag" id="analyzing-clip-badge">00:00.0 – 00:05.5</span>
                 </div>
               </div>
@@ -530,7 +529,7 @@
 
           <div class="meter"><span class="meter-marker" id="sarc-marker"><span class="meter-val" id="sarc-val"></span></span></div>
           <div class="meter-scale"><span>Sincere</span><span>Sarcastic</span></div>
-          <div class="guide-note" id="g-sarc"><div><p>Measures sarcastic tone. This keeps the AI from mistaking dry jokes or poker faces for deepfakes.</p></div></div>
+          <div class="guide-note" id="g-sarc"><div><p>Measures the estimated probability of sarcastic delivery P(sarcasm). Sincere speech scores &lt;25%, while rhetorical or deadpan irony scores &gt;50%. This prevents the detector from mistaking dry humor or poker faces for deepfakes.</p></div></div>
         </div>
 
         <!-- two emotion reads -->
@@ -559,15 +558,15 @@
 
         <!-- Unified Emotion Discrepancy (Δ) Card -->
         <div class="glass-card discrepancy-unified-card" data-reveal>
-          <div class="card-head">
-            <div class="card-head-modality">
-              <strong class="modality-title">Emotion Discrepancy Breakdown <span class="step-tech">(Δ)</span></strong>
-              <span class="hint">Cross-modal difference per emotion (0% = match, 100% = clash)</span>
-            </div>
-            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?">
+          <div class="card-head" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+            <strong class="modality-title" style="margin:0;">Emotion Discrepancy Breakdown <span class="step-tech">(Δ)</span></strong>
+            <button class="info-btn" data-guide="g-delta" aria-expanded="false" aria-label="What is Delta?" style="margin:0;">
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
+
+          <!-- Upper Side Collapsible Guide Note -->
+          <div class="guide-note" id="g-delta" style="margin-bottom: 16px;"><div><p><b>Δ (delta)</b> measures the affective divergence between voice and facial expressions for each of the 6 emotions. Authentic videos maintain low discrepancy across all categories, whereas synthetic faces or spliced audio produce sharp localized spikes.</p></div></div>
 
           <!-- Dominant / Biggest Gap Highlight Banner -->
           <div class="discrepancy-dominant-banner" id="dom-banner">
@@ -584,7 +583,6 @@
 
           <!-- Itemized 6-Emotion Breakdown -->
           <div class="dist dist-delta" id="delta-list" style="margin-top: 18px;"></div>
-          <div class="guide-note" id="g-delta"><div><p><b>Δ (delta)</b> measures the affective divergence between voice and facial expressions for each of the 6 emotions. Authentic videos maintain low discrepancy across all categories, whereas synthetic faces or spliced audio produce sharp localized spikes.</p></div></div>
         </div>
 
         <div class="results-foot">

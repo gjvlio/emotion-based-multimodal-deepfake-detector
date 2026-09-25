@@ -59,6 +59,9 @@ tools/MuseTalk/
 *.txt
 !requirements*.txt
 !requirements/*.txt
+!deploy/hf_space/packages.txt
+deploy/hf_staging/
+deploy/hf_repo/
 *.pdf
 *.log
 
@@ -93,9 +96,11 @@ docs/*.pdf
 /logs
 
 # =============================================================================
-# Web app — runtime artifacts (keep source + static assets tracked)
+# Web app & Generator — runtime artifacts (keep source + static assets tracked)
 # =============================================================================
 webapp/uploads/
+generator/outputs/
+generator/temp/
 
 # =============================================================================
 # Preprocessing / data outputs (regenerable, too large for git)

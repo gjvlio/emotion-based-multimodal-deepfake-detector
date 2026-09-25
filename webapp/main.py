@@ -16,19 +16,20 @@ No UI yet — this is the model-serving backend. Frontend comes later.
 """
 from __future__ import annotations
 
-import logging
-import shutil
-from contextlib import asynccontextmanager
-from pathlib import Path
-
+import asyncio
 import json
+import logging
 import re
+import shutil
 import subprocess
 import time
 import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -113,6 +114,14 @@ app = FastAPI(
                 "Auto-equips the latest training checkpoint.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -297,7 +306,29 @@ def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]
         except Exception as e:
             log.warning(f"ffmpeg slicing exception ({e}); using source file")
 
+    # If untrimmed non-mp4 (e.g. webm, mov, mkv), remux to CFR H.264 mp4 for reliable cv2 seeking
+    if clip_to_eval == dest and dest.suffix.lower() != ".mp4":
+        norm_name = f"norm_{dest.stem}_{unique_name}.mp4"
+        norm_dest = settings.upload_dir / norm_name
+        n_cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(dest),
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac",
+            str(norm_dest),
+        ]
+        try:
+            r = subprocess.run(n_cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode == 0 and norm_dest.exists() and norm_dest.stat().st_size > 1000:
+                clip_to_eval = norm_dest
+        except Exception as e:
+            log.warning(f"ffmpeg format normalization notice ({e}); using source file")
+
     return clip_to_eval
+
+
+# Global GPU semaphore to serialize neural inference and prevent CUDA OOM under concurrency
+_gpu_semaphore = asyncio.Semaphore(1)
 
 
 @app.post("/detect", response_model=DetectionResult)
@@ -312,18 +343,19 @@ async def detect(
             status_code=503,
             detail="Live detection needs the ML stack (torch/transformers). Use Demo mode (/demo) for walkthrough.",
         )
-    try:
-        clip_to_eval = _prepare_clip(file, start_time, end_time)
-        return svc.predict(clip_to_eval)
-    except InputValidationError as e:
-        raise HTTPException(status_code=422, detail=e.to_dict())
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        log.exception("Detection failed")
-        raise HTTPException(status_code=500, detail=f"Detection error: {e}")
+    async with _gpu_semaphore:
+        try:
+            clip_to_eval = _prepare_clip(file, start_time, end_time)
+            return svc.predict(clip_to_eval)
+        except InputValidationError as e:
+            raise HTTPException(status_code=422, detail=e.to_dict())
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        except Exception as e:
+            log.exception("Detection failed")
+            raise HTTPException(status_code=500, detail=f"Detection error: {e}")
 
 
 @app.post("/detect/stream")
@@ -356,47 +388,49 @@ async def detect_stream(
             yield f"data: {json.dumps({'error': err_dict})}\n\n"
         return StreamingResponse(err_generator(), media_type="text/event-stream")
 
-    def event_generator():
-        try:
-            for event in svc.predict_stream(clip_to_eval):
-                yield f"data: {json.dumps(event)}\n\n"
-        except InputValidationError as e:
-            yield f"data: {json.dumps({'error': e.to_dict()})}\n\n"
-        except Exception as e:
-            log.exception("Stream detection error")
-            err_dict = {
-                "code": "ERR_INTERNAL",
-                "title": "Pipeline Processing Error",
-                "message": str(e),
-                "suggestion": "Please check the clip formatting or try another video.",
-            }
-            yield f"data: {json.dumps({'error': err_dict})}\n\n"
+    async def event_generator():
+        async with _gpu_semaphore:
+            try:
+                for event in svc.predict_stream(clip_to_eval):
+                    yield f"data: {json.dumps(event)}\n\n"
+                    await asyncio.sleep(0.005)
+            except InputValidationError as e:
+                yield f"data: {json.dumps({'error': e.to_dict()})}\n\n"
+            except Exception as e:
+                log.exception("Stream detection error")
+                err_dict = {
+                    "code": "ERR_INTERNAL",
+                    "title": "Pipeline Processing Error",
+                    "message": str(e),
+                    "suggestion": "Please check the clip formatting or try another video.",
+                }
+                yield f"data: {json.dumps({'error': err_dict})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ── Frontend (SPA) ─────────────────────────────────────────────────────────────
 # Static assets (css/js/img) under /static. The single-page app shell is served
-# for every client-side route so deep links and refreshes work.
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# for every client-side route so deep links and refreshes work when static assets exist.
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Client-side routes handled by the SPA shell (History API navigation).
-SPA_PATHS = {
-    "/", "/upload", "/analyzing", "/results",
-    "/about", "/about/thesis", "/about/researchers",
-    "/demo", "/demo/upload", "/demo/analyzing", "/demo/results",
-    "/demo/about", "/demo/about/thesis", "/demo/about/researchers",
-}
+    # Client-side routes handled by the SPA shell (History API navigation).
+    SPA_PATHS = {
+        "/", "/upload", "/analyzing", "/results",
+        "/about", "/about/thesis", "/about/researchers",
+        "/demo", "/demo/upload", "/demo/analyzing", "/demo/results",
+        "/demo/about", "/demo/about/thesis", "/demo/about/researchers",
+    }
 
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_shell(full_path: str):
+        """Serve the SPA shell for known view routes; 404 otherwise."""
+        index_file = STATIC_DIR / "index.html"
+        p = "/" + full_path
+        if p == "/demo" or p.startswith("/demo/"):
+            p = p[len("/demo"):] or "/"
+        if p in SPA_PATHS or full_path == "":
+            return FileResponse(index_file, headers={"Cache-Control": "no-store"})
+        raise HTTPException(status_code=404, detail="Not found")
 
-@app.get("/{full_path:path}", include_in_schema=False)
-def spa_shell(full_path: str):
-    """Serve the SPA shell for known view routes; 404 otherwise.
-    The optional /demo prefix maps onto the same views (hardcoded demo mode)."""
-    p = "/" + full_path
-    if p == "/demo" or p.startswith("/demo/"):
-        p = p[len("/demo"):] or "/"
-    if p in SPA_PATHS or full_path == "":
-        # never cache the shell so updated css/js are always picked up
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
-    raise HTTPException(status_code=404, detail="Not found")

@@ -57,6 +57,8 @@ class DetectionResult(BaseModel):
     transcript: str
     served_by: ModelInfo             # which checkpoint produced this result
     forensic_interpretation: Optional[ForensicInterpretation] = None
+    language: Optional[str] = "en"
+    advisory_notes: Optional[List[str]] = []
 
 
 class HealthResponse(BaseModel):

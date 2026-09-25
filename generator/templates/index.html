@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deepfake Generator Studio • Thesis Demonstration Companion</title>
+  <meta name="description" content="Interactive Deepfake Synthesis Companion Tool for Multimodal Deepfake Detection Demonstration. Features live webcam recording, file upload, and Wav2Lip lip-sync & audio swap generation.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/generator.css">
+</head>
+<body class="dark-theme">
+  <!-- Subtle ambient background glows -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="ambient-glow glow-3"></div>
+
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-icon-wrapper">
+          <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-badge-row">
+            <span class="badge badge-accent">Thesis Defense Demo</span>
+            <span class="badge badge-success">GPU Accelerated</span>
+            <span class="badge badge-neutral">Git-Safe Sandbox</span>
+          </div>
+          <h1 class="brand-title">Deepfake Generator <span class="gradient-text">Studio</span></h1>
+          <p class="brand-subtitle">Interactive Cross-Modal Manipulation Suite for Live DeepSentinel Defense</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="http://localhost:8000" target="_blank" class="btn btn-outline" id="btn-open-detector">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          Open DeepSentinel Detector
+        </a>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="generator-workspace">
+      <!-- Section 1: Inputs Grid -->
+      <section class="studio-section" aria-labelledby="section-inputs-title">
+        <div class="section-header">
+          <div class="step-indicator">Step 1</div>
+          <h2 id="section-inputs-title" class="section-title">Prepare Source Materials</h2>
+          <p class="section-desc">Record or upload an authentic base face, then provide the tampering material to drive the deepfake.</p>
+        </div>
+
+        <div class="inputs-grid">
+          <!-- Left Card: Original Face Video -->
+          <div class="input-card" id="card-original-face">
+            <div class="card-header">
+              <div class="card-title-group">
+                <span class="card-icon">👤</span>
+                <div>
+                  <h3 class="card-title">1. Original Face Material</h3>
+                  <p class="card-subtitle">Authentic video or webcam capture</p>
+                </div>
+              </div>
+              <div class="tab-pill-group" role="tablist">
+                <button type="button" class="tab-pill active" id="tab-face-cam" data-target="panel-face-cam">Webcam</button>
+                <button type="button" class="tab-pill" id="tab-face-upload" data-target="panel-face-upload">Upload</button>
+                <button type="button" class="tab-pill" id="tab-face-preset" data-target="panel-face-preset">Presets</button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <!-- Panel: Webcam -->
+              <div class="tab-panel active" id="panel-face-cam">
+                <div class="webcam-viewport-wrapper">
+                  <video id="face-cam-live" class="viewport-video" autoplay playsinline muted></video>
+                  <video id="face-cam-playback" class="viewport-video hidden" controls playsinline></video>
+                  <div class="cam-overlay" id="face-cam-placeholder">
+                    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                    <span>Click "Enable Camera" to record live video</span>
+                    <button type="button" class="btn btn-sm btn-primary" id="btn-start-face-cam">Enable Camera</button>
+                  </div>
+                  <div class="recording-badge hidden" id="face-record-indicator">
+                    <span class="record-pulse"></span>
+                    <span id="face-record-timer">00:00</span>
+                  </div>
+                </div>
+
+                <div class="cam-controls hidden" id="face-cam-controls">
+                  <button type="button" class="btn btn-danger" id="btn-record-face">
+                    <span class="btn-dot"></span> Record Clip
+                  </button>
+                  <button type="button" class="btn btn-secondary hidden" id="btn-stop-face">Stop</button>
+                  <button type="button" class="btn btn-outline btn-sm hidden" id="btn-retake-face">Retake</button>
+                </div>
+              </div>
+
+              <!-- Panel: Upload -->
+              <div class="tab-panel hidden" id="panel-face-upload">
+                <div class="dropzone" id="dropzone-face">
+                  <input type="file" id="file-face" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,image/jpeg,image/png" class="file-input-hidden">
+                  <div class="dropzone-content">
+                    <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <p class="dropzone-title">Drag & drop original video or image</p>
+                    <p class="dropzone-hint">Supports MP4, WebM, MOV or Portrait JPEG/PNG</p>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="document.getElementById('file-face').click()">Browse File</button>
+                  </div>
+                </div>
+                <div class="upload-preview hidden" id="preview-face-upload">
+                  <video id="video-face-preview" controls class="viewport-video"></video>
+                  <div class="preview-meta">
+                    <span id="label-face-file" class="file-tag">selected_face.mp4</span>
+                    <button type="button" class="btn-icon-clear" id="btn-clear-face">✕</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Panel: Presets -->
+              <div class="tab-panel hidden" id="panel-face-preset">
+                <p class="preset-hint">Select a pre-loaded authentic subject video from the thesis dataset:</p>
+                <div class="preset-list" id="preset-list-face">
+                  {% for p in presets %}
+                  <div class="preset-item" data-path="{{ p.path }}" data-type="face">
+                    <div class="preset-info">
+                      <span class="preset-name">{{ p.label }}</span>
+                      <span class="preset-sub">{{ p.filename }} • {{ p.duration }}s</span>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline preset-select-btn">Use Face</button>
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="preset-preview hidden" id="preview-face-preset">
+                  <video id="video-face-preset-playback" controls class="viewport-video"></video>
+                  <div class="preview-meta">
+                    <span id="label-face-preset" class="file-tag">Preset Selected</span>
+                    <button type="button" class="btn-icon-clear" id="btn-clear-face-preset">✕</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <span class="status-indicator" id="status-face-ready">
+                <span class="status-dot"></span> <span class="status-text">No face material selected</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Right Card: Tampering / Donor Material -->
+          <div class="input-card" id="card-donor-material">
+            <div class="card-header">
+              <div class="card-title-group">
+                <span class="card-icon">🎭</span>
+                <div>
+                  <h3 class="card-title">2. Tampering / Donor Material</h3>
+                  <p class="card-subtitle">Driving speech, audio, or emotion</p>
+                </div>
+              </div>
+              <div class="tab-pill-group" role="tablist">
+                <button type="button" class="tab-pill active" id="tab-donor-presets" data-target="panel-donor-preset">Presets</button>
+                <button type="button" class="tab-pill" id="tab-donor-record" data-target="panel-donor-record">Record</button>
+                <button type="button" class="tab-pill" id="tab-donor-upload" data-target="panel-donor-upload">Upload</button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <!-- Panel: Presets (Default for quick demo!) -->
+              <div class="tab-panel active" id="panel-donor-preset">
+                <p class="preset-hint">Instant donor audio from thesis emotional tracks (happy, angry, neutral):</p>
+                <div class="preset-list" id="preset-list-donor">
+                  {% for p in presets %}
+                  <div class="preset-item" data-path="{{ p.path }}" data-type="donor">
+                    <div class="preset-info">
+                      <span class="preset-name">{{ p.label }}</span>
+                      <span class="preset-sub">{{ p.filename }} • {{ p.duration }}s</span>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline preset-select-btn">Use Donor</button>
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="preset-preview hidden" id="preview-donor-preset">
+                  <video id="video-donor-preset-playback" controls class="viewport-video"></video>
+                  <div class="preview-meta">
+                    <span id="label-donor-preset" class="file-tag">Preset Selected</span>
+                    <button type="button" class="btn-icon-clear" id="btn-clear-donor-preset">✕</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Panel: Record Audio / Cam -->
+              <div class="tab-panel hidden" id="panel-donor-record">
+                <div class="webcam-viewport-wrapper">
+                  <video id="donor-cam-live" class="viewport-video" autoplay playsinline muted></video>
+                  <video id="donor-cam-playback" class="viewport-video hidden" controls playsinline></video>
+                  <div class="cam-overlay" id="donor-cam-placeholder">
+                    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                    <span>Click "Enable Microphone/Camera" to record donor voice</span>
+                    <button type="button" class="btn btn-sm btn-primary" id="btn-start-donor-cam">Enable Mic / Camera</button>
+                  </div>
+                  <div class="recording-badge hidden" id="donor-record-indicator">
+                    <span class="record-pulse"></span>
+                    <span id="donor-record-timer">00:00</span>
+                  </div>
+                </div>
+
+                <div class="cam-controls hidden" id="donor-cam-controls">
+                  <button type="button" class="btn btn-danger" id="btn-record-donor">
+                    <span class="btn-dot"></span> Record Donor Clip
+                  </button>
+                  <button type="button" class="btn btn-secondary hidden" id="btn-stop-donor">Stop</button>
+                  <button type="button" class="btn btn-outline btn-sm hidden" id="btn-retake-donor">Retake</button>
+                </div>
+              </div>
+
+              <!-- Panel: Upload -->
+              <div class="tab-panel hidden" id="panel-donor-upload">
+                <div class="dropzone" id="dropzone-donor">
+                  <input type="file" id="file-donor" accept="video/mp4,video/webm,video/quicktime,audio/wav,audio/mpeg,audio/mp3,audio/ogg" class="file-input-hidden">
+                  <div class="dropzone-content">
+                    <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+                    </svg>
+                    <p class="dropzone-title">Drag & drop donor video or audio</p>
+                    <p class="dropzone-hint">Supports MP4, WebM, WAV, MP3, M4A</p>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="document.getElementById('file-donor').click()">Browse Donor</button>
+                  </div>
+                </div>
+                <div class="upload-preview hidden" id="preview-donor-upload">
+                  <video id="video-donor-preview" controls class="viewport-video"></video>
+                  <div class="preview-meta">
+                    <span id="label-donor-file" class="file-tag">selected_donor.mp4</span>
+                    <button type="button" class="btn-icon-clear" id="btn-clear-donor">✕</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <span class="status-indicator" id="status-donor-ready">
+                <span class="status-dot"></span> <span class="status-text">No donor material selected</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Generation Mode & Controls -->
+      <section class="studio-section" aria-labelledby="section-mode-title">
+        <div class="section-header">
+          <div class="step-indicator">Step 2</div>
+          <h2 id="section-mode-title" class="section-title">Select Manipulation Model</h2>
+          <p class="section-desc">Choose between GAN-based lip-sync reanimation or instantaneous cross-modal audio track splicing.</p>
+        </div>
+
+        <div class="mode-selection-grid">
+          <!-- Mode 1: Wav2Lip -->
+          <label class="mode-card active" id="mode-card-wav2lip">
+            <input type="radio" name="generation_mode" value="wav2lip" checked class="mode-radio">
+            <div class="mode-card-content">
+              <div class="mode-badge-row">
+                <span class="mode-icon">👄</span>
+                <span class="badge badge-accent">Track 2: GAN Lip-Sync</span>
+                <span class="badge badge-tech">PyTorch CUDA</span>
+              </div>
+              <h3 class="mode-title">Wav2Lip Lip-Sync Reanimation</h3>
+              <p class="mode-description">
+                Re-synthesizes the lower face and mouth regions using a pre-trained GAN generator and lip-sync discriminator. The mouth geometry accurately articulates the phonemes of the donor audio while retaining head pose and background.
+              </p>
+              <div class="mode-specs">
+                <span>⏱ Speed: ~10-15s</span>
+                <span>🎯 Best for: Visual Phonetic Tampering</span>
+              </div>
+            </div>
+          </label>
+
+          <!-- Mode 2: Audio Swap -->
+          <label class="mode-card" id="mode-card-audioswap">
+            <input type="radio" name="generation_mode" value="audio_swap" class="mode-radio">
+            <div class="mode-card-content">
+              <div class="mode-badge-row">
+                <span class="mode-icon">🔊</span>
+                <span class="badge badge-success">Track 1: Audio Swap</span>
+                <span class="badge badge-tech">FFmpeg Engine</span>
+              </div>
+              <h3 class="mode-title">Audio-Swap Manipulation</h3>
+              <p class="mode-description">
+                Directly splices the donor audio into the authentic face video stream. Produces profound cross-modal affective discordance (e.g. smiling face paired with enraged audio), ideal for testing DeepSentinel's emotion-incongruence detector.
+              </p>
+              <div class="mode-specs">
+                <span>⏱ Speed: &lt; 1s (Instant)</span>
+                <span>🎯 Best for: Cross-Modal Incongruence</span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Collapsible Advanced Tuning -->
+        <details class="tuning-details" id="advanced-tuning">
+          <summary class="tuning-summary">
+            <span>⚙️ Advanced Tuning & Performance Controls</span>
+          </summary>
+          <div class="tuning-content">
+            <div class="tuning-grid">
+              <div class="tuning-control">
+                <label for="tuning-resolution" class="tuning-label">Resolution Scaling</label>
+                <select id="tuning-resolution" class="tuning-select">
+                  <option value="2" selected>Fast 2x Downscale (Optimized for ~10s Demo)</option>
+                  <option value="1">Native 1x Resolution (Full Definition)</option>
+                </select>
+                <small class="tuning-hint">2x scales video for ultra-fast generation during live presentations.</small>
+              </div>
+
+              <div class="tuning-control">
+                <label for="tuning-pad" class="tuning-label">Chin Pad Padding (px)</label>
+                <input type="number" id="tuning-pad" value="10" min="0" max="30" class="tuning-input">
+                <small class="tuning-hint">Bottom bounding box expansion to cover chin movement.</small>
+              </div>
+
+              <div class="tuning-control">
+                <label class="tuning-checkbox-label">
+                  <input type="checkbox" id="tuning-nosmooth">
+                  <span>Disable Temporal Box Smoothing</span>
+                </label>
+                <small class="tuning-hint">Disables rolling window average for rapid head motions.</small>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Generation Trigger Button -->
+        <div class="action-trigger-row">
+          <button type="button" class="btn btn-xl btn-primary glow-btn" id="btn-generate" disabled>
+            <span class="btn-icon">⚡</span>
+            <span class="btn-text">Synthesize Deepfake Video</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Section 3: Live Progress Overlay (Shows during generation) -->
+      <section class="progress-section hidden" id="section-progress">
+        <div class="progress-card">
+          <div class="progress-spinner-wrapper">
+            <div class="radar-pulse"></div>
+            <div class="progress-spinner"></div>
+          </div>
+          <h3 class="progress-heading">Synthesizing Deepfake Manipulation...</h3>
+          <p class="progress-sub" id="progress-status-text">Ingesting source materials and extracting acoustic features...</p>
+          
+          <div class="progress-steps-list">
+            <div class="step-item active" id="p-step-1">
+              <span class="step-dot"></span>
+              <span class="step-label">1. Video Preprocessing & Normalization</span>
+            </div>
+            <div class="step-item" id="p-step-2">
+              <span class="step-dot"></span>
+              <span class="step-label">2. Face Detection & Audio Mel-Spectrogram Processing</span>
+            </div>
+            <div class="step-item" id="p-step-3">
+              <span class="step-dot"></span>
+              <span class="step-label">3. Deep Learning Synthesis (CUDA Execution)</span>
+            </div>
+            <div class="step-item" id="p-step-4">
+              <span class="step-dot"></span>
+              <span class="step-label">4. Final Muxing & Encoding to Sandbox Storage</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 4: Result & Side-by-Side Visualization Dashboard -->
+      <section class="results-section hidden" id="section-results" aria-labelledby="section-results-title">
+        <div class="section-header">
+          <div class="step-indicator success">Success</div>
+          <h2 id="section-results-title" class="section-title">Deepfake Synthesis Complete</h2>
+          <p class="section-desc">Side-by-side comparison of original authentic face, tampering donor material, and the generated deepfake.</p>
+        </div>
+
+        <!-- Master Synchronized Playback Control -->
+        <div class="playback-master-bar">
+          <div class="master-btn-group">
+            <button type="button" class="btn btn-sm btn-primary" id="btn-sync-play">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Play All Synchronized
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary" id="btn-sync-pause">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              Pause All
+            </button>
+            <button type="button" class="btn btn-sm btn-outline" id="btn-sync-restart">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+              Restart
+            </button>
+          </div>
+          <div class="master-time" id="master-time-display">00:00 / 00:00</div>
+        </div>
+
+        <!-- 3-Column Video Showcase Grid -->
+        <div class="showcase-grid">
+          <!-- Col 1: Original Face -->
+          <div class="showcase-card">
+            <div class="showcase-header">
+              <span class="badge badge-neutral">Original Face</span>
+              <span class="badge-fps" id="badge-face-fps">25 fps</span>
+            </div>
+            <div class="showcase-player-box">
+              <video id="res-video-face" class="showcase-video" playsinline loop></video>
+            </div>
+            <div class="showcase-footer">
+              <span class="showcase-meta" id="meta-face-res">Authentic Base Material</span>
+            </div>
+          </div>
+
+          <!-- Col 2: Tampering Source -->
+          <div class="showcase-card">
+            <div class="showcase-header">
+              <span class="badge badge-warning">Tampering Donor</span>
+              <span class="badge-fps" id="badge-donor-fps">Audio/Video</span>
+            </div>
+            <div class="showcase-player-box">
+              <video id="res-video-donor" class="showcase-video" playsinline loop></video>
+            </div>
+            <div class="showcase-footer">
+              <span class="showcase-meta" id="meta-donor-res">Driving Audio & Emotion</span>
+            </div>
+          </div>
+
+          <!-- Col 3: Generated Deepfake Result -->
+          <div class="showcase-card highlight-fake">
+            <div class="showcase-header">
+              <span class="badge badge-danger">Synthesized Deepfake</span>
+              <span class="badge-fps" id="badge-fake-fps">MP4</span>
+            </div>
+            <div class="showcase-player-box">
+              <video id="res-video-fake" class="showcase-video" playsinline controls loop></video>
+            </div>
+            <div class="showcase-footer">
+              <span class="showcase-meta" id="meta-fake-res">Manipulated Stream</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Technical Telemetry & Defense Card -->
+        <div class="telemetry-card">
+          <div class="telemetry-header">
+            <h4>Generated Artifact Telemetry (Gitignored Sandbox)</h4>
+            <span class="badge badge-success" id="telemetry-mode-tag">Wav2Lip Lip-Sync</span>
+          </div>
+          <div class="telemetry-grid">
+            <div class="telemetry-item">
+              <span class="t-label">Generation Time:</span>
+              <span class="t-value" id="t-time">12.4s</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="t-label">Output Filename:</span>
+              <span class="t-value" id="t-filename">fake_wav2lip_xxxx.mp4</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="t-label">Storage Location:</span>
+              <span class="t-value" id="t-path">generator/outputs/</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="t-label">Video Stream:</span>
+              <span class="t-value" id="t-video-stream">h264 (640x360 @ 25fps)</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="t-label">Audio Stream:</span>
+              <span class="t-value" id="t-audio-stream">aac (16kHz / 44.1kHz)</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="t-label">File Size:</span>
+              <span class="t-value" id="t-size">142 KB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Demonstration Action Suite -->
+        <div class="demo-action-bar">
+          <a id="btn-download-result" href="#" download class="btn btn-secondary">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download Deepfake MP4
+          </a>
+
+          <button type="button" class="btn btn-primary" id="btn-test-deepfake-sentinel">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            Verify with DeepSentinel Detector
+          </button>
+
+          <button type="button" class="btn btn-outline" id="btn-reset-studio">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+            </svg>
+            Generate Another
+          </button>
+        </div>
+
+        <!-- Live Detector Cross-Examination Box (Appears when tested) -->
+        <div class="detector-live-card hidden" id="detector-live-card">
+          <div class="detector-live-header">
+            <div class="detector-status-title">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              <span>DeepSentinel Multimodal Evaluation Verdict</span>
+            </div>
+            <span class="badge" id="detector-verdict-badge">ANALYZING...</span>
+          </div>
+          <div class="detector-live-body" id="detector-live-body">
+            <p id="detector-live-msg">Querying DeepSentinel detection pipeline at http://localhost:8000/detect...</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Thesis Defense Companion Tool • Multimodal Audio-Visual Emotion Incongruence Deepfake Detection • Group 10</p>
+    </footer>
+  </div>
+
+  <script src="/static/js/generator.js"></script>
+</body>
+</html>
