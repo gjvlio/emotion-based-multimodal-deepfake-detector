@@ -130,16 +130,51 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
         probe_btn = gr.Button("Analyze Video with GPU", variant="primary")
         probe_btn.click(fn=predict_video_gpu, inputs=[video_input], outputs=[probe_output], api_name=False)
 
-# Mount Gradio onto the root of the application so Space health checks pass
-app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+from fastapi.responses import HTMLResponse
 
-# Pre-populate api_info on the mounted Gradio App so it never executes the broken
-# Pydantic 2.11 boolean schema generator during GET /
-safe_info = {"named_endpoints": {}, "unnamed_endpoints": {}, "_safe": True}
-for route in app.routes:
-    if hasattr(route, "app") and hasattr(route.app, "api_info"):
-        route.app.api_info = safe_info
-        route.app.all_app_info = safe_info
+@fastapi_app.get("/", response_class=HTMLResponse)
+def index_dashboard():
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>DeepSentinel Neural Engine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; background: #07090e; color: #f8fafc; padding: 2rem; display: flex; justify-content: center; align-items: center; min-height: 80vh; margin: 0; }
+        .card { max-width: 600px; width: 100%; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 2rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h1 { font-size: 1.4rem; margin-top: 0; color: #38bdf8; }
+        .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 600; font-size: 0.85rem; margin-bottom: 1rem; }
+        p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+        ul { list-style: none; padding: 0; margin: 1rem 0; }
+        li { padding: 0.45rem 0; border-bottom: 1px solid #1e293b; font-family: ui-monospace, monospace; font-size: 0.85rem; color: #cbd5e1; }
+        a { color: #38bdf8; text-decoration: none; font-weight: 500; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🛡️ DeepSentinel — Neural Inference Engine</h1>
+        <div class="badge">🟢 Operational &amp; Listening</div>
+        <p>This backend hosts the multimodal deep learning inference pipeline (Whisper, ArcFace, Swin Transformer, Wav2Vec 2.0). Connected directly to the Vercel frontend.</p>
+        <div style="font-weight: 600; margin-top: 1rem; color: #e2e8f0;">Active API Endpoints:</div>
+        <ul>
+            <li><code>POST /detect</code> — Synchronous forensic analysis</li>
+            <li><code>POST /detect/stream</code> — Real-time SSE telemetry</li>
+            <li><code>GET /health</code> — Model checkpoint status</li>
+            <li><code>GET /warmup/status</code> — Model warmup monitor</li>
+        </ul>
+        <p style="margin-top: 1.5rem;"><a href="/gradio">Open Forensic GPU Probe &rarr;</a></p>
+    </div>
+</body>
+</html>"""
+
+@fastapi_app.get("/config")
+def config_fallback():
+    return {"status": "ok", "app": "DeepSentinel"}
+
+# Mount Gradio probe dashboard at /gradio so Space health checks at / and /config are 100% reliable
+app = gr.mount_gradio_app(fastapi_app, demo, path="/gradio")
 
 # Explicit ZeroGPU startup dispatch: ZeroGPU normally triggers client.startup_report()
 # through gr.Blocks.launch(). Since gr.mount_gradio_app bypasses launch(), we invoke
