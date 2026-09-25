@@ -411,35 +411,26 @@ async def detect_stream(
 
 # ── Frontend (SPA) ─────────────────────────────────────────────────────────────
 # Static assets (css/js/img) under /static. The single-page app shell is served
-# for every client-side route so deep links and refreshes work.
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# for every client-side route so deep links and refreshes work when static assets exist.
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Client-side routes handled by the SPA shell (History API navigation).
-SPA_PATHS = {
-    "/", "/upload", "/analyzing", "/results",
-    "/about", "/about/thesis", "/about/researchers",
-    "/demo", "/demo/upload", "/demo/analyzing", "/demo/results",
-    "/demo/about", "/demo/about/thesis", "/demo/about/researchers",
-}
+    # Client-side routes handled by the SPA shell (History API navigation).
+    SPA_PATHS = {
+        "/", "/upload", "/analyzing", "/results",
+        "/about", "/about/thesis", "/about/researchers",
+        "/demo", "/demo/upload", "/demo/analyzing", "/demo/results",
+        "/demo/about", "/demo/about/thesis", "/demo/about/researchers",
+    }
 
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_shell(full_path: str):
+        """Serve the SPA shell for known view routes; 404 otherwise."""
+        index_file = STATIC_DIR / "index.html"
+        p = "/" + full_path
+        if p == "/demo" or p.startswith("/demo/"):
+            p = p[len("/demo"):] or "/"
+        if p in SPA_PATHS or full_path == "":
+            return FileResponse(index_file, headers={"Cache-Control": "no-store"})
+        raise HTTPException(status_code=404, detail="Not found")
 
-@app.get("/{full_path:path}", include_in_schema=False)
-def spa_shell(full_path: str):
-    """Serve the SPA shell for known view routes; 200 healthcheck otherwise."""
-    index_file = STATIC_DIR / "index.html"
-    if not index_file.exists():
-        if full_path == "":
-            return {
-                "status": "ok",
-                "service": "DeepSentinel Neural Engine",
-                "dashboard": "/gradio",
-                "endpoints": ["/detect", "/detect/stream", "/health", "/warmup/status"],
-            }
-        raise HTTPException(status_code=404, detail="SPA static frontend is served by Vercel.")
-    p = "/" + full_path
-    if p == "/demo" or p.startswith("/demo/"):
-        p = p[len("/demo"):] or "/"
-    if p in SPA_PATHS or full_path == "":
-        # never cache the shell so updated css/js are always picked up
-        return FileResponse(index_file, headers={"Cache-Control": "no-store"})
-    raise HTTPException(status_code=404, detail="Not found")

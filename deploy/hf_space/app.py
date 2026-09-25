@@ -21,6 +21,42 @@ if str(PROJECT_ROOT) not in sys.path:
 
 Path(os.environ["DEEPSENTINEL_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
+# If the 1.16 GB checkpoint is not inside the repo, fetch it from private HF Model Hub
+MODEL_REPO = os.environ.get("DEEPSENTINEL_MODEL_REPO", "gjrvlio/deepsentinel-weights")
+CKPT_FILE = Path("checkpoints/best_phase2_adapted.pt")
+
+if not CKPT_FILE.exists():
+    token = (
+        os.environ.get("HF_TOKEN")
+        or os.environ.get("hf_token")
+        or os.environ.get("HF_ACCESS_TOKEN")
+        or os.environ.get("HUGGINGFACE_TOKEN")
+        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        or os.environ.get("HF_READ_TOKEN")
+        or os.environ.get("TOKEN")
+    )
+    if token:
+        masked = token[:4] + "..." + token[-4:] if len(token) > 8 else "***"
+        print(f"[DeepSentinel] Auth token detected ({masked}). Downloading weights from {MODEL_REPO}...")
+    else:
+        print("[DeepSentinel] WARNING: No HF_TOKEN detected in environment!")
+        print("[DeepSentinel] 'gjrvlio/deepsentinel-weights' is private. Please add 'HF_TOKEN' as a Secret in Space Settings > Variables and secrets.")
+
+    try:
+        from huggingface_hub import hf_hub_download
+        print(f"[DeepSentinel] Fetching model weights from {MODEL_REPO} ({CKPT_FILE.name})...")
+        CKPT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        downloaded = hf_hub_download(
+            repo_id=MODEL_REPO,
+            filename=CKPT_FILE.name,
+            local_dir=str(CKPT_FILE.parent),
+            repo_type="model",
+            token=token if token else None,
+        )
+        print(f"[DeepSentinel] Weights ready at {downloaded} ({os.path.getsize(downloaded):,} bytes).")
+    except Exception as e:
+        print(f"[DeepSentinel] Hub download notice: {e}")
+
 import gradio as gr
 from webapp.main import app as fastapi_app
 
@@ -31,7 +67,7 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
         # 🛡️ DeepSentinel — Neural Inference Engine
         ### Status: 🟢 Operational & Listening for Requests
         
-        This private Space runs the deep learning inference pipeline (Whisper, ArcFace, Swin Transformer, Wav2Vec 2.0).
+        This Space runs the multimodal deep learning inference pipeline (Whisper, ArcFace, Swin Transformer, Wav2Vec 2.0).
         It communicates directly with the DeepSentinel Vercel frontend.
 
         #### Active Endpoints:
@@ -42,10 +78,11 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
         """
     )
 
-# Mount Gradio onto the existing FastAPI application
-app = gr.mount_gradio_app(fastapi_app, demo, path="/gradio")
+# Mount Gradio onto the root of the application so Space health checks pass
+app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 7860))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
