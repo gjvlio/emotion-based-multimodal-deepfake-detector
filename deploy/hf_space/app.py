@@ -4,15 +4,26 @@ Runs on free Gradio SDK without requiring Docker or paid billing.
 Exposes full FastAPI endpoints (/detect, /detect/stream, /health, /warmup/status)
 while displaying a live service status dashboard on port 7860.
 """
-from __future__ import annotations
+# 1. ZeroGPU must be imported before any other packages
+try:
+    import spaces
+except ImportError:
+    class _MockSpaces:
+        @staticmethod
+        def GPU(func=None, duration=60):
+            if func is None:
+                return lambda f: f
+            return func
+    spaces = _MockSpaces()
 
 import os
 import sys
 from pathlib import Path
 
-# Hugging Face Spaces have a writable /tmp directory
+# Force CPU device and disable boot warmup so ZeroGPU CUDA emulation is not tripped at startup
+os.environ["DEEPSENTINEL_DEVICE"] = "cpu"
+os.environ["DEEPSENTINEL_WARMUP"] = "0"
 os.environ.setdefault("DEEPSENTINEL_UPLOAD_DIR", "/tmp/deepsentinel_uploads")
-os.environ.setdefault("DEEPSENTINEL_WARMUP", "1")
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -20,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 Path(os.environ["DEEPSENTINEL_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
+
 
 # If the 1.16 GB checkpoint is not inside the repo, fetch it from private HF Model Hub
 MODEL_REPO = os.environ.get("DEEPSENTINEL_MODEL_REPO", "gjrvlio/deepsentinel-weights")
@@ -57,16 +69,6 @@ if not CKPT_FILE.exists():
     except Exception as e:
         print(f"[DeepSentinel] Hub download notice: {e}")
 
-try:
-    import spaces
-except ImportError:
-    class _MockSpaces:
-        @staticmethod
-        def GPU(func=None, duration=60):
-            if func is None:
-                return lambda f: f
-            return func
-    spaces = _MockSpaces()
 
 import gradio as gr
 from webapp.main import app as fastapi_app
