@@ -1286,7 +1286,9 @@
         });
 
         // 6. Top tag on Bounding Box
-        const topLabelText = insightFaceKeyframes.length > 0 ? "INSIGHTFACE · RETINAFACE" : "FACE #01 · ViT KEYFRAME";
+        const topLabelText = insightFaceKeyframes.length > 0 
+          ? (cssW < 420 ? "RETINAFACE" : "INSIGHTFACE · RETINAFACE")
+          : (cssW < 420 ? "ViT FRAME" : "FACE #01 · ViT KEYFRAME");
         ctx.font = "600 9px monospace";
         const topTextW = ctx.measureText(topLabelText).width;
         ctx.fillStyle = "rgba(11, 15, 23, 0.85)";
@@ -1298,9 +1300,17 @@
         ctx.fillText(topLabelText, x + 5, y - 6);
 
         // 7. Live Emotion Detection Badge Attached to Box (Placed safely so never clipped)
-        const emoPillText = `EMOTION: ${emoLabel.toUpperCase()} ${emoConf.toFixed(0)}%`;
-        ctx.font = "700 10.5px monospace";
-        const emoPillW = ctx.measureText(emoPillText).width + 18;
+        let shortEmo = emoLabel;
+        if (cssW < 420 && shortEmo.length > 10) {
+          if (shortEmo.toLowerCase().includes("vit")) shortEmo = "ViT";
+          else if (shortEmo.toLowerCase().includes("retina")) shortEmo = "RetinaFace";
+          else if (shortEmo.toLowerCase().includes("listen")) shortEmo = "Listening";
+        }
+        const emoPillText = cssW < 420
+          ? `${shortEmo.toUpperCase()} ${emoConf.toFixed(0)}%`
+          : `EMOTION: ${shortEmo.toUpperCase()} ${emoConf.toFixed(0)}%`;
+        ctx.font = cssW < 420 ? "700 9.5px monospace" : "700 10.5px monospace";
+        const emoPillW = ctx.measureText(emoPillText).width + (cssW < 420 ? 14 : 18);
         const emoPillX = Math.max(drawX + 4, Math.min(drawX + drawW - emoPillW - 4, x + bw - emoPillW));
         // Place above the box if room, otherwise inside or below without colliding with bottom telemetry pill
         let emoPillY = y - 26;
@@ -1314,9 +1324,10 @@
         // Strict boundary clamp so it NEVER collides with bottom telemetry pill (occupies bottom 10-48px)
         emoPillY = Math.max(drawY + 4, Math.min(cssH - 72, emoPillY));
 
+        const pillH = cssW < 420 ? 18 : 22;
         ctx.fillStyle = "rgba(11, 15, 23, 0.92)";
         ctx.beginPath();
-        ctx.roundRect(emoPillX, emoPillY, emoPillW, 22, 6);
+        ctx.roundRect(emoPillX, emoPillY, emoPillW, pillH, 5);
         ctx.fill();
 
         ctx.strokeStyle = emoColor;
@@ -1328,11 +1339,11 @@
 
         ctx.fillStyle = emoColor;
         ctx.beginPath();
-        ctx.arc(emoPillX + 9, emoPillY + 11, 3.5, 0, Math.PI * 2);
+        ctx.arc(emoPillX + (cssW < 420 ? 7 : 9), emoPillY + (cssW < 420 ? 9 : 11), cssW < 420 ? 2.5 : 3.5, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(emoPillText, emoPillX + 18, emoPillY + 15);
+        ctx.fillText(emoPillText, emoPillX + (cssW < 420 ? 13 : 18), emoPillY + (cssW < 420 ? 12.5 : 15));
 
         // Smooth asymptotic progress interpolation towards targetProgressPct
         if (currentRenderedPct < targetProgressPct) {

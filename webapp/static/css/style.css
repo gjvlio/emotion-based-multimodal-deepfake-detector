@@ -2243,11 +2243,25 @@ body {
 
 /* ── Handheld & Mobile (max-width: 768px) ────────────────────────────────── */
 @media (max-width: 768px) {
-  /* Safe-area header adjustments */
+  /* Safe-area header adjustments - strict edge-to-edge navbar */
   .site-header {
-    margin: 0;
-    width: 100%;
-    border-radius: 0;
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 0 !important;
+    border-top: none !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(60, 60, 60, 0.08) !important;
+    background: rgba(247, 247, 245, 0.94) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    box-shadow: 0 2px 14px rgba(18, 24, 32, 0.05) !important;
+    z-index: 100 !important;
     padding: max(10px, env(safe-area-inset-top, 10px)) 16px 10px;
   }
 
@@ -2426,32 +2440,172 @@ body {
     border-radius: 14px;
   }
 
+  /* General Mobile Card & Stage Rhythm */
+  .stage {
+    margin: 14px auto 20px !important;
+    max-width: 100% !important;
+  }
+
+  .stage.stage-crop-active {
+    margin: 8px auto 0 !important;
+  }
+
+  .glass-card {
+    padding: 16px 14px !important;
+    margin-bottom: 12px !important;
+    border-radius: 18px !important;
+  }
+
   /* Analyzing Stage on Mobile */
+  .analyzing-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .analyzing-left,
+  .analyzing-right {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
   .analyzing-player-card {
-    padding: 12px;
-    border-radius: 18px;
+    padding: 12px 14px !important;
+    border-radius: 16px !important;
+  }
+
+  .analyzing-player-header {
+    margin-bottom: 8px;
+  }
+
+  .live-pill {
+    font-size: 10.5px;
+    padding: 2.5px 8px;
+  }
+
+  .analyzing-chip {
+    font-size: 10.5px;
+    padding: 2.5px 8px;
   }
 
   .analyzing-video-wrapper {
-    max-height: 40vh;
-    border-radius: 12px;
+    aspect-ratio: 16 / 9;
+    max-height: 34vh;
+    border-radius: 10px;
+  }
+
+  .analyzing-telemetry-badge {
+    padding: 5px 8px;
+    gap: 6px;
+    bottom: 6px;
+    left: 6px;
+    right: 6px;
+    border-radius: 7px;
   }
 
   .hud-phase-label {
-    font-size: 10.5px;
+    font-size: 11px;
+    max-width: 58%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hud-phase-label span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .hud-emotion-stat {
-    font-size: 11px;
+    font-size: 10.5px;
+    padding: 2px 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .analyzing-transcript-card {
+    padding: 12px 14px !important;
+    border-radius: 16px !important;
+  }
+
+  .transcript-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .transcript-header strong {
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .transcript-model-tag {
+    font-size: 9.5px;
+    padding: 2px 6px;
+    flex-shrink: 0;
+  }
+
+  .transcript-body {
+    padding: 8px 10px;
+    min-height: 38px;
+    border-radius: 8px;
+  }
+
+  .analyzing-transcript-text {
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  .analyzing-status-card {
+    padding: 16px 14px !important;
+    border-radius: 16px !important;
+  }
+
+  .loader-lg {
+    width: 74px;
+    height: 74px;
+    margin: 4px auto 10px;
+  }
+
+  .loader-ring {
+    width: 74px;
+    height: 74px;
+  }
+
+  .loader-pct {
+    font-size: 17px;
+  }
+
+  .loader-sub {
+    font-size: 8.5px;
+  }
+
+  .analyzing-title {
+    font-size: 18px;
+    margin: 0 0 2px;
+  }
+
+  #analyzing-file {
+    font-size: 11.5px;
+    margin-bottom: 8px;
   }
 
   .analyzing-timing-bar {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 4px;
-    padding: 8px 4px;
-    margin-bottom: 12px;
+    padding: 6px 4px;
+    margin-bottom: 10px;
     text-align: center;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid var(--line);
   }
 
   .timing-divider {
@@ -2459,98 +2613,328 @@ body {
   }
 
   .timing-lbl {
-    font-size: 9px;
+    font-size: 8.5px;
+    letter-spacing: 0.04em;
   }
 
   .timing-num {
-    font-size: 12px;
+    font-size: 11.5px;
   }
 
   .analyzing-steps {
+    margin: 10px 0 0;
     font-size: 12.5px;
-    gap: 8px;
-    padding: 4px 0;
+    gap: 6px;
+    padding: 2px 0;
   }
 
-  .loader-lg {
-    width: 80px;
-    height: 80px;
+  .analyzing-steps li {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 6px 0 !important;
+    font-size: 12.5px !important;
+    line-height: 1.35 !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
   }
 
-  .loader-pct {
-    font-size: 18px;
+  .analyzing-steps li .step-dot {
+    width: 18px !important;
+    height: 18px !important;
+    margin-top: 1px !important;
+    flex-shrink: 0 !important;
   }
 
-  .loader-sub {
-    font-size: 9px;
+  .analyzing-steps li .step-tech {
+    display: none !important;
   }
 
   /* Results Stage on Mobile */
   .verdict-card {
-    padding: 28px 16px 22px;
-    border-radius: 20px;
+    padding: 22px 14px 18px !important;
+    border-radius: 18px !important;
+    margin-bottom: 12px !important;
   }
 
   .verdict-tag {
-    font-size: 11px;
-    padding: 4px 12px;
+    font-size: 10.5px;
+    padding: 3px 10px;
   }
 
   .verdict-pct {
-    font-size: clamp(52px, 14vw, 78px);
+    font-size: clamp(48px, 13vw, 68px);
     line-height: 1.0;
-    margin: 8px 0;
+    margin: 6px 0;
   }
 
   .verdict-label {
-    font-size: 19px;
+    font-size: 17px;
   }
 
   .verdict-sub {
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: 12.5px;
+    line-height: 1.45;
+    margin: 8px auto 0;
   }
 
   /* Forensic Multi-Tier Interpretation Cards */
   .forensic-card {
-    padding: 20px 14px;
-    border-radius: 18px;
+    padding: 16px 14px !important;
+    border-radius: 18px !important;
+    margin-bottom: 12px !important;
   }
 
   .forensic-headline {
-    font-size: 16px;
-    line-height: 1.35;
+    font-size: 15px;
+    line-height: 1.3;
+    margin-bottom: 6px;
   }
 
   .forensic-summary {
-    font-size: 13px;
-    line-height: 1.55;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .forensic-details-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    margin-top: 12px !important;
   }
 
   .forensic-col-card {
-    padding: 14px 12px;
-    border-radius: 14px;
-  }
-
-  .fcol-text {
-    font-size: 12px;
-  }
-
-  /* Dominant Emotion Banners & Emotion Bars */
-  .head-dominant-banner,
-  .discrepancy-dominant-banner {
-    padding: 12px 14px;
+    padding: 11px 12px;
     border-radius: 12px;
   }
 
-  .row-between {
-    flex-wrap: wrap;
+  .fcol-head {
     gap: 6px;
+    margin-bottom: 6px;
   }
 
-  .dist-item {
+  .fcol-head strong {
     font-size: 12.5px;
+  }
+
+  .fcol-text {
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  /* Sarcasm & Tone NLP Card */
+  .sarc-card {
+    padding: 16px 14px !important;
+    border-radius: 18px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .sarc-head {
+    display: flex;
+    align-items: center;
     gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .sarc-head strong {
+    font-size: 13.5px;
+    line-height: 1.25;
+  }
+
+  .sarc-ic {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+
+  .sarc-ic svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .result-bert-tag {
+    font-size: 9.5px;
+    padding: 2px 6px;
+    margin-left: 0;
+  }
+
+  .result-transcript-box {
+    padding: 9px 12px;
+    margin: 0 0 12px;
+  }
+
+  .result-transcript-label {
+    font-size: 9px;
+    margin-bottom: 3px;
+  }
+
+  .result-transcript-text {
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+
+  .meter {
+    margin: 20px 0 6px;
+    height: 10px;
+  }
+
+  .meter-marker {
+    width: 16px;
+    height: 16px;
+  }
+
+  .meter-scale {
+    font-size: 10.5px;
+    margin-top: 6px;
+  }
+
+  /* Two Modality Cards (Voice & Face) */
+  .grid-2 {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .grid-2 .glass-card {
+    margin-bottom: 0 !important;
+  }
+
+  .card-head-modality {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 2px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .modality-title {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    line-height: 1.25 !important;
+  }
+
+  .card-head .hint {
+    font-size: 11.5px !important;
+    line-height: 1.35 !important;
+    color: var(--muted) !important;
+  }
+
+  /* Dominant Emotion Banners & Emotion Bars */
+  .head-dominant-banner {
+    padding: 9px 12px !important;
+    gap: 10px !important;
+    border-radius: 12px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .dom-icon-box {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 9px !important;
+  }
+
+  .dom-icon-box .emo-svg {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  .dom-tag {
+    font-size: 9px !important;
+    letter-spacing: 0.08em !important;
+  }
+
+  .dom-name {
+    font-size: 17px !important;
+  }
+
+  .dist {
+    gap: 7px !important;
+  }
+
+  .drow-head {
+    display: grid !important;
+    grid-template-columns: 56px 1fr 36px !important;
+    gap: 8px !important;
+    font-size: 9.5px !important;
+    padding-bottom: 3px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .drow {
+    display: grid !important;
+    grid-template-columns: 56px 1fr 36px !important;
+    align-items: center !important;
+    gap: 8px !important;
+    font-size: 12.5px !important;
+    padding: 2.5px 0 !important;
+  }
+
+  .drow .dlabel {
+    font-size: 12px !important;
+  }
+
+  .drow .dval {
+    font-size: 11.5px !important;
+  }
+
+  .bar {
+    height: 8px !important;
+  }
+
+  /* Emotion Discrepancy Breakdown Card */
+  .discrepancy-unified-card {
+    padding: 16px 14px !important;
+    border-radius: 18px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .discrepancy-dominant-banner {
+    padding: 11px 13px !important;
+    margin: 10px 0 14px !important;
+    border-radius: 13px !important;
+  }
+
+  .discrepancy-dominant-banner .row-between {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    margin-bottom: 6px !important;
+  }
+
+  .dom-tag-label {
+    font-size: 9px !important;
+    padding: 2px 6px !important;
+  }
+
+  #dom-title {
+    font-size: 12.5px !important;
+  }
+
+  .gap-val {
+    font-size: 15px !important;
+  }
+
+  #dom-desc {
+    font-size: 11.5px !important;
+    line-height: 1.4 !important;
+    margin-top: 6px !important;
+  }
+
+  .dist-delta .drow {
+    display: grid !important;
+    grid-template-columns: 56px 1fr 34px 56px !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 3px 0 !important;
+  }
+
+  .dist-delta .dtag {
+    min-width: 50px !important;
+    font-size: 9.5px !important;
+    padding: 2.5px 6px !important;
+    border-radius: 999px !important;
+    text-align: center !important;
+    justify-self: end !important;
   }
 
   .scope-card {
@@ -2565,16 +2949,25 @@ body {
 
   /* Action Buttons */
   .results-foot {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    margin-top: 16px !important;
   }
 
   .results-foot .btn {
-    width: 100%;
-    min-height: 48px;
-    justify-content: center;
+    width: 100% !important;
+    min-height: 46px !important;
+    font-size: 14.5px !important;
+    justify-content: center !important;
+  }
+
+  .disclaimer {
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    text-align: center !important;
+    margin: 4px 0 0 !important;
   }
 }
 
