@@ -130,11 +130,16 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
         probe_btn = gr.Button("Analyze Video with GPU", variant="primary")
         probe_btn.click(fn=predict_video_gpu, inputs=[video_input], outputs=[probe_output], api_name=False)
 
-# Bypass Gradio 4.44.0 / Pydantic schema generation crash when rendering frontend/index.html
-demo.get_api_info = lambda all_endpoints=False: {"named_endpoints": {}, "unnamed_endpoints": {}}
-
 # Mount Gradio onto the root of the application so Space health checks pass
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+
+# Pre-populate api_info on the mounted Gradio App so it never executes the broken
+# Pydantic 2.11 boolean schema generator during GET /
+safe_info = {"named_endpoints": {}, "unnamed_endpoints": {}, "_safe": True}
+for route in app.routes:
+    if hasattr(route, "app") and hasattr(route.app, "api_info"):
+        route.app.api_info = safe_info
+        route.app.all_app_info = safe_info
 
 # Explicit ZeroGPU startup dispatch: ZeroGPU normally triggers client.startup_report()
 # through gr.Blocks.launch(). Since gr.mount_gradio_app bypasses launch(), we invoke
