@@ -2,6 +2,10 @@
 (() => {
   "use strict";
 
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has("api")) localStorage.setItem("ds_api_base", urlParams.get("api"));
+  if (urlParams.has("token")) localStorage.setItem("ds_hf_token", urlParams.get("token"));
+
   const API_BASE = window.DEEPSENTINEL_API_BASE || localStorage.getItem("ds_api_base") || "";
   const getAuthHeaders = (headers = {}) => {
     const token = window.DEEPSENTINEL_HF_TOKEN || localStorage.getItem("ds_hf_token") || "";
