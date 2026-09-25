@@ -50,12 +50,13 @@ This guide walks you through deploying DeepSentinel so that anyone—including t
 
 1. Go to [Hugging Face Spaces](https://huggingface.co/spaces) and log in.
 2. Click **"Create new Space"**:
-   - **Space name:** `deepsentinel-engine` (or your choice).
-   - **License:** `mit` or `openrail`.
-   - **Select Space SDK:** **`Docker`** → **`Blank`**.
-   - **Space hardware:** Choose **`Free CPU`** (or **`T4 GPU`** if available/activated).
-   - **Visibility:** `Public`.
-3. In your local terminal, add the Hugging Face Space as a remote or push the deployment kit:
+   - **Space name:** `deepsentinel-engine` (or your preferred name).
+   - **License:** `mit`.
+   - **Select Space SDK:** **`Gradio`** (Selected by default) → Choose **`Blank`**.
+     *(Note: Hugging Face charges for custom Docker, but Gradio is **100% FREE** with no credit card required!)*
+   - **Space hardware:** Choose **`Free CPU`** (2 vCPU, 16 GB RAM) or **`T4 GPU`**.
+   - **Space visibility:** **`Private`** (Protects your model weights and code from unauthorized access).
+3. Click **"Create Space"**.
    ```bash
    # Clone the empty space repository
    git clone https://huggingface.co/spaces/YOUR_USERNAME/deepsentinel-engine temp_hf_space
