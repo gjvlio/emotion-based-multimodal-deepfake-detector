@@ -964,16 +964,20 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .interpret { font-family: var(--f-display); font-size: clamp(18px,2.6vw,23px); font-weight: 500; line-height: 1.32; letter-spacing: -0.02em; color: var(--gun); margin: 0 0 18px; }
 .interpret b { color: var(--copper); font-weight: 600; }
 .interpret b.ok { color: var(--verdigris); }
-.meter { position: relative; height: 12px; border-radius: 999px; background: linear-gradient(90deg, rgba(30,168,150,.18), rgba(114,161,229,.32)); overflow: visible; margin: 8px 0 8px; }
+.sarc-meter-header { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; margin-bottom: 2px; }
+.sarc-meter-title { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+.sarc-meter-score { font-family: var(--f-mono); font-size: 12px; font-weight: 700; color: var(--verdigris); background: rgba(30, 168, 150, 0.12); padding: 3px 9px; border-radius: 6px; }
+.meter { position: relative; height: 12px; border-radius: 999px; background: linear-gradient(90deg, rgba(30,168,150,.18), rgba(114,161,229,.32)); overflow: visible; margin: 28px 0 8px; }
 .meter-marker { position: absolute; top: 50%; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid var(--wisteria);
   transform: translate(-50%,-50%); left: 0; box-shadow: var(--shadow); transition: left 1s var(--e-out); }
-.meter-scale { display: flex; justify-content: space-between; font-family: var(--f-display); font-size: 12.5px; font-weight: 500; color: var(--gun-soft); margin-top: 8px; }
-.meter { margin-top: 30px; }   /* room for the % label sitting above the marker */
+.meter-scale { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 8px; }
 .meter-val { position: absolute; bottom: 150%; left: 50%; transform: translateX(-50%); white-space: nowrap;
   font-family: var(--f-display); font-weight: 600; font-size: 13px; color: var(--gun); }
 .gap-val { font-family: var(--f-display); font-weight: 600; font-size: 15px; color: var(--gun-soft); }
 
-.dist { display: flex; flex-direction: column; gap: 12px; }
+.dist { display: flex; flex-direction: column; gap: 10px; }
+.drow-head { display: grid; grid-template-columns: 66px 1fr 64px; align-items: center; gap: 12px; font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 2px; padding-bottom: 4px; border-bottom: 1px dashed rgba(60, 60, 60, 0.15); }
+.drow-head .dval-head { text-align: right; }
 .drow { display: grid; grid-template-columns: 66px 1fr 42px; align-items: center; gap: 12px; font-size: 13.5px; }
 .drow .dlabel { color: var(--gun-soft); }
 .drow .dval { text-align: right; color: var(--muted); font-family: var(--f-mono); font-size: 12.5px; }

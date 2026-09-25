@@ -410,21 +410,42 @@ class ModelService:
             val_b = 1 if top_b_idx == 1 else (-1 if top_b_idx in {2, 3, 4, 5} else 0)
 
             harmony_bonus = 0.0
-            if top_a_idx == top_b_idx:
-                if top_a_idx != 0:
-                    harmony_bonus = settings.active_emotion_harmony_bonus  # 2.70
-                else:
-                    harmony_bonus = settings.neutral_emotion_harmony_bonus  # 0.70
-            elif val_a * val_b > 0:
-                # Same active valence (both positive or both negative)
-                if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
-                    sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
-                    harmony_bonus = settings.compatible_active_harmony_bonus * sync_scale
-            elif ((val_a == 0 and val_b > 0) or (val_b == 0 and val_a > 0)):
-                # Pleasant conversational engagement: Neutral baseline + gentle positive tone/expression
-                if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
-                    sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
-                    harmony_bonus = settings.compatible_neutral_harmony_bonus * sync_scale
+            max_d = float(torch.max(delta).item())
+
+            # 1. High-Arousal Biological Shield (Russell, 1980; Ekman, 1969):
+            # In genuine high-arousal distress/anger (top_a == top_b == 'angry'), violent facial
+            # contortions and shouting acoustics mimic synthesis artifacts to ViT/W2V encoders.
+            # When vocal and visual affect exhibit tight congruent coupling (max_d <= 0.20)
+            # and sincere delivery (p_sarc < 0.25), compensate for organic arousal strain.
+            if top_a_idx == 3 and top_b_idx == 3 and max_d <= 0.20 and p_sarc < 0.25:
+                harmony_bonus = settings.arousal_harmony_bonus
+            # 2. General / Conversational Harmony Gating:
+            # For conversational speech (happy, neutral, calm), deepfake generators (Wav2Lip,
+            # SadTalker) frequently match smiling moods. Never apply harmony bonuses if the
+            # neural backbone detects manipulation artifacts (raw_val > logit_0).
+            elif (settings.active_emotion_harmony_bonus > 0 or 
+                  settings.neutral_emotion_harmony_bonus > 0 or 
+                  settings.compatible_active_harmony_bonus > 0 or 
+                  settings.compatible_neutral_harmony_bonus > 0):
+                raw_val = float(raw_logit.squeeze().item())
+                tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
+                logit_0 = math.log(tau_0 / (1.0 - tau_0))
+                if raw_val <= logit_0:
+                    if top_a_idx == top_b_idx:
+                        if top_a_idx != 0:
+                            harmony_bonus = settings.active_emotion_harmony_bonus
+                        else:
+                            harmony_bonus = settings.neutral_emotion_harmony_bonus
+                    elif val_a * val_b > 0:
+                        # Same active valence (both positive or both negative)
+                        if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
+                            sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
+                            harmony_bonus = settings.compatible_active_harmony_bonus * sync_scale
+                    elif ((val_a == 0 and val_b > 0) or (val_b == 0 and val_a > 0)):
+                        # Pleasant conversational engagement: Neutral baseline + gentle positive tone/expression
+                        if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
+                            sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
+                            harmony_bonus = settings.compatible_neutral_harmony_bonus * sync_scale
 
         # ── Calibrated Evidence Accumulation ─────────────────────────────
         logit = raw_logit.squeeze() - harmony_bonus
