@@ -3,44 +3,10 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": "webapp/static",
-  "cleanUrls": true,
-  "trailingSlash": false,
   "rewrites": [
     {
       "source": "/static/(.*)",
       "destination": "/$1"
-    },
-    {
-      "source": "/benchmarks",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/about/(.*)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/about",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/demo/(.*)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/demo",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/upload",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/analyzing",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/results",
-      "destination": "/index.html"
     },
     {
       "source": "/(.*)",

@@ -19,8 +19,8 @@ env/
 ENV/
 
 # Exclude all Deep Learning models, checkpoints, weights, and large data files
-checkpoints/
-data/
+/checkpoints/
+/data/
 *.pt
 *.pth
 *.bin
@@ -33,13 +33,13 @@ data/
 *.7z
 
 # Exclude backend services, generator pipelines, evaluation scripts, and tools
-generator/
-src/
-scripts/
-tools/
-deploy/
-tests/
-notebooks/
-docs/
-scratch/
+/generator/
+/src/
+/scripts/
+/tools/
+/deploy/
+/tests/
+/notebooks/
+/docs/
+/scratch/
 run_generator.*
