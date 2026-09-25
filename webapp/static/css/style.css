@@ -228,6 +228,8 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .dz-icon svg { display: block; }
 .dz-icon svg { width: 28px; height: 28px; }
 .dz-empty h3 { font-size: 22px; } .dz-empty .muted { margin: 8px 0 0; } .dz-empty .hint { margin-top: 16px; }
+.privacy-badge { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; padding: 4px 12px; background: rgba(30, 168, 150, 0.08); border: 1px solid rgba(30, 168, 150, 0.22); border-radius: 999px; font-size: 11.5px; color: #0f6e62; font-family: var(--f-body); font-weight: 500; letter-spacing: 0.01em; }
+.privacy-badge svg { flex-shrink: 0; color: var(--verdigris); }
 .dz-file-name { font-size: 17px; font-weight: 600; font-family: var(--f-display); margin: 0; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .error-text { color: var(--copper); text-align: center; margin-top: 16px; font-size: 14px; }
 

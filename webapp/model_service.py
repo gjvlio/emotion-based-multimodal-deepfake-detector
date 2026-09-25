@@ -214,6 +214,27 @@ class ModelService:
     def stop_watcher(self) -> None:
         self._stop.set()
 
+    def cleanup_clip_artifacts(self, clip_id: Optional[str]) -> None:
+        """
+        Zero-Retention Ephemeral Privacy Purge:
+        Immediately removes cached audio, transcript, and feature files
+        generated for a user-uploaded clip.
+        """
+        if not clip_id:
+            return
+        try:
+            for getter in ("_wav_path", "_txt_path", "_transcript_path", "_z_at_path", "_z_v_path"):
+                fn = getattr(self.pipeline, getter, None)
+                if fn:
+                    try:
+                        p = fn(clip_id)
+                        if isinstance(p, Path) and p.is_file():
+                            p.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.debug(f"Cleanup clip artifacts notice ({clip_id}): {e}")
+
     # ── Info ───────────────────────────────────────────────────────────────────
 
     def info(self) -> ModelInfo:

@@ -46,25 +46,50 @@ log = logging.getLogger("deepsentinel.api")
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wav"}
 
 
-def _cleanup_old_uploads(max_files: int = 50, max_age_hours: float = 2.0) -> None:
-    """Prune stale uploaded clips to prevent server disk exhaustion."""
+def _cleanup_old_uploads(max_age_sec: float = 300.0) -> None:
+    """Zero-Retention Sweeper: Purge any lingering upload files older than 5 minutes."""
     try:
         if not settings.upload_dir.exists():
             return
         now = time.time()
-        files = sorted(settings.upload_dir.glob("*"), key=lambda p: p.stat().st_mtime)
-        # Delete if older than max_age_hours
-        for p in files:
-            if p.is_file() and (now - p.stat().st_mtime) > (max_age_hours * 3600):
-                p.unlink(missing_ok=True)
-        # If count still exceeds max_files, prune oldest
-        remaining = sorted(settings.upload_dir.glob("*"), key=lambda p: p.stat().st_mtime)
-        if len(remaining) > max_files:
-            for p in remaining[: len(remaining) - max_files]:
-                if p.is_file():
+        for p in settings.upload_dir.glob("*"):
+            try:
+                if p.is_file() and (now - p.stat().st_mtime) >= max_age_sec:
                     p.unlink(missing_ok=True)
+            except Exception:
+                pass
     except Exception as e:
         log.debug(f"Upload cleanup notice: {e}")
+
+
+def _cleanup_ephemeral_files(paths: list, clip_id: Optional[str] = None) -> None:
+    """
+    Zero-Retention Ephemeral Privacy Purge:
+    Immediately and unconditionally deletes uploaded video files, trimmed derivatives,
+    and any temporary acoustic/linguistic/feature caches generated during inference.
+    """
+    for p in paths:
+        try:
+            if p and isinstance(p, Path) and p.is_file():
+                p.unlink(missing_ok=True)
+        except Exception as e:
+            log.debug(f"Ephemeral file cleanup notice ({p}): {e}")
+
+    if clip_id:
+        try:
+            cache_dir = settings.preprocess_cache_dir
+            if cache_dir.exists():
+                for sub in ("audio", "transcripts", "features/z_at", "features/z_v"):
+                    sub_path = cache_dir / sub
+                    if sub_path.exists():
+                        for f in sub_path.glob(f"*{clip_id}*"):
+                            try:
+                                if f.is_file():
+                                    f.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+        except Exception as e:
+            log.debug(f"Ephemeral cache cleanup notice ({clip_id}): {e}")
 
 # The model backend (torch/transformers/...) is OPTIONAL. A lightweight checkout
 # with only FastAPI installed still serves the full UI and the /demo flow — only
@@ -94,6 +119,8 @@ def _demo_info(note: str) -> ModelInfo:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Purge any stale files left from previous sessions on boot (Zero-Retention Privacy Guarantee)
+    _cleanup_old_uploads(max_age_sec=0.0)
     # Build the model service if the ML stack is present; otherwise demo/static mode.
     svc = _service()
     if svc:
@@ -106,6 +133,7 @@ async def lifespan(app: FastAPI):
     yield
     if svc:
         svc.stop_watcher()
+    _cleanup_old_uploads(max_age_sec=0.0)
 
 
 app = FastAPI(
@@ -181,7 +209,11 @@ def model_reload():
     return meta
 
 
-def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]) -> Path:
+def _prepare_clip(
+    file: UploadFile,
+    start_time: float,
+    end_time: Optional[float],
+) -> Tuple[Path, List[Path], str]:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise InputValidationError(
@@ -192,139 +224,156 @@ def _prepare_clip(file: UploadFile, start_time: float, end_time: Optional[float]
             details={"suffix": suffix},
         )
 
-    # Periodic cleanup of old uploads
+    # Periodic maintenance cleanup
     _cleanup_old_uploads()
 
     # Sanitize and create collision-resistant unique filename
     raw_name = Path(file.filename or "upload.mp4").name
     clean_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw_name)
-    unique_name = f"{uuid.uuid4().hex[:8]}_{clean_name}"
+    clip_id = f"upload_{uuid.uuid4().hex[:8]}_{clean_name}"
+    unique_name = clip_id
 
-    # Persist upload
+    tracked_files: List[Path] = []
+
+    # Persist upload transiently
     dest = settings.upload_dir / unique_name
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    file_bytes = dest.stat().st_size
-    if file_bytes < 1000:
-        raise InputValidationError(
-            code="ERR_EMPTY_FILE",
-            title="Empty or Corrupted File",
-            message="The uploaded video is empty or smaller than 1 KB.",
-            suggestion="Please check that the video file is valid and re-export if needed.",
-            details={"bytes": file_bytes},
-        )
-    if file_bytes > 500 * 1024 * 1024:
-        raise InputValidationError(
-            code="ERR_FILE_TOO_LARGE",
-            title="File Exceeds 500MB Limit",
-            message=f"The uploaded video ({file_bytes / (1024 * 1024):.1f} MB) exceeds the 500 MB limit.",
-            suggestion="Please compress the video or select a smaller clip under 500 MB.",
-            details={"bytes": file_bytes, "max_bytes": 500 * 1024 * 1024},
-        )
-
-    # Pre-check overall video duration
-    total_dur = None
     try:
-        import cv2
-        cap = cv2.VideoCapture(str(dest))
-        if cap.isOpened():
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-            total_dur = frame_count / fps if fps > 0 else 0
-            cap.release()
-            if total_dur > settings.max_upload_duration_sec:
+        with dest.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+        tracked_files.append(dest)
+
+        file_bytes = dest.stat().st_size
+        if file_bytes < 1000:
+            raise InputValidationError(
+                code="ERR_EMPTY_FILE",
+                title="Empty or Corrupted File",
+                message="The uploaded video is empty or smaller than 1 KB.",
+                suggestion="Please check that the video file is valid and re-export if needed.",
+                details={"bytes": file_bytes},
+            )
+        if file_bytes > 500 * 1024 * 1024:
+            raise InputValidationError(
+                code="ERR_FILE_TOO_LARGE",
+                title="File Exceeds 500MB Limit",
+                message=f"The uploaded video ({file_bytes / (1024 * 1024):.1f} MB) exceeds the 500 MB limit.",
+                suggestion="Please compress the video or select a smaller clip under 500 MB.",
+                details={"bytes": file_bytes, "max_bytes": 500 * 1024 * 1024},
+            )
+
+        # Pre-check overall video duration
+        total_dur = None
+        try:
+            import cv2
+            cap = cv2.VideoCapture(str(dest))
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+                total_dur = frame_count / fps if fps > 0 else 0
+                cap.release()
+                if total_dur > settings.max_upload_duration_sec:
+                    raise InputValidationError(
+                        code="ERR_DURATION_TOO_LONG",
+                        title="Video Exceeds Time Limit",
+                        message=f"Video duration ({total_dur / 60.0:.1f} min) exceeds the 10-minute maximum limit.",
+                        suggestion="Please upload or trim a video under 10 minutes.",
+                        details={"duration_sec": total_dur, "max_allowed": settings.max_upload_duration_sec},
+                    )
+        except InputValidationError:
+            raise
+        except Exception as e:
+            log.debug(f"Duration inspection bypassed: {e}")
+
+        # Clip extraction / trimming logic
+        clip_to_eval = dest
+        t_start = max(0.0, float(start_time or 0.0))
+        t_end = float(end_time) if end_time is not None and float(end_time) > 0 else None
+
+        # If a sub-clip is requested or video is longer than max_duration_sec (20s)
+        if (t_start > 0.05) or (t_end is not None) or (total_dur and total_dur > settings.max_duration_sec + 0.5):
+            if t_end is None:
+                t_end = t_start + settings.max_duration_sec
+
+            if t_end <= t_start:
                 raise InputValidationError(
-                    code="ERR_DURATION_TOO_LONG",
-                    title="Video Exceeds Time Limit",
-                    message=f"Video duration ({total_dur / 60.0:.1f} min) exceeds the 10-minute maximum limit.",
-                    suggestion="Please upload or trim a video under 10 minutes.",
-                    details={"duration_sec": total_dur, "max_allowed": settings.max_upload_duration_sec},
+                    code="ERR_INVALID_CROP_RANGE",
+                    title="Invalid Selection Range",
+                    message="Start time must be before end time.",
+                    suggestion="Please drag the timeline handles to select a valid forward time window.",
+                    details={"start_time": t_start, "end_time": t_end},
                 )
-    except InputValidationError:
+
+            slice_dur = t_end - t_start
+            if slice_dur < settings.min_duration_sec - 0.2:
+                raise InputValidationError(
+                    code="ERR_CROP_TOO_SHORT",
+                    title="Selected Clip Is Too Short",
+                    message=f"Selected clip ({slice_dur:.1f}s) is shorter than the minimum {settings.min_duration_sec:.1f}s required.",
+                    suggestion=f"Please drag the timeline scrubber to select at least {settings.min_duration_sec:.0f} seconds.",
+                    details={"duration": slice_dur, "min_required": settings.min_duration_sec},
+                )
+            if slice_dur > settings.max_duration_sec + 0.5:
+                raise InputValidationError(
+                    code="ERR_CROP_TOO_LONG",
+                    title="Selected Clip Is Too Long",
+                    message=f"Selected clip ({slice_dur:.1f}s) exceeds the maximum {settings.max_duration_sec:.1f}s allowed.",
+                    suggestion=f"Please drag the timeline scrubber to select at most {settings.max_duration_sec:.0f} seconds.",
+                    details={"duration": slice_dur, "max_allowed": settings.max_duration_sec},
+                )
+
+            trimmed_name = f"trim_{int(t_start * 100)}_{int(t_end * 100)}_{unique_name}"
+            trimmed_dest = settings.upload_dir / trimmed_name
+            tracked_files.append(trimmed_dest)
+
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", f"{t_start:.3f}",
+                "-to", f"{t_end:.3f}",
+                "-i", str(dest),
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-c:a", "aac",
+                "-avoid_negative_ts", "make_zero",
+                str(trimmed_dest),
+            ]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                if r.returncode == 0 and trimmed_dest.exists() and trimmed_dest.stat().st_size > 1000:
+                    clip_to_eval = trimmed_dest
+                else:
+                    log.warning(f"ffmpeg trim notice: {r.stderr}; using source file")
+            except Exception as e:
+                log.warning(f"ffmpeg slicing exception ({e}); using source file")
+
+        # If untrimmed non-mp4 (e.g. webm, mov, mkv), remux to CFR H.264 mp4 for reliable cv2 seeking
+        if clip_to_eval == dest and dest.suffix.lower() != ".mp4":
+            norm_name = f"norm_{dest.stem}_{unique_name}.mp4"
+            norm_dest = settings.upload_dir / norm_name
+            tracked_files.append(norm_dest)
+            n_cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(dest),
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-c:a", "aac",
+                str(norm_dest),
+            ]
+            try:
+                r = subprocess.run(n_cmd, capture_output=True, text=True, timeout=30)
+                if r.returncode == 0 and norm_dest.exists() and norm_dest.stat().st_size > 1000:
+                    clip_to_eval = norm_dest
+            except Exception as e:
+                log.warning(f"ffmpeg format normalization notice ({e}); using source file")
+
+        return clip_to_eval, tracked_files, clip_id
+
+    except Exception:
+        # If preparation fails at any point, immediately purge any created files
+        for p in tracked_files:
+            try:
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
         raise
-    except Exception as e:
-        log.debug(f"Duration inspection bypassed: {e}")
-
-    # Clip extraction / trimming logic
-    clip_to_eval = dest
-    t_start = max(0.0, float(start_time or 0.0))
-    t_end = float(end_time) if end_time is not None and float(end_time) > 0 else None
-
-    # If a sub-clip is requested or video is longer than max_duration_sec (20s)
-    if (t_start > 0.05) or (t_end is not None) or (total_dur and total_dur > settings.max_duration_sec + 0.5):
-        if t_end is None:
-            t_end = t_start + settings.max_duration_sec
-
-        if t_end <= t_start:
-            raise InputValidationError(
-                code="ERR_INVALID_CROP_RANGE",
-                title="Invalid Selection Range",
-                message="Start time must be before end time.",
-                suggestion="Please drag the timeline handles to select a valid forward time window.",
-                details={"start_time": t_start, "end_time": t_end},
-            )
-
-        slice_dur = t_end - t_start
-        if slice_dur < settings.min_duration_sec - 0.2:
-            raise InputValidationError(
-                code="ERR_CROP_TOO_SHORT",
-                title="Selected Clip Is Too Short",
-                message=f"Selected clip ({slice_dur:.1f}s) is shorter than the minimum {settings.min_duration_sec:.1f}s required.",
-                suggestion=f"Please drag the timeline scrubber to select at least {settings.min_duration_sec:.0f} seconds.",
-                details={"duration": slice_dur, "min_required": settings.min_duration_sec},
-            )
-        if slice_dur > settings.max_duration_sec + 0.5:
-            raise InputValidationError(
-                code="ERR_CROP_TOO_LONG",
-                title="Selected Clip Is Too Long",
-                message=f"Selected clip ({slice_dur:.1f}s) exceeds the maximum {settings.max_duration_sec:.1f}s allowed.",
-                suggestion=f"Please drag the timeline scrubber to select at most {settings.max_duration_sec:.0f} seconds.",
-                details={"duration": slice_dur, "max_allowed": settings.max_duration_sec},
-            )
-
-        trimmed_name = f"trim_{int(t_start * 100)}_{int(t_end * 100)}_{unique_name}"
-        trimmed_dest = settings.upload_dir / trimmed_name
-
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", f"{t_start:.3f}",
-            "-to", f"{t_end:.3f}",
-            "-i", str(dest),
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-c:a", "aac",
-            "-avoid_negative_ts", "make_zero",
-            str(trimmed_dest),
-        ]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if r.returncode == 0 and trimmed_dest.exists() and trimmed_dest.stat().st_size > 1000:
-                clip_to_eval = trimmed_dest
-            else:
-                log.warning(f"ffmpeg trim notice: {r.stderr}; using source file")
-        except Exception as e:
-            log.warning(f"ffmpeg slicing exception ({e}); using source file")
-
-    # If untrimmed non-mp4 (e.g. webm, mov, mkv), remux to CFR H.264 mp4 for reliable cv2 seeking
-    if clip_to_eval == dest and dest.suffix.lower() != ".mp4":
-        norm_name = f"norm_{dest.stem}_{unique_name}.mp4"
-        norm_dest = settings.upload_dir / norm_name
-        n_cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(dest),
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-c:a", "aac",
-            str(norm_dest),
-        ]
-        try:
-            r = subprocess.run(n_cmd, capture_output=True, text=True, timeout=30)
-            if r.returncode == 0 and norm_dest.exists() and norm_dest.stat().st_size > 1000:
-                clip_to_eval = norm_dest
-        except Exception as e:
-            log.warning(f"ffmpeg format normalization notice ({e}); using source file")
-
-    return clip_to_eval
 
 
 # Global GPU semaphore to serialize neural inference and prevent CUDA OOM under concurrency
@@ -343,10 +392,12 @@ async def detect(
             status_code=503,
             detail="Live detection needs the ML stack (torch/transformers). Use Demo mode (/demo) for walkthrough.",
         )
+    temp_files: List[Path] = []
+    clip_id: Optional[str] = None
     async with _gpu_semaphore:
         try:
-            clip_to_eval = _prepare_clip(file, start_time, end_time)
-            return svc.predict(clip_to_eval)
+            clip_to_eval, temp_files, clip_id = _prepare_clip(file, start_time, end_time)
+            return svc.predict(clip_to_eval, clip_id=clip_id)
         except InputValidationError as e:
             raise HTTPException(status_code=422, detail=e.to_dict())
         except ValueError as e:
@@ -356,6 +407,11 @@ async def detect(
         except Exception as e:
             log.exception("Detection failed")
             raise HTTPException(status_code=500, detail=f"Detection error: {e}")
+        finally:
+            # Ephemeral Zero-Retention Privacy: immediately purge upload and caches
+            _cleanup_ephemeral_files(temp_files, clip_id=clip_id)
+            if svc:
+                svc.cleanup_clip_artifacts(clip_id)
 
 
 @app.post("/detect/stream")
@@ -371,8 +427,10 @@ async def detect_stream(
             detail="Live detection needs the ML stack (torch/transformers).",
         )
 
+    temp_files: List[Path] = []
+    clip_id: Optional[str] = None
     try:
-        clip_to_eval = _prepare_clip(file, start_time, end_time)
+        clip_to_eval, temp_files, clip_id = _prepare_clip(file, start_time, end_time)
     except InputValidationError as e:
         def err_generator():
             yield f"data: {json.dumps({'error': e.to_dict()})}\n\n"
@@ -391,7 +449,7 @@ async def detect_stream(
     async def event_generator():
         async with _gpu_semaphore:
             try:
-                for event in svc.predict_stream(clip_to_eval):
+                for event in svc.predict_stream(clip_to_eval, clip_id=clip_id):
                     yield f"data: {json.dumps(event)}\n\n"
                     await asyncio.sleep(0.005)
             except InputValidationError as e:
@@ -405,6 +463,11 @@ async def detect_stream(
                     "suggestion": "Please check the clip formatting or try another video.",
                 }
                 yield f"data: {json.dumps({'error': err_dict})}\n\n"
+            finally:
+                # Ephemeral Zero-Retention Privacy: immediately purge upload and caches
+                _cleanup_ephemeral_files(temp_files, clip_id=clip_id)
+                if svc:
+                    svc.cleanup_clip_artifacts(clip_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

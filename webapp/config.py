@@ -57,8 +57,8 @@ class Settings:
     preprocess_cache_dir: Path = field(
         default_factory=lambda: REPO_ROOT / _env("PREPROCESS_CACHE_DIR", "data/preprocessed")
     )
-    # Uploaded videos are stored here. Cleanup is intentionally left to the user
-    # (no auto-delete) — manage this directory yourself.
+    # Ephemeral working directory for transient upload processing. Uploaded videos
+    # and intermediate artifacts are purged immediately upon inference (Zero Retention).
     upload_dir: Path = field(
         default_factory=lambda: REPO_ROOT / _env("UPLOAD_DIR", "webapp/uploads")
     )
