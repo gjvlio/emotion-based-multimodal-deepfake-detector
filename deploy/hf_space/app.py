@@ -115,9 +115,38 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
 # Mount Gradio onto the root of the application so Space health checks pass
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
+# Explicit ZeroGPU startup dispatch: ZeroGPU normally triggers client.startup_report()
+# through gr.Blocks.launch(). Since gr.mount_gradio_app bypasses launch(), we invoke
+# the startup hook directly to notify the ZeroGPU orchestrator of our @spaces.GPU targets.
+_zerogpu_notified = False
+
+def _report_zerogpu():
+    global _zerogpu_notified
+    if _zerogpu_notified:
+        return
+    try:
+        from spaces.zero import client as zero_client
+        from spaces.zero import torch as zero_torch
+        from spaces.zero import decorator as zero_decorator
+        zero_torch.pack()
+        if len(zero_decorator.decorated_cache) > 0:
+            print(f"[DeepSentinel] ZeroGPU targets registered: {len(zero_decorator.decorated_cache)}")
+            zero_client.startup_report()
+            _zerogpu_notified = True
+            print("[DeepSentinel] ZeroGPU startup report transmitted successfully!")
+    except Exception as e:
+        print(f"[DeepSentinel] ZeroGPU startup hook notice: {e}")
+
+_report_zerogpu()
+
+@fastapi_app.on_event("startup")
+def _on_fastapi_startup():
+    _report_zerogpu()
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 7860))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
