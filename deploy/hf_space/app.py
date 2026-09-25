@@ -71,6 +71,28 @@ if not CKPT_FILE.exists():
 
 
 import gradio as gr
+
+# Patch Gradio 4.44.0 / Pydantic 2.11+ incompatibility where bool additionalProperties crashes get_type
+try:
+    import gradio_client.utils as gc_utils
+    _orig_json_schema = getattr(gc_utils, "_json_schema_to_python_type", None)
+    if _orig_json_schema:
+        def _safe_json_schema_to_python_type(schema, defs):
+            if isinstance(schema, bool):
+                return "Any"
+            return _orig_json_schema(schema, defs)
+        gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type
+
+    _orig_get_type = getattr(gc_utils, "get_type", None)
+    if _orig_get_type:
+        def _safe_get_type(schema):
+            if isinstance(schema, bool):
+                return "Any"
+            return _orig_get_type(schema)
+        gc_utils.get_type = _safe_get_type
+except Exception as e:
+    print(f"[DeepSentinel] gradio_client schema patch note: {e}")
+
 from webapp.main import app as fastapi_app
 
 @spaces.GPU(duration=120)
