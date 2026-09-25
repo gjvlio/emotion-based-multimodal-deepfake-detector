@@ -73,25 +73,21 @@ if not CKPT_FILE.exists():
 import gradio as gr
 
 # Patch Gradio 4.44.0 / Pydantic 2.11+ incompatibility where bool additionalProperties crashes get_type
+gr.Blocks.get_api_info = lambda *args, **kwargs: {"named_endpoints": {}, "unnamed_endpoints": {}}
+
 try:
     import gradio_client.utils as gc_utils
-    _orig_json_schema = getattr(gc_utils, "_json_schema_to_python_type", None)
-    if _orig_json_schema:
-        def _safe_json_schema_to_python_type(schema, defs):
-            if isinstance(schema, bool):
-                return "Any"
-            return _orig_json_schema(schema, defs)
-        gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type
-
-    _orig_get_type = getattr(gc_utils, "get_type", None)
-    if _orig_get_type:
-        def _safe_get_type(schema):
-            if isinstance(schema, bool):
-                return "Any"
-            return _orig_get_type(schema)
-        gc_utils.get_type = _safe_get_type
+    import gradio.blocks as gr_blocks
+    def _safe_get_type(schema):
+        if isinstance(schema, bool) or not isinstance(schema, dict):
+            return "Any"
+        return "Any" if "const" not in schema else schema.get("type", "Any")
+    gc_utils.get_type = _safe_get_type
+    if hasattr(gr_blocks, "client_utils"):
+        gr_blocks.client_utils.get_type = _safe_get_type
+        gr_blocks.client_utils.json_schema_to_python_type = lambda *args, **kwargs: "Any"
 except Exception as e:
-    print(f"[DeepSentinel] gradio_client schema patch note: {e}")
+    print(f"[DeepSentinel] gradio schema patch notice: {e}")
 
 from webapp.main import app as fastapi_app
 
