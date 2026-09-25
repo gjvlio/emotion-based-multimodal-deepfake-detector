@@ -17,3 +17,5 @@ onnx>=1.14.0
 timm>=0.9.0
 requests
 aiofiles
+huggingface-hub==0.24.6
+spaces

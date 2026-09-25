@@ -57,8 +57,30 @@ if not CKPT_FILE.exists():
     except Exception as e:
         print(f"[DeepSentinel] Hub download notice: {e}")
 
+try:
+    import spaces
+except ImportError:
+    class _MockSpaces:
+        @staticmethod
+        def GPU(func=None, duration=60):
+            if func is None:
+                return lambda f: f
+            return func
+    spaces = _MockSpaces()
+
 import gradio as gr
 from webapp.main import app as fastapi_app
+
+@spaces.GPU(duration=120)
+def predict_video_gpu(video_file):
+    """ZeroGPU probe handler allowing direct forensic inference on Nvidia A10G."""
+    if not video_file:
+        return {"status": "error", "message": "No video uploaded."}
+    from webapp.main import _service
+    svc = _service()
+    if not svc:
+        return {"status": "error", "message": "Neural engine not loaded."}
+    return svc.predict(Path(video_file))
 
 # Gradio interactive status dashboard
 with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
@@ -69,14 +91,24 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
         
         This Space runs the multimodal deep learning inference pipeline (Whisper, ArcFace, Swin Transformer, Wav2Vec 2.0).
         It communicates directly with the DeepSentinel Vercel frontend.
-
-        #### Active Endpoints:
-        - `POST /detect/stream` — Real-time Server-Sent Events (SSE) telemetry stream
-        - `POST /detect` — Synchronous full-video forensic analysis
-        - `GET /health` — Service readiness and checkpoint status
-        - `GET /warmup/status` — Model warmup progress tracker
         """
     )
+    with gr.Tab("Active API Endpoints"):
+        gr.Markdown(
+            """
+            #### Registered Endpoints:
+            - `POST /detect/stream` — Real-time Server-Sent Events (SSE) telemetry stream
+            - `POST /detect` — Synchronous full-video forensic analysis
+            - `GET /health` — Service readiness and checkpoint status
+            - `GET /warmup/status` — Model warmup progress tracker
+            """
+        )
+    with gr.Tab("Forensic Probe (A10G GPU)"):
+        with gr.Row():
+            video_input = gr.Video(label="Upload Video for Test Analysis")
+            probe_output = gr.JSON(label="Forensic Report")
+        probe_btn = gr.Button("Analyze Video with GPU", variant="primary")
+        probe_btn.click(fn=predict_video_gpu, inputs=[video_input], outputs=[probe_output])
 
 # Mount Gradio onto the root of the application so Space health checks pass
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
@@ -85,4 +117,5 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 7860))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
