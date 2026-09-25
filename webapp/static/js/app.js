@@ -3,6 +3,10 @@
   "use strict";
 
   const API_BASE = window.DEEPSENTINEL_API_BASE || localStorage.getItem("ds_api_base") || "";
+  const getAuthHeaders = (headers = {}) => {
+    const token = window.DEEPSENTINEL_HF_TOKEN || localStorage.getItem("ds_hf_token") || "";
+    return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+  };
 
   const EMO_ORDER = ["angry", "happy", "sad", "neutral", "fear", "disgust"];
   const EMO_LABEL = { angry: "Angry", happy: "Happy", sad: "Sad", neutral: "Neutral", fear: "Fearful", disgust: "Disgust", fearful: "Fearful" };
@@ -1603,10 +1607,10 @@
       setPhase("Listening to the voice (16kHz Wav2Vec 2.0)");
 
       // Connect to real-time Server-Sent Event stream
-      const res = await fetch(`${API_BASE}/detect/stream`, { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/detect/stream`, { method: "POST", headers: getAuthHeaders(), body: form });
       if (!res.ok) {
         // Fallback to standard /detect endpoint if streaming endpoint is unavailable
-        const fbRes = await fetch(`${API_BASE}/detect`, { method: "POST", body: form });
+        const fbRes = await fetch(`${API_BASE}/detect`, { method: "POST", headers: getAuthHeaders(), body: form });
         if (!fbRes.ok) {
           const err = await fbRes.json().catch(() => ({}));
           showDiagnosticError(err.detail || `Server error (${fbRes.status})`);
@@ -2365,7 +2369,7 @@
     let backendWarmed = false;
 
     // Check live backend warmup status
-    fetch(`${API_BASE}/warmup/status`)
+    fetch(`${API_BASE}/warmup/status`, { headers: getAuthHeaders() })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data) return;

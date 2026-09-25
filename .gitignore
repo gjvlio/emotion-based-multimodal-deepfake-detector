@@ -60,6 +60,7 @@ tools/MuseTalk/
 !requirements*.txt
 !requirements/*.txt
 !deploy/hf_space/packages.txt
+deploy/hf_staging/
 *.pdf
 *.log
 
