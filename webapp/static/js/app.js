@@ -1326,14 +1326,10 @@
         // Update DOM timing metrics and loader percentage smoothly without UI lag
         if (now - lastDomTimeUpdate > 60) {
           lastDomTimeUpdate = now;
-          const elElapsedHeader = document.getElementById("analyzing-elapsed-header");
-          const elEstHeader = document.getElementById("analyzing-est-header");
           const elElapsedVal = document.getElementById("timing-elapsed-val");
           const elEstVal = document.getElementById("timing-est-val");
           const elRemainingVal = document.getElementById("timing-remaining-val");
 
-          if (elElapsedHeader) elElapsedHeader.textContent = elapsedStr;
-          if (elEstHeader) elEstHeader.textContent = `~${estStr}`;
           if (elElapsedVal) elElapsedVal.textContent = elapsedStr;
           if (elEstVal) elEstVal.textContent = `~${estStr}`;
           if (elRemainingVal) elRemainingVal.textContent = `~${remStr}`;
@@ -1354,24 +1350,6 @@
         ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
         ctx.fillText(`CROP: [${fmtTime(startSec)} - ${fmtTime(endSec)}]`, 12, 18);
         ctx.fillText(`FPS: 29.97 · FACS AU: SALIENT`, 12, 32);
-        ctx.fillStyle = "rgba(61, 243, 216, 0.9)";
-        ctx.fillText(`⏱ ELAPSED: ${elapsedStr}  ·  EST: ~${estStr}`, 12, 46);
-
-        // Top-right Live Evaluation Stopwatch Badge
-        const timerBadgeText = `⏱ ${elapsedStr} / ~${estStr}`;
-        ctx.font = "600 10px monospace";
-        const timerTextW = ctx.measureText(timerBadgeText).width;
-        const tbX = cssW - timerTextW - 20;
-        const tbY = 10;
-        ctx.fillStyle = "rgba(11, 15, 23, 0.82)";
-        ctx.beginPath();
-        ctx.roundRect(tbX, tbY, timerTextW + 12, 20, 5);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(44, 213, 190, 0.45)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = "#3df3d8";
-        ctx.fillText(timerBadgeText, tbX + 6, tbY + 14);
       }
 
       ctx.restore();
@@ -1762,7 +1740,7 @@
     bannerEl.innerHTML = `
       <div class="dom-icon-box">${svg}</div>
       <div class="dom-text-box">
-        <span class="dom-tag">Strongest feeling</span>
+        <span class="dom-tag">Highest Probability Emotion</span>
         <span class="dom-name">${label}</span>
       </div>
     `;
@@ -1772,6 +1750,11 @@
     if (!container) return;
     container.innerHTML = "";
     const { key: topKey } = getTopEmotion(dist);
+
+    const headRow = document.createElement("div");
+    headRow.className = "drow-head";
+    headRow.innerHTML = `<span class="dlabel-head">Emotion</span><span></span><span class="dval-head">Probability</span>`;
+    container.appendChild(headRow);
 
     EMO_ORDER.forEach((k, idx) => {
       const v = dist[k] ?? 0;
@@ -1834,6 +1817,7 @@
     // sarcasm + plain-language interpretation
     const pSarc = r.p_sarcasm ?? 0;
     const sarcastic = pSarc >= 0.5;
+    const sarcPct = Math.round(pSarc * 100);
     const auth = isFake ? "<b>manipulated</b>" : "<b class='ok'>genuine</b>";
     let sentence;
     if (!isFake && !sarcastic) {
@@ -1852,7 +1836,7 @@
     const interpretEl = document.getElementById("interpret");
     if (interpretEl) interpretEl.innerHTML = sentence;
     const marker = document.getElementById("sarc-marker");
-    document.getElementById("sarc-val").textContent = Math.round(pSarc * 100) + "%";
+    document.getElementById("sarc-val").textContent = sarcPct + "%";
     marker.style.left = "0%";
     setTimeout(() => (marker.style.left = (pSarc * 100).toFixed(0) + "%"), 180);
 
@@ -2359,6 +2343,7 @@
     const pctNumEl = document.getElementById("warmup-pct-num");
     const wingLeftEl = document.getElementById("warmup-wing-left");
     const wingRightEl = document.getElementById("warmup-wing-right");
+    const barTrackEl = document.getElementById("warmup-bar-track");
     const actionEl = document.getElementById("warmup-action");
     const targetEl = document.getElementById("warmup-target");
     const skipBtnEl = document.getElementById("warmup-skip-btn");
@@ -2391,21 +2376,32 @@
     function dismiss() {
       if (isDismissed) return;
       isDismissed = true;
-      sessionStorage.setItem("ds_warmup_completed", "1");
-      currentPct = 100;
-      updateVisuals(100);
-      if (actionEl) {
-        actionEl.textContent = "ready";
-        actionEl.style.color = accentCol;
+      try {
+        sessionStorage.setItem("ds_warmup_completed", "1");
+      } catch (e) {
+        /* storage restricted in private mode */
       }
-      if (targetEl) targetEl.textContent = "DeepSentinel Operational";
+      window.removeEventListener("keydown", keyListener);
+
+      try {
+        currentPct = 100;
+        updateVisuals(100);
+        if (actionEl) {
+          actionEl.textContent = "ready";
+          actionEl.style.color = accentCol;
+        }
+        if (targetEl) targetEl.textContent = "DeepSentinel Operational";
+      } catch (err) {
+        console.warn("Warmup visual completion notice:", err);
+      }
+
+      // Immediately unblock user interactions
+      screenEl.style.pointerEvents = "none";
+      screenEl.classList.add("dismissed");
 
       setTimeout(() => {
-        screenEl.classList.add("dismissed");
-        setTimeout(() => {
-          screenEl.style.display = "none";
-        }, 550);
-      }, 300);
+        screenEl.style.display = "none";
+      }, 500);
     }
 
     if (skipBtnEl) {
@@ -2421,39 +2417,43 @@
     window.addEventListener("keydown", keyListener);
 
     function updateVisuals(pct) {
-      const pClamped = Math.min(100, Math.max(0, pct));
-      if (pctNumEl) pctNumEl.textContent = Math.round(pClamped);
+      try {
+        const pClamped = Math.min(100, Math.max(0, pct));
+        if (pctNumEl) pctNumEl.textContent = Math.round(pClamped);
 
-      // Mirrored center expansion: half-width extends left and right from 50%
-      const halfPct = pClamped / 2;
-      if (wingLeftEl) wingLeftEl.style.width = `${halfPct.toFixed(1)}%`;
-      if (wingRightEl) wingRightEl.style.width = `${halfPct.toFixed(1)}%`;
+        // Mirrored center expansion: half-width extends left and right from 50%
+        const halfPct = pClamped / 2;
+        if (wingLeftEl) wingLeftEl.style.width = `${halfPct.toFixed(1)}%`;
+        if (wingRightEl) wingRightEl.style.width = `${halfPct.toFixed(1)}%`;
 
-      if (barTrackEl) {
-        if (pClamped > 1) barTrackEl.classList.add("active");
-        else barTrackEl.classList.remove("active");
-      }
-
-      // Update bracketed console line: fetching [ ... ] ...
-      const activeStage = STAGES.find((s) => pClamped <= s.threshold) || STAGES[STAGES.length - 1];
-      if (actionEl && actionEl.textContent !== activeStage.action) {
-        actionEl.textContent = activeStage.action;
-        if (activeStage.action === "ready") {
-          actionEl.style.color = "#1EA896";
-        } else if (activeStage.action === "calibrating") {
-          actionEl.style.color = "#DB5A42";
-        } else {
-          actionEl.style.color = "#1EA896";
+        if (barTrackEl) {
+          if (pClamped > 1) barTrackEl.classList.add("active");
+          else barTrackEl.classList.remove("active");
         }
-      }
-      if (targetEl && targetEl.textContent !== activeStage.target) {
-        targetEl.textContent = activeStage.target;
+
+        // Update bracketed console line: fetching [ ... ] ...
+        const activeStage = STAGES.find((s) => pClamped <= s.threshold) || STAGES[STAGES.length - 1];
+        if (actionEl && actionEl.textContent !== activeStage.action) {
+          actionEl.textContent = activeStage.action;
+          if (activeStage.action === "ready") {
+            actionEl.style.color = "#1EA896";
+          } else if (activeStage.action === "calibrating") {
+            actionEl.style.color = "#DB5A42";
+          } else {
+            actionEl.style.color = "#1EA896";
+          }
+        }
+        if (targetEl && targetEl.textContent !== activeStage.target) {
+          targetEl.textContent = activeStage.target;
+        }
+      } catch (err) {
+        console.warn("Warmup updateVisuals notice:", err);
       }
     }
 
-    // Animation loop: smoothly advance towards 100% over ~2.2 seconds
+    // Animation loop: smoothly advance towards 100% over ~2.0 seconds
     const startTime = performance.now();
-    const duration = 2200; // 2.2 seconds for optimal cinematic feel
+    const duration = 2000;
 
     function tick(now) {
       if (isDismissed) return;
@@ -2474,7 +2474,7 @@
       currentPct += (targetProgress - currentPct) * 0.25;
       updateVisuals(currentPct);
 
-      if (progressRatio >= 1 && (backendWarmed || elapsed > 3500)) {
+      if (progressRatio >= 1 && (backendWarmed || elapsed > 2800)) {
         dismiss();
       } else {
         requestAnimationFrame(tick);
@@ -2482,6 +2482,9 @@
     }
 
     requestAnimationFrame(tick);
+
+    // Guaranteed absolute safety timer: dismiss after 3.0s even if browser tab was backgrounded/throttled
+    setTimeout(dismiss, 3000);
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────
