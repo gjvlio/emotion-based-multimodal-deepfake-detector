@@ -1442,13 +1442,13 @@ body.no-scroll { overflow: hidden; }
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(18, 24, 32, 0.38);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: rgba(18, 24, 32, 0.40);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.25s ease;
-    z-index: 105;
+    z-index: 90;
   }
   .nav-backdrop.open {
     opacity: 1;
