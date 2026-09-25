@@ -1,0 +1,52 @@
+{
+  "version": 2,
+  "public": false,
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/static/(.*)",
+      "destination": "/webapp/static/$1"
+    },
+    {
+      "source": "/benchmarks",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/about/(.*)",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/about",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/demo/(.*)",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/demo",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/upload",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/analyzing",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/results",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/",
+      "destination": "/webapp/static/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/webapp/static/index.html"
+    }
+  ]
+}

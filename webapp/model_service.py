@@ -32,8 +32,9 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -45,6 +46,7 @@ from .config import EMOTIONS, settings
 from .input_validator import (
     InputValidationError,
     inspect_video_stream,
+    sanitize_transcript,
     validate_container,
     validate_audio_track,
     validate_speech_presence,
@@ -356,6 +358,8 @@ class ModelService:
         has_speech: bool,
         transcript: str,
         meta: ModelInfo,
+        language: str = "en",
+        advisory_notes: Optional[List[str]] = None,
     ) -> Tuple[DetectionResult, dict]:
         """
         Calibrated Evidence Accumulation with Information-Theoretic Synchrony Engine:
@@ -479,6 +483,10 @@ class ModelService:
             d_js=d_js,
         )
 
+        notes = list(advisory_notes or [])
+        if language and language.lower() not in {"en", "english"}:
+            notes.append(f"Non-English speech detected ({language.upper()}); evaluation prioritized acoustic-visual affect.")
+
         det_result = DetectionResult(
             verdict=verdict,
             p_fake=p_fake,
@@ -490,6 +498,8 @@ class ModelService:
             transcript=transcript,
             served_by=meta,
             forensic_interpretation=interpretation,
+            language=language,
+            advisory_notes=notes,
         )
 
         extra = {
@@ -684,7 +694,8 @@ class ModelService:
         z_at = feats.z_at.unsqueeze(0).float().to(self.device)  # (1, 1536)
         z_v = feats.z_v.unsqueeze(0).float().to(self.device)    # (1, 768)
 
-        has_speech = bool(feats.transcript and len(feats.transcript.strip()) > 0)
+        clean_transcript = sanitize_transcript(feats.transcript or "")
+        has_speech = bool(clean_transcript and len(clean_transcript.strip()) > 0)
         out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at, has_speech=has_speech)
 
         det_result, _ = self._fuse_and_calibrate_verdict(
@@ -693,8 +704,9 @@ class ModelService:
             raw_emo_a=out.emotion_a,
             raw_emo_b=out.emotion_b,
             has_speech=has_speech,
-            transcript=feats.transcript,
+            transcript=clean_transcript,
             meta=meta,
+            language=getattr(feats, "language", "en") or "en",
         )
         return det_result
 
@@ -740,6 +752,9 @@ class ModelService:
                 except Exception:
                     cascade = None
 
+            anchor_embedding = None
+            last_box = None
+
             for idx in indices:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
@@ -751,8 +766,38 @@ class ModelService:
                 if app is not None:
                     detected = app.get(frame)
                     if detected:
-                        best = max(detected, key=lambda f: f.det_score)
-                        if best.det_score >= 0.35:
+                        valid_faces = [f for f in detected if getattr(f, "det_score", 0.0) >= 0.35]
+                        if valid_faces:
+                            if anchor_embedding is None:
+                                best = max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) * f.det_score)
+                                if hasattr(best, "embedding") and best.embedding is not None:
+                                    anchor_embedding = best.embedding.copy()
+                                last_box = best.bbox
+                            else:
+                                def _sim(f):
+                                    if hasattr(f, "embedding") and f.embedding is not None and anchor_embedding is not None:
+                                        dot = float(np.dot(f.embedding, anchor_embedding))
+                                        norm = float(np.linalg.norm(f.embedding) * np.linalg.norm(anchor_embedding) + 1e-9)
+                                        return dot / norm
+                                    return 0.0
+
+                                id_matches = [f for f in valid_faces if _sim(f) >= 0.30]
+                                if id_matches:
+                                    best = max(id_matches, key=_sim)
+                                elif last_box is not None:
+                                    def _iou(f):
+                                        b1, b2 = f.bbox, last_box
+                                        xi1, yi1 = max(b1[0], b2[0]), max(b1[1], b2[1])
+                                        xi2, yi2 = min(b1[2], b2[2]), min(b1[3], b2[3])
+                                        inter = max(0.0, xi2 - xi1) * max(0.0, yi2 - yi1)
+                                        a1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+                                        a2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
+                                        return inter / (a1 + a2 - inter + 1e-9)
+                                    best = max(valid_faces, key=_iou)
+                                else:
+                                    best = max(valid_faces, key=lambda f: f.det_score)
+                                last_box = best.bbox
+
                             x1, y1, x2, y2 = best.bbox.astype(int)
                             nx1 = max(0.0, min(1.0, float(x1) / w))
                             ny1 = max(0.0, min(1.0, float(y1) / h))
@@ -772,12 +817,25 @@ class ModelService:
                             bw, bh = max(1, x2 - x1), max(1, y2 - y1)
                             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
                             side = max(bw, bh) * 1.20
+                            target_side = max(16, int(round(side)))
                             h_f, w_f = frame.shape[:2]
-                            ny1_c = max(0, int(round(cy - side / 2.0)))
-                            ny2_c = min(h_f, int(round(cy + side / 2.0)))
-                            nx1_c = max(0, int(round(cx - side / 2.0)))
-                            nx2_c = min(w_f, int(round(cx + side / 2.0)))
-                            crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+
+                            y1_t = int(round(cy - target_side / 2.0))
+                            y2_t = y1_t + target_side
+                            x1_t = int(round(cx - target_side / 2.0))
+                            x2_t = x1_t + target_side
+
+                            p_top = max(0, -y1_t)
+                            p_bot = max(0, y2_t - h_f)
+                            p_lft = max(0, -x1_t)
+                            p_rgt = max(0, x2_t - w_f)
+
+                            if p_top > 0 or p_bot > 0 or p_lft > 0 or p_rgt > 0:
+                                padded = cv2.copyMakeBorder(frame, p_top, p_bot, p_lft, p_rgt, cv2.BORDER_REFLECT_101)
+                                crop = padded[y1_t + p_top : y2_t + p_top, x1_t + p_lft : x2_t + p_lft]
+                            else:
+                                crop = frame[y1_t:y2_t, x1_t:x2_t]
+
                             if crop.size > 0:
                                 face_crops.append(crop)
                                 scores.append(float(best.det_score) * sharpness_score(crop))
@@ -806,12 +864,25 @@ class ModelService:
                                 "score": 0.85,
                             })
                             side = max(w_box, h_box) * 1.20
+                            target_side = max(16, int(round(side)))
                             h_f, w_f = frame.shape[:2]
-                            ny1_c = max(0, int(round(cy - side / 2.0)))
-                            ny2_c = min(h_f, int(round(cy + side / 2.0)))
-                            nx1_c = max(0, int(round(cx - side / 2.0)))
-                            nx2_c = min(w_f, int(round(cx + side / 2.0)))
-                            crop = frame[ny1_c:ny2_c, nx1_c:nx2_c]
+
+                            y1_t = int(round(cy - target_side / 2.0))
+                            y2_t = y1_t + target_side
+                            x1_t = int(round(cx - target_side / 2.0))
+                            x2_t = x1_t + target_side
+
+                            p_top = max(0, -y1_t)
+                            p_bot = max(0, y2_t - h_f)
+                            p_lft = max(0, -x1_t)
+                            p_rgt = max(0, x2_t - w_f)
+
+                            if p_top > 0 or p_bot > 0 or p_lft > 0 or p_rgt > 0:
+                                padded = cv2.copyMakeBorder(frame, p_top, p_bot, p_lft, p_rgt, cv2.BORDER_REFLECT_101)
+                                crop = padded[y1_t + p_top : y2_t + p_top, x1_t + p_lft : x2_t + p_lft]
+                            else:
+                                crop = frame[y1_t:y2_t, x1_t:x2_t]
+
                             if crop.size > 0:
                                 face_crops.append(crop)
                                 scores.append(0.85 * sharpness_score(crop))
@@ -883,13 +954,21 @@ class ModelService:
             "tech": "Wav2Vec 2.0 · BERT",
             "status": "active",
         }
-        from src.preprocessing.audio import transcribe
+        from src.preprocessing.audio import transcribe_with_meta
         txt_file = self.pipeline._txt_path(clip_id)
+        detected_language = "en"
         if not txt_file.exists():
-            transcript = transcribe(wav, self.pipeline.whisper_model, device=self.device) if (wav.exists() and wav.stat().st_size > 500) else ""
+            if wav.exists() and wav.stat().st_size > 500:
+                meta_res = transcribe_with_meta(wav, self.pipeline.whisper_model, device=self.device)
+                transcript = meta_res.get("text", "")
+                detected_language = meta_res.get("language", "en")
+            else:
+                transcript = ""
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
+
+        transcript = sanitize_transcript(transcript)
 
         try:
             validate_speech_presence(transcript, min_words=1)
@@ -1042,6 +1121,12 @@ class ModelService:
             z_v_t = z_v.unsqueeze(0).float().to(self.device)
             out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t, has_speech=has_speech)
 
+        advisories = []
+        if detected_language and detected_language.lower() not in {"en", "english"}:
+            advisories.append(f"Non-English speech detected ({detected_language.upper()}); evaluation prioritized acoustic-visual synchrony.")
+        if face_scores and np.mean(face_scores) < 30.0:
+            advisories.append("Note: Face lighting or contrast is low; visual affect confidence is calibrated accordingly.")
+
         det_result, extra = self._fuse_and_calibrate_verdict(
             raw_logit=out.logit,
             raw_sarcasm=out.sarcasm,
@@ -1050,6 +1135,8 @@ class ModelService:
             has_speech=has_speech,
             transcript=transcript,
             meta=meta,
+            language=detected_language,
+            advisory_notes=advisories,
         )
 
         yield {
@@ -1135,10 +1222,13 @@ class ModelService:
         # 2. Transcript & BERT
         txt_file = self.pipeline._txt_path(clip_id)
         if not txt_file.exists():
-            transcript = transcribe(wav, self.pipeline.whisper_model, device=self.device) if (wav.exists() and wav.stat().st_size > 500) else ""
+            from src.preprocessing.audio import transcribe_with_meta
+            meta_res = transcribe_with_meta(wav, self.pipeline.whisper_model, device=self.device) if (wav.exists() and wav.stat().st_size > 500) else {}
+            transcript = meta_res.get("text", "")
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
+        transcript = sanitize_transcript(transcript)
         validate_speech_presence(transcript, min_words=1)
 
         tok = self._get_bert_tokenizer()

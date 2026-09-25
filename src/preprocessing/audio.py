@@ -172,6 +172,27 @@ def transcribe(
         return ""
 
 
+def transcribe_with_meta(
+    wav_path: str | Path,
+    model_name: str = "openai/whisper-base",
+    device: str = "cpu",
+) -> dict:
+    """
+    Transcribe WAV file with Whisper without forcing English, returning text and detected language.
+    """
+    try:
+        wm = _load_whisper(model_name, device=device)
+        use_fp16 = device.startswith("cuda")
+        result = wm.transcribe(str(wav_path), fp16=use_fp16, task="transcribe", temperature=0.0)
+        return {
+            "text": result.get("text", "").strip(),
+            "language": result.get("language", "en"),
+        }
+    except Exception as e:
+        log.warning(f"Whisper transcription with meta failed for {wav_path}: {e}")
+        return {"text": "", "language": "en"}
+
+
 # ── Linguistic embedding (BERT) ────────────────────────────────────────────────
 
 def get_linguistic_embedding(

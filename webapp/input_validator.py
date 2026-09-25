@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -270,9 +271,56 @@ def validate_audio_track(inspection: VideoInspection, wav_path: Path) -> None:
         log.warning(f"Audio energy evaluation warning: {e}")
 
 
-def validate_speech_presence(transcript: str, min_words: int = 1) -> None:
-    """Verify that spoken words were detected by speech recognition."""
+# Known Whisper hallucination boilerplates that occur on silence, background noise, or music
+WHISPER_HALLUCINATIONS = [
+    "thank you for watching",
+    "thanks for watching",
+    "thank you for listening",
+    "please subscribe",
+    "subscribe to my channel",
+    "subtitles by",
+    "transcribed by",
+    "translated by",
+    "watching this video",
+    "see you next time",
+    "like and subscribe",
+]
+
+
+def sanitize_transcript(transcript: str) -> str:
+    """
+    Filter out common Whisper hallucination boilerplates and repetitive token loops
+    generated on music, ambient noise, or silence.
+    """
     cleaned = (transcript or "").strip()
+    if not cleaned:
+        return ""
+
+    lower = cleaned.lower()
+
+    # 1. Boilerplate substring match
+    for phrase in WHISPER_HALLUCINATIONS:
+        if phrase in lower:
+            # If the phrase dominates the transcript (less than 12 other chars), it's a hallucination
+            remainder = lower.replace(phrase, "").strip()
+            if len(remainder) < 12:
+                log.info(f"Filtered Whisper hallucination boilerplate: '{cleaned}'")
+                return ""
+
+    # 2. Repetitive loop detection (e.g. "you you you you you" or "thank you thank you thank you")
+    words = re.findall(r"\b\w+\b", lower)
+    if len(words) >= 4:
+        unique_words = set(words)
+        if len(unique_words) <= 2:
+            log.info(f"Filtered Whisper repetitive loop hallucination: '{cleaned}'")
+            return ""
+
+    return cleaned
+
+
+def validate_speech_presence(transcript: str, min_words: int = 1) -> str:
+    """Verify that spoken words were detected by speech recognition, rejecting hallucination loops."""
+    cleaned = sanitize_transcript(transcript)
     words = cleaned.split()
 
     if len(words) < min_words:
@@ -281,8 +329,9 @@ def validate_speech_presence(transcript: str, min_words: int = 1) -> None:
             title="No Spoken Words Heard",
             message="No clear speech was heard in this clip (only silence, background noise, or music).",
             suggestion="Please pick a section where the person is speaking clearly.",
-            details={"transcript": cleaned},
+            details={"transcript": (transcript or "").strip()},
         )
+    return cleaned
 
 
 def validate_face_and_visual_quality(

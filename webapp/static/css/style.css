@@ -1843,3 +1843,403 @@ body.no-scroll { overflow: hidden; }
   .warmup-pct-unit { font-size: 18px; }
   .warmup-status-line { font-size: 11px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE & TABLET RESPONSIVE SYSTEM (Touch Ergonomics & Multi-Device Polish)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Global Mobile Safe Area & Touch Tap Optimization */
+html, body {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+body {
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+}
+
+/* ── Tablet Optimization (max-width: 1024px) ────────────────────────────── */
+@media (max-width: 1024px) {
+  .stage-wide {
+    max-width: 96%;
+    padding: 0 12px;
+  }
+
+  .crop-panel {
+    padding: 20px 18px;
+  }
+
+  .analyzing-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .analyzing-right {
+    order: 2;
+  }
+
+  .analyzing-left {
+    order: 1;
+  }
+}
+
+/* ── Handheld & Mobile (max-width: 768px) ────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Safe-area header adjustments */
+  .site-header {
+    margin: max(8px, env(safe-area-inset-top, 0px)) 10px 0;
+    padding: 8px 14px;
+    border-radius: 18px;
+  }
+
+  .brand-logo {
+    width: 24px;
+    height: 24px;
+  }
+
+  .brand-name {
+    font-size: 16px;
+  }
+
+  /* Hero & Headings */
+  .hero {
+    padding: 20px 0 10px;
+    text-align: center;
+  }
+
+  .hero h1 {
+    font-size: clamp(28px, 7.5vw, 40px);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+
+  .hero .sub {
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 0 8px;
+  }
+
+  /* Touch Dropzone */
+  .dropzone {
+    padding: 32px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+  }
+
+  .dz-icon svg {
+    width: 38px;
+    height: 38px;
+  }
+
+  .dz-empty h3 {
+    font-size: 17px;
+    margin-bottom: 4px;
+  }
+
+  /* Interactive Crop & Playback Panel */
+  .crop-panel {
+    padding: 14px 12px;
+    border-radius: 18px;
+    margin-top: 14px;
+  }
+
+  .crop-header {
+    margin-bottom: 10px;
+  }
+
+  .crop-video-container {
+    max-height: 45vh;
+    border-radius: 14px;
+  }
+
+  /* Touch Expanded Controls */
+  .video-control-bar {
+    padding: 6px 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .player-btn {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+  }
+
+  .player-time-display {
+    font-size: 11px;
+  }
+
+  .player-badge-clip {
+    font-size: 10.5px;
+    padding: 3px 8px;
+  }
+
+  .player-pill-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  /* Timeline Scrubber Touch Handles (44px Minimum Tap Target) */
+  .timeline-track {
+    height: 56px;
+    border-radius: 10px;
+  }
+
+  .timeline-filmstrip {
+    height: 56px;
+  }
+
+  .timeline-handle {
+    width: 14px;
+  }
+
+  /* Invisible 44px Touch Extender for Thumb / Finger Ergonomics */
+  .timeline-handle::after {
+    content: "";
+    position: absolute;
+    top: -8px;
+    bottom: -8px;
+    left: -14px;
+    right: -14px;
+    z-index: 10;
+  }
+
+  .window-pan-hint span {
+    display: none;
+  }
+
+  /* Timeline Header & Presets */
+  .timeline-header-row {
+    padding: 0 4px;
+    margin-bottom: 8px;
+  }
+
+  .time-label {
+    font-size: 10px;
+  }
+
+  .time-value {
+    font-size: 13px;
+  }
+
+  .pill-optimal {
+    font-size: 10.5px;
+    padding: 4px 8px;
+  }
+
+  .crop-presets-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .presets-left {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .presets-caption {
+    width: 100%;
+    margin-bottom: 2px;
+    font-size: 11px;
+  }
+
+  .btn-pill {
+    padding: 8px 12px;
+    min-height: 36px;
+    font-size: 11.5px;
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .btn-preview-clip {
+    width: 100%;
+    min-height: 40px;
+    justify-content: center;
+  }
+
+  .btn-block {
+    min-height: 48px;
+    font-size: 15px;
+    border-radius: 14px;
+  }
+
+  /* Analyzing Stage on Mobile */
+  .analyzing-player-card {
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .analyzing-video-wrapper {
+    max-height: 40vh;
+    border-radius: 12px;
+  }
+
+  .hud-phase-label {
+    font-size: 10.5px;
+  }
+
+  .hud-emotion-stat {
+    font-size: 11px;
+  }
+
+  .analyzing-timing-bar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 8px 4px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .timing-divider {
+    display: none;
+  }
+
+  .timing-lbl {
+    font-size: 9px;
+  }
+
+  .timing-num {
+    font-size: 12px;
+  }
+
+  .analyzing-steps {
+    font-size: 12.5px;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .loader-lg {
+    width: 80px;
+    height: 80px;
+  }
+
+  .loader-pct {
+    font-size: 18px;
+  }
+
+  .loader-sub {
+    font-size: 9px;
+  }
+
+  /* Results Stage on Mobile */
+  .verdict-card {
+    padding: 28px 16px 22px;
+    border-radius: 20px;
+  }
+
+  .verdict-tag {
+    font-size: 11px;
+    padding: 4px 12px;
+  }
+
+  .verdict-pct {
+    font-size: clamp(52px, 14vw, 78px);
+    line-height: 1.0;
+    margin: 8px 0;
+  }
+
+  .verdict-label {
+    font-size: 19px;
+  }
+
+  .verdict-sub {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* Forensic Multi-Tier Interpretation Cards */
+  .forensic-card {
+    padding: 20px 14px;
+    border-radius: 18px;
+  }
+
+  .forensic-headline {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .forensic-summary {
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .forensic-col-card {
+    padding: 14px 12px;
+    border-radius: 14px;
+  }
+
+  .fcol-text {
+    font-size: 12px;
+  }
+
+  /* Dominant Emotion Banners & Emotion Bars */
+  .head-dominant-banner,
+  .discrepancy-dominant-banner {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+
+  .row-between {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .dist-item {
+    font-size: 12.5px;
+    gap: 8px;
+  }
+
+  .scope-card {
+    padding: 16px 14px;
+    border-radius: 16px;
+  }
+
+  .scope-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Action Buttons */
+  .results-foot {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .results-foot .btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+  }
+}
+
+/* ── Extra-Small Screens (iPhone SE / Foldables, max-width: 390px) ────────── */
+@media (max-width: 390px) {
+  .hero h1 {
+    font-size: 26px;
+  }
+
+  .verdict-pct {
+    font-size: 48px;
+  }
+
+  .btn-pill {
+    padding: 6px 10px;
+    font-size: 10.5px;
+  }
+
+  .timing-lbl {
+    font-size: 8px;
+  }
+
+  .timing-num {
+    font-size: 11px;
+  }
+}
+
