@@ -132,7 +132,10 @@ with gr.Blocks(title="DeepSentinel Neural Engine") as demo:
             video_input = gr.Video(label="Upload Video for Test Analysis")
             probe_output = gr.JSON(label="Forensic Report")
         probe_btn = gr.Button("Analyze Video with GPU", variant="primary")
-        probe_btn.click(fn=predict_video_gpu, inputs=[video_input], outputs=[probe_output])
+        probe_btn.click(fn=predict_video_gpu, inputs=[video_input], outputs=[probe_output], api_name=False)
+
+# Bypass Gradio 4.44.0 / Pydantic schema generation crash when rendering frontend/index.html
+demo.get_api_info = lambda all_endpoints=False: {"named_endpoints": {}, "unnamed_endpoints": {}}
 
 # Mount Gradio onto the root of the application so Space health checks pass
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
