@@ -106,9 +106,8 @@ class Settings:
     emotion_floor_epsilon: float = float(_env("EMOTION_FLOOR_EPSILON", "0.040"))
 
     # Sarcasm head logit calibration bias:
-    # Subtracting 2.20 aligns raw logits so conversational sincere speech (scoring up to +1.5)
-    # stays cleanly within Sincere (0% - 25%), while genuine sarcasm (MUStARD at +3.7) stays >80%. Default: 2.20.
-    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "2.20"))
+    # Set to 0.0 by default to preserve the Bayes-optimal threshold (0.50) learned during MUStARD training.
+    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "0.0"))
 
     # Multimodal Biological Harmony Logit Adjustments:
     # Set to 0.0 by default to ensure resilient detection of high-level deepfakes

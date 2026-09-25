@@ -380,19 +380,11 @@ class ModelService:
             pa = self._calibrate_emotion_probs(raw_emo_a, modality="audio").squeeze(0)
             delta = torch.abs(pa - pb)
 
-            # ── Multimodal Sarcasm Irony Filter ───────────────────────────
-            p_sarc_raw = torch.sigmoid(raw_sarcasm.squeeze() - settings.sarcasm_logit_bias).item()
-            top_b_idx = int(torch.argmax(pb).item())
-            vis_happy = float(pb[1].item())
-            # Sarcasm in affective science requires visual amusement/smirking incongruence.
-            # If the dominant visual expression is not smiling/smirking (top_b_idx != 1),
-            # rhetorical phrasing is gated by excess smiling above the uniform baseline (1/6 ≈ 0.167).
-            if top_b_idx != 1:
-                excess_smile = max(0.0, vis_happy - 0.167)
-                sarc_gate = max(0.05, min(1.0, (excess_smile / 0.20) ** 2))
-                p_sarc = p_sarc_raw * sarc_gate
-            else:
-                p_sarc = p_sarc_raw
+            # ── Sarcasm Head Output (Trained on MUStARD with BCEWithLogitsLoss) ───
+            # Sarcasm is assessed directly by the multimodal sarcasm classifier (Z_at)
+            # without artificial smile-gating that suppresses deadpan/serious delivery.
+            bias = float(getattr(settings, "sarcasm_logit_bias", 0.0) or 0.0)
+            p_sarc = float(torch.sigmoid(raw_sarcasm.squeeze() - bias).item())
 
             # ── Information-Theoretic Synchrony Engine (D_JS & CosSim) ───
             eps = 1e-12
