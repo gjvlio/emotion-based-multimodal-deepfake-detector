@@ -111,14 +111,18 @@ class Settings:
     sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "2.20"))
 
     # Multimodal Biological Harmony Logit Adjustments:
-    # When voice and face agree on an active emotion (e.g. angry==angry, happy==happy),
-    # genuine human biological synchrony is confirmed; applies -2.70 authenticity bonus.
-    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.70"))
+    # Set to 0.0 by default to ensure resilient detection of high-level deepfakes
+    # (e.g., Wav2Lip, facial reanimation) that intentionally match facial expressions with voice tone.
+    # When set > 0, an evidence gate prevents overrides whenever the neural backbone detects manipulation.
+    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "0.0"))
     # When voice and face agree on neutral baseline speech:
-    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.70"))
+    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.0"))
     # Continuous Information-Theoretic Harmony (D_JS & CosSim) for compatible non-conflicting emotions:
-    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "1.80"))
-    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "1.40"))
+    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "0.0"))
+    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "0.0"))
+    # High-arousal negative emotion compensation (e.g. intense anger/shouting):
+    # Prevents organic facial contortions and vocal strain from triggering false positives. Default: 2.70.
+    arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.70"))
     synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.75"))
     synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.070"))
     sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))

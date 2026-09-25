@@ -93,9 +93,11 @@ docs/*.pdf
 /logs
 
 # =============================================================================
-# Web app — runtime artifacts (keep source + static assets tracked)
+# Web app & Generator — runtime artifacts (keep source + static assets tracked)
 # =============================================================================
 webapp/uploads/
+generator/outputs/
+generator/temp/
 
 # =============================================================================
 # Preprocessing / data outputs (regenerable, too large for git)
