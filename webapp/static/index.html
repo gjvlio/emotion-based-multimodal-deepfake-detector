@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css?v=16" />
+  <link rel="stylesheet" href="/static/css/style.css?v=19" />
   <script>
     window.DEEPSENTINEL_API_BASE = localStorage.getItem("ds_api_base") || "https://gjrvlio-deepsentinel-engine.hf.space";
   </script>
@@ -98,6 +98,7 @@
     </nav>
     <button class="nav-burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
   </header>
+  <div class="nav-backdrop" id="nav-backdrop" aria-hidden="true"></div>
 
   <main id="app">
     <!-- ── Landing ─────────────────────────────────────────────────────────── -->
@@ -124,8 +125,10 @@
             <span>Start Detecting</span>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </a>
-          <a href="/demo/upload" data-link class="btn btn-glass magnetic">Demo mode</a>
-          <a href="/about/thesis" data-link class="btn btn-glass magnetic">Read the thesis</a>
+          <div class="cta-sub-row">
+            <a href="/demo/upload" data-link class="btn btn-glass magnetic">Demo mode</a>
+            <a href="/about/thesis" data-link class="btn btn-glass magnetic">Read the thesis</a>
+          </div>
         </div>
         <div class="hero-features glass" data-reveal>
           <div class="hf">
@@ -704,6 +707,10 @@
             <strong>Master Benchmark Comparison</strong>
             <span class="mono-tag hint">N = 700 clips · FakeAVCeleb v1.2</span>
           </div>
+          <div class="bm-scroll-hint hint mono">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16l-4-4m0 0l4-4m-4 4h18m-4 4l4-4m0 0l-4-4"/></svg>
+            <span>Scroll horizontally to compare all 10 evaluation metrics</span>
+          </div>
           <div class="bm-table-scroll">
             <table class="bm-table" id="sota-table">
               <thead>
@@ -818,6 +825,6 @@
 
   </main>
 
-  <script src="/static/js/app.js?v=18"></script>
+  <script src="/static/js/app.js?v=19"></script>
 </body>
 </html>

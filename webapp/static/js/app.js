@@ -227,9 +227,36 @@
   const header = document.getElementById("header");
   const nav = document.getElementById("nav");
   const burger = document.getElementById("burger");
-  window.addEventListener("scroll", () => header.classList.toggle("scrolled", window.scrollY > 6), { passive: true });
-  burger?.addEventListener("click", () => { nav.classList.toggle("open"); burger.classList.toggle("open"); });
-  function closeMenu() { nav.classList.remove("open"); burger?.classList.remove("open"); }
+  const navBackdrop = document.getElementById("nav-backdrop");
+
+  window.addEventListener("scroll", () => header?.classList.toggle("scrolled", window.scrollY > 6), { passive: true });
+
+  function openMenu() {
+    nav?.classList.add("open");
+    burger?.classList.add("open");
+    navBackdrop?.classList.add("open");
+    document.body.classList.add("menu-open");
+  }
+
+  function closeMenu() {
+    nav?.classList.remove("open");
+    burger?.classList.remove("open");
+    navBackdrop?.classList.remove("open");
+    document.body.classList.remove("menu-open");
+  }
+
+  burger?.addEventListener("click", () => {
+    if (nav?.classList.contains("open")) {
+      closeMenu();
+    } else {
+      openMenu();
+    }
+  });
+
+  navBackdrop?.addEventListener("click", closeMenu);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMenu();
+  });
 
   // ── Motion: sparkles, magnetic buttons, card tilt ─────────────────────────
   function makeSparkles() {
@@ -1909,6 +1936,7 @@
   }
 
   // ── Benchmarks ────────────────────────────────────────────────────────────
+  const EMBEDDED_BM_DATA = {"benchmark_metadata": {"test_dataset": "FakeAVCeleb v1.2", "test_split_size": 700, "real_clips": 350, "fake_clips": 350, "evaluation_protocol": "Strict Cross-Dataset Zero-Shot Generalization (Zero Fine-Tuning)", "published_literature_reference": {"paper": "Elpeltagy & Sallam (2023), Expert Systems with Applications", "approach": "Intra-dataset FakeAVCeleb training (In-domain)", "reported_auc": 0.9721, "reported_accuracy": 96.8}}, "models": [{"name": "DeepSentinel (Ours)", "id": "deepsentinel", "badge": "Proposed Method", "modality": "Affect-Bilinear Cross-Attention (Audio + Video + Text)", "color": "#0284c7", "metrics": {"accuracy": 82.14, "balanced_accuracy": 82.14, "precision": 79.22, "recall_fake": 87.14, "specificity_real": 77.14, "f1_score": 0.8299, "mcc": 0.6461, "auc_roc": 0.902, "auc_ci_lower": 0.877, "auc_ci_upper": 0.924, "tp": 305, "fp": 80, "tn": 270, "fn": 45}, "delong_test": {"p_value": null, "significance": "Reference"}}, {"name": "MesoNet-4", "id": "mesonet", "badge": "Vision Baseline", "modality": "Visual Spatial CNN", "color": "#ef4444", "metrics": {"accuracy": 52.0, "balanced_accuracy": 52.0, "precision": 52.15, "recall_fake": 48.57, "specificity_real": 55.43, "f1_score": 0.503, "mcc": 0.0401, "auc_roc": 0.5389, "auc_ci_lower": 0.495, "auc_ci_upper": 0.583, "tp": 170, "fp": 156, "tn": 194, "fn": 180}, "delong_test": {"p_value": 0.0, "significance": "p < 0.001 (Statistically Significant)", "z_score": null}}, {"name": "XceptionNet", "id": "xception", "badge": "Vision Baseline", "modality": "Visual Spatial Deep CNN", "color": "#f59e0b", "metrics": {"accuracy": 50.57, "balanced_accuracy": 50.57, "precision": 50.56, "recall_fake": 51.14, "specificity_real": 50.0, "f1_score": 0.5085, "mcc": 0.0114, "auc_roc": 0.5002, "auc_ci_lower": 0.458, "auc_ci_upper": 0.542, "tp": 179, "fp": 175, "tn": 175, "fn": 171}, "delong_test": {"p_value": 0.0, "significance": "p < 0.001 (Statistically Significant)", "z_score": null}}, {"name": "Multimodal ResNet-AV", "id": "resnet_av", "badge": "Multimodal Baseline", "modality": "Audio-Visual Concatenation (ResNet-18)", "color": "#10b981", "metrics": {"accuracy": 46.14, "balanced_accuracy": 46.14, "precision": 46.06, "recall_fake": 45.14, "specificity_real": 47.14, "f1_score": 0.456, "mcc": -0.0772, "auc_roc": 0.4629, "auc_ci_lower": 0.419, "auc_ci_upper": 0.506, "tp": 158, "fp": 185, "tn": 165, "fn": 192}, "delong_test": {"p_value": 0.0, "significance": "p < 0.001 (Statistically Significant)", "z_score": null}}, {"name": "LipForensics", "id": "lipforensics", "badge": "Temporal Baseline", "modality": "Spatiotemporal Viseme / Lip Sync", "color": "#ec4899", "metrics": {"accuracy": 52.0, "balanced_accuracy": 52.0, "precision": 52.08, "recall_fake": 50.0, "specificity_real": 54.0, "f1_score": 0.5102, "mcc": 0.04, "auc_roc": 0.5132, "auc_ci_lower": 0.469, "auc_ci_upper": 0.553, "tp": 175, "fp": 161, "tn": 189, "fn": 175}, "delong_test": {"p_value": 0.0, "significance": "p < 0.001 (Statistically Significant)", "z_score": null}}, {"name": "AceNet (Baseline)", "id": "acenet", "badge": "Direct Competitor", "modality": "Cross-Attention Multimodal Baseline", "color": "#8b5cf6", "metrics": {"accuracy": 64.0, "balanced_accuracy": 64.0, "precision": 68.42, "recall_fake": 52.0, "specificity_real": 76.0, "f1_score": 0.5909, "mcc": 0.2884, "auc_roc": 0.6425, "auc_ci_lower": 0.6, "auc_ci_upper": 0.682, "tp": 182, "fp": 84, "tn": 266, "fn": 168}, "delong_test": {"p_value": 0.000222, "significance": "p < 0.001 (Statistically Significant)", "z_score": null}}], "per_manipulation_breakdown": {"faceswap": {"DeepSentinel (Ours)": {"total": 13, "correct": 11, "accuracy": 84.62}, "MesoNet-4": {"total": 13, "correct": 8, "accuracy": 61.54}, "XceptionNet": {"total": 13, "correct": 6, "accuracy": 46.15}, "Multimodal ResNet-AV": {"total": 13, "correct": 7, "accuracy": 53.85}, "LipForensics": {"total": 13, "correct": 5, "accuracy": 38.46}, "AceNet (Baseline)": {"total": 9, "correct": 3, "accuracy": 33.33}}, "faceswap-wav2lip": {"DeepSentinel (Ours)": {"total": 58, "correct": 57, "accuracy": 98.28}, "MesoNet-4": {"total": 58, "correct": 27, "accuracy": 46.55}, "XceptionNet": {"total": 58, "correct": 30, "accuracy": 51.72}, "Multimodal ResNet-AV": {"total": 58, "correct": 21, "accuracy": 36.21}, "LipForensics": {"total": 58, "correct": 32, "accuracy": 55.17}, "AceNet (Baseline)": {"total": 66, "correct": 43, "accuracy": 65.15}}, "fsgan": {"DeepSentinel (Ours)": {"total": 40, "correct": 25, "accuracy": 62.5}, "MesoNet-4": {"total": 40, "correct": 21, "accuracy": 52.5}, "XceptionNet": {"total": 40, "correct": 18, "accuracy": 45.0}, "Multimodal ResNet-AV": {"total": 40, "correct": 24, "accuracy": 60.0}, "LipForensics": {"total": 40, "correct": 24, "accuracy": 60.0}, "AceNet (Baseline)": {"total": 56, "correct": 24, "accuracy": 42.86}}, "fsgan-wav2lip": {"DeepSentinel (Ours)": {"total": 69, "correct": 68, "accuracy": 98.55}, "MesoNet-4": {"total": 69, "correct": 30, "accuracy": 43.48}, "XceptionNet": {"total": 69, "correct": 38, "accuracy": 55.07}, "Multimodal ResNet-AV": {"total": 69, "correct": 29, "accuracy": 42.03}, "LipForensics": {"total": 69, "correct": 36, "accuracy": 52.17}, "AceNet (Baseline)": {"total": 74, "correct": 45, "accuracy": 60.81}}, "real": {"DeepSentinel (Ours)": {"total": 350, "correct": 270, "accuracy": 77.14}, "MesoNet-4": {"total": 350, "correct": 194, "accuracy": 55.43}, "XceptionNet": {"total": 350, "correct": 175, "accuracy": 50.0}, "Multimodal ResNet-AV": {"total": 350, "correct": 165, "accuracy": 47.14}, "LipForensics": {"total": 350, "correct": 189, "accuracy": 54.0}, "AceNet (Baseline)": {"total": 350, "correct": 266, "accuracy": 76.0}}, "rtvc": {"DeepSentinel (Ours)": {"total": 5, "correct": 3, "accuracy": 60.0}, "MesoNet-4": {"total": 5, "correct": 1, "accuracy": 20.0}, "XceptionNet": {"total": 5, "correct": 2, "accuracy": 40.0}, "Multimodal ResNet-AV": {"total": 5, "correct": 4, "accuracy": 80.0}, "LipForensics": {"total": 5, "correct": 1, "accuracy": 20.0}, "AceNet (Baseline)": {"total": 5, "correct": 2, "accuracy": 40.0}}, "wav2lip": {"DeepSentinel (Ours)": {"total": 165, "correct": 141, "accuracy": 85.45}, "MesoNet-4": {"total": 165, "correct": 83, "accuracy": 50.3}, "XceptionNet": {"total": 165, "correct": 85, "accuracy": 51.52}, "Multimodal ResNet-AV": {"total": 165, "correct": 73, "accuracy": 44.24}, "LipForensics": {"total": 165, "correct": 77, "accuracy": 46.67}, "AceNet (Baseline)": {"total": 140, "correct": 65, "accuracy": 46.43}}}, "grouped_category_breakdown": {"Visual Swap Only": {"DeepSentinel (Ours)": {"total": 53, "correct": 36, "accuracy": 67.92}, "MesoNet-4": {"total": 53, "correct": 29, "accuracy": 54.72}, "XceptionNet": {"total": 53, "correct": 24, "accuracy": 45.28}, "Multimodal ResNet-AV": {"total": 53, "correct": 31, "accuracy": 58.49}, "LipForensics": {"total": 53, "correct": 29, "accuracy": 54.72}, "AceNet (Baseline)": {"total": 65, "correct": 27, "accuracy": 41.54}}, "Audio Cloning Only": {"DeepSentinel (Ours)": {"total": 5, "correct": 3, "accuracy": 60.0}, "MesoNet-4": {"total": 5, "correct": 1, "accuracy": 20.0}, "XceptionNet": {"total": 5, "correct": 2, "accuracy": 40.0}, "Multimodal ResNet-AV": {"total": 5, "correct": 4, "accuracy": 80.0}, "LipForensics": {"total": 5, "correct": 1, "accuracy": 20.0}, "AceNet (Baseline)": {"total": 5, "correct": 2, "accuracy": 40.0}}, "Audio-Visual Combined (Sync/Lip)": {"DeepSentinel (Ours)": {"total": 292, "correct": 266, "accuracy": 91.1}, "MesoNet-4": {"total": 292, "correct": 140, "accuracy": 47.95}, "XceptionNet": {"total": 292, "correct": 153, "accuracy": 52.4}, "Multimodal ResNet-AV": {"total": 292, "correct": 123, "accuracy": 42.12}, "LipForensics": {"total": 292, "correct": 145, "accuracy": 49.66}, "AceNet (Baseline)": {"total": 280, "correct": 153, "accuracy": 54.64}}, "Authentic / Real Clips": {"DeepSentinel (Ours)": {"total": 350, "correct": 270, "accuracy": 77.14}, "MesoNet-4": {"total": 350, "correct": 194, "accuracy": 55.43}, "XceptionNet": {"total": 350, "correct": 175, "accuracy": 50.0}, "Multimodal ResNet-AV": {"total": 350, "correct": 165, "accuracy": 47.14}, "LipForensics": {"total": 350, "correct": 189, "accuracy": 54.0}, "AceNet (Baseline)": {"total": 350, "correct": 266, "accuracy": 76.0}}}, "figure_assets": {"thesis_master_dashboard": "data/eval_results/figures_comparative/thesis_master_comparative_dashboard.png", "roc_curves": "data/eval_results/figures_comparative/comparative_roc_curves.png", "multimetric_barchart": "data/eval_results/figures_comparative/comparative_multimetric_barchart.png", "method_breakdown": "data/eval_results/figures_comparative/comparative_method_breakdown.png"}};
   let bmData = null;
   let bmRendered = false;
 
@@ -1916,11 +1944,15 @@
     if (bmData) return bmData;
     try {
       const res = await fetch("/static/data/comparative_benchmark_data.json");
-      bmData = await res.json();
+      if (res.ok) {
+        bmData = await res.json();
+      } else {
+        bmData = EMBEDDED_BM_DATA;
+      }
     } catch (e) {
-      bmData = null;
+      bmData = EMBEDDED_BM_DATA;
     }
-    return bmData;
+    return bmData || EMBEDDED_BM_DATA;
   }
 
   async function renderBenchmarks() {
@@ -1928,11 +1960,29 @@
     if (!data) return;
 
     renderSotaTable(data);
-    renderRocChart(data);
-    renderManipChart(data);
+    requestAnimationFrame(() => {
+      renderRocChart(data);
+      renderManipChart(data);
+    });
     bindMagnetic();
     bmRendered = true;
   }
+
+  // Window resize observer to smoothly redraw charts on phone orientation changes
+  let bmResizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(bmResizeTimer);
+    bmResizeTimer = setTimeout(() => {
+      const bmView = views.benchmarks;
+      if (bmView && bmView.classList.contains("active")) {
+        const d = bmData || EMBEDDED_BM_DATA;
+        if (d) {
+          renderRocChart(d, true);
+          renderManipChart(d, true);
+        }
+      }
+    }, 120);
+  });
 
   // ---------- Table ----------
   function renderSotaTable(data) {
@@ -1972,31 +2022,23 @@
   }
 
   // ---------- ROC Chart ----------
-  // Empirical ROC curves approximated from confusion matrix data per model.
-  // We construct a synthetic curve by sweeping thresholds between (FPR=0,TPR=0)
-  // and (FPR=1,TPR=1), anchoring the one measured operating point in the middle.
   function buildRocPoints(m) {
     const tp = m.metrics.tp, fp = m.metrics.fp, tn = m.metrics.tn, fn = m.metrics.fn;
-    const totalPos = tp + fn;  // real positive clips
-    const totalNeg = fp + tn;  // real negative clips
+    const totalPos = tp + fn;
+    const totalNeg = fp + tn;
     const tpr = tp / totalPos;
     const fpr = fp / totalNeg;
-    // Smooth curve: origin → operating point → AUC-guided upper bend → (1,1)
     const auc = m.metrics.auc_roc;
     const pts = [];
     const N = 60;
     for (let i = 0; i <= N; i++) {
       const t = i / N;
-      // Parametric curve that passes through (0,0), operating point, (1,1)
-      // and whose integral approximates the stated AUC.
       let x, y;
       if (t < 0.5) {
-        // First half: origin → operating point, with a concave bend
         const s = t * 2;
         x = fpr * Math.pow(s, 0.7);
         y = tpr * Math.pow(s, 1 / (2 * auc));
       } else {
-        // Second half: operating point → (1,1)
         const s = (t - 0.5) * 2;
         x = fpr + (1 - fpr) * Math.pow(s, 1.3);
         y = tpr + (1 - tpr) * Math.pow(s, 0.6);
@@ -2006,15 +2048,15 @@
     return pts;
   }
 
-  function renderRocChart(data) {
+  function renderRocChart(data, forceRedraw = false) {
     const canvas = document.getElementById("roc-canvas");
     const legend = document.getElementById("roc-legend");
-    if (!canvas || canvas.dataset.drawn) return;
+    if (!canvas || (!forceRedraw && canvas.dataset.drawn)) return;
 
     const dpr = window.devicePixelRatio || 1;
     const wrap = canvas.parentElement;
-    const cssW = wrap.clientWidth || 700;
-    const cssH = wrap.clientHeight || 340;
+    const cssW = Math.max(wrap ? wrap.clientWidth : 0, 260);
+    const cssH = Math.max(wrap ? wrap.clientHeight : 0, 220);
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = cssW + "px";
@@ -2023,50 +2065,44 @@
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
 
-    const pad = { top: 22, right: 22, bottom: 50, left: 54 };
+    const isSmall = cssW < 520;
+    const pad = isSmall
+      ? { top: 16, right: 14, bottom: 42, left: 38 }
+      : { top: 22, right: 22, bottom: 50, left: 54 };
     const plotW = cssW - pad.left - pad.right;
     const plotH = cssH - pad.top - pad.bottom;
 
-    // Background
     ctx.fillStyle = "rgba(255,255,255,0)";
     ctx.fillRect(0, 0, cssW, cssH);
 
-    // Axis lines
     ctx.strokeStyle = "rgba(60,60,60,0.12)";
     ctx.lineWidth = 1;
-    // Grid lines
     const ticks = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
-    ctx.font = `500 10px var(--f-mono, monospace)`;
+    ctx.font = `500 ${isSmall ? 9 : 10}px var(--f-mono, monospace)`;
     ctx.fillStyle = "#9b9a92";
     ticks.forEach((t) => {
       const gx = pad.left + t * plotW;
       const gy = pad.top + (1 - t) * plotH;
-      // Vertical grid
       ctx.beginPath(); ctx.moveTo(gx, pad.top); ctx.lineTo(gx, pad.top + plotH); ctx.stroke();
-      // Horizontal grid
       ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(pad.left + plotW, gy); ctx.stroke();
-      // X labels
       if (t > 0) {
         ctx.textAlign = "center";
-        ctx.fillText((t * 100).toFixed(0) + "%", gx, pad.top + plotH + 18);
+        ctx.fillText((t * 100).toFixed(0) + "%", gx, pad.top + plotH + (isSmall ? 14 : 18));
       }
-      // Y labels
       ctx.textAlign = "right";
-      ctx.fillText((t * 100).toFixed(0) + "%", pad.left - 8, gy + 3.5);
+      ctx.fillText((t * 100).toFixed(0) + "%", pad.left - (isSmall ? 4 : 8), gy + 3.5);
     });
 
-    // Axis titles
-    ctx.font = "600 11px var(--f-mono, monospace)";
+    ctx.font = `600 ${isSmall ? 9.5 : 11}px var(--f-mono, monospace)`;
     ctx.fillStyle = "#5f5f5d";
     ctx.textAlign = "center";
-    ctx.fillText("False Positive Rate", pad.left + plotW / 2, cssH - 4);
+    ctx.fillText("False Positive Rate", pad.left + plotW / 2, cssH - (isSmall ? 2 : 4));
     ctx.save();
-    ctx.translate(14, pad.top + plotH / 2);
+    ctx.translate(isSmall ? 10 : 14, pad.top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText("True Positive Rate", 0, 0);
     ctx.restore();
 
-    // Random-guess diagonal
     ctx.save();
     ctx.strokeStyle = "rgba(60,60,60,0.28)";
     ctx.lineWidth = 1.2;
@@ -2078,7 +2114,6 @@
     ctx.setLineDash([]);
     ctx.restore();
 
-    // Model curves
     data.models.slice().reverse().forEach((m) => {
       const pts = buildRocPoints(m);
       const isOurs = m.id === "deepsentinel";
@@ -2090,12 +2125,11 @@
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       });
       ctx.strokeStyle = m.color;
-      ctx.lineWidth = isOurs ? 3 : 1.5;
+      ctx.lineWidth = isOurs ? (isSmall ? 2.5 : 3) : (isSmall ? 1.2 : 1.5);
       ctx.globalAlpha = isOurs ? 1 : 0.7;
       ctx.stroke();
       ctx.restore();
 
-      // Operating point dot
       const tp = m.metrics.tp, fp = m.metrics.fp, tn = m.metrics.tn, fn = m.metrics.fn;
       const tpr = tp / (tp + fn);
       const fpr = fp / (fp + tn);
@@ -2105,27 +2139,26 @@
       ctx.fillStyle = m.color;
       ctx.globalAlpha = isOurs ? 1 : 0.8;
       ctx.beginPath();
-      ctx.arc(dotX, dotY, isOurs ? 5 : 3.5, 0, Math.PI * 2);
+      ctx.arc(dotX, dotY, isOurs ? (isSmall ? 4 : 5) : (isSmall ? 2.5 : 3.5), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
 
-    // "AUC=0.9020" label for our model
     const ours = data.models.find((m) => m.id === "deepsentinel");
     if (ours) {
       const tpr = ours.metrics.tp / (ours.metrics.tp + ours.metrics.fn);
       const fpr = ours.metrics.fp / (ours.metrics.fp + ours.metrics.tn);
       const dotX = pad.left + fpr * plotW;
       const dotY = pad.top + (1 - tpr) * plotH;
-      ctx.font = "700 11px var(--f-display, sans-serif)";
+      ctx.font = `700 ${isSmall ? 9.5 : 11}px var(--f-display, sans-serif)`;
       ctx.fillStyle = ours.color;
-      ctx.textAlign = "left";
-      ctx.fillText(`AUC = ${ours.metrics.auc_roc.toFixed(4)}`, dotX + 8, dotY - 6);
+      ctx.textAlign = isSmall ? "right" : "left";
+      const offsetX = isSmall ? -8 : 8;
+      ctx.fillText(`AUC = ${ours.metrics.auc_roc.toFixed(4)}`, dotX + offsetX, dotY - 6);
     }
 
     canvas.dataset.drawn = "1";
 
-    // Legend
     if (legend) {
       legend.innerHTML = [
         ...data.models.map((m) => `
@@ -2142,18 +2175,17 @@
   }
 
   // ---------- Per-Manipulation Bar Chart ----------
-  function renderManipChart(data) {
+  function renderManipChart(data, forceRedraw = false) {
     const canvas = document.getElementById("manip-canvas");
     const legend = document.getElementById("manip-legend");
-    if (!canvas || canvas.dataset.drawn) return;
+    if (!canvas || (!forceRedraw && canvas.dataset.drawn)) return;
 
     const categories = ["faceswap", "faceswap-wav2lip", "fsgan", "fsgan-wav2lip", "real", "rtvc", "wav2lip"];
-    const labels = ["Faceswap", "Faceswap+W2L", "FSGAN", "FSGAN+W2L", "Real", "RTVC", "Wav2Lip"];
     const models = data.models;
     const dpr = window.devicePixelRatio || 1;
     const wrap = canvas.parentElement;
-    const cssW = wrap.clientWidth || 700;
-    const cssH = wrap.clientHeight || 360;
+    const cssW = Math.max(wrap ? wrap.clientWidth : 0, 260);
+    const cssH = Math.max(wrap ? wrap.clientHeight : 0, 240);
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = cssW + "px";
@@ -2162,16 +2194,21 @@
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
 
-    const pad = { top: 22, right: 14, bottom: 56, left: 44 };
+    const isSmall = cssW < 520;
+    const labels = isSmall
+      ? ["FS", "FS+W2L", "FSGAN", "FSG+W", "Real", "RTVC", "W2Lip"]
+      : ["Faceswap", "Faceswap+W2L", "FSGAN", "FSGAN+W2L", "Real", "RTVC", "Wav2Lip"];
+    const pad = isSmall
+      ? { top: 16, right: 10, bottom: 44, left: 34 }
+      : { top: 22, right: 14, bottom: 56, left: 44 };
     const plotW = cssW - pad.left - pad.right;
     const plotH = cssH - pad.top - pad.bottom;
 
     const groupW = plotW / categories.length;
-    const barW = Math.min(10, (groupW - 8) / models.length);
-    const groupPad = (groupW - barW * models.length) / 2;
+    const barW = Math.max(2.5, Math.min(isSmall ? 6 : 10, (groupW - (isSmall ? 3 : 8)) / models.length));
+    const groupPad = Math.max(0, (groupW - barW * models.length) / 2);
 
-    // Grid + axes
-    ctx.font = `500 10px var(--f-mono, monospace)`;
+    ctx.font = `500 ${isSmall ? 8.5 : 10}px var(--f-mono, monospace)`;
     ctx.fillStyle = "#9b9a92";
     ctx.strokeStyle = "rgba(60,60,60,0.1)";
     ctx.lineWidth = 1;
@@ -2179,13 +2216,12 @@
       const gy = pad.top + (1 - v / 100) * plotH;
       ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(pad.left + plotW, gy); ctx.stroke();
       ctx.textAlign = "right";
-      ctx.fillText(v + "%", pad.left - 6, gy + 3.5);
+      ctx.fillText(v + "%", pad.left - (isSmall ? 4 : 6), gy + 3.5);
     });
 
-    // Bars
     models.forEach((m, mi) => {
       categories.forEach((cat, ci) => {
-        const entry = data.per_manipulation_breakdown[cat]?.[m.name];
+        const entry = data.per_manipulation_breakdown?.[cat]?.[m.name];
         if (!entry) return;
         const val = entry.accuracy / 100;
         const x = pad.left + ci * groupW + groupPad + mi * barW;
@@ -2196,7 +2232,7 @@
         ctx.save();
         ctx.fillStyle = m.color;
         ctx.globalAlpha = isOurs ? 1 : 0.6;
-        const r = Math.min(3, barW / 2);
+        const r = Math.min(2.5, barW / 2);
         ctx.beginPath();
         ctx.moveTo(x + r, y);
         ctx.lineTo(x + barW - r, y);
@@ -2211,19 +2247,17 @@
       });
     });
 
-    // X labels
-    ctx.font = `500 10.5px var(--f-mono, monospace)`;
+    ctx.font = `500 ${isSmall ? 9 : 10.5}px var(--f-mono, monospace)`;
     ctx.fillStyle = "#5f5f5d";
     ctx.textAlign = "center";
     labels.forEach((lbl, ci) => {
       const cx = pad.left + ci * groupW + groupW / 2;
-      ctx.fillText(lbl, cx, pad.top + plotH + 20);
+      ctx.fillText(lbl, cx, pad.top + plotH + (isSmall ? 15 : 20));
     });
 
-    // Y axis title
-    ctx.font = "600 11px var(--f-mono, monospace)";
+    ctx.font = `600 ${isSmall ? 9.5 : 11}px var(--f-mono, monospace)`;
     ctx.save();
-    ctx.translate(12, pad.top + plotH / 2);
+    ctx.translate(isSmall ? 10 : 12, pad.top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = "center";
     ctx.fillText("Accuracy %", 0, 0);
@@ -2231,7 +2265,6 @@
 
     canvas.dataset.drawn = "1";
 
-    // Legend
     if (legend) {
       legend.innerHTML = models.map((m) => `
         <span class="bm-leg-item">
