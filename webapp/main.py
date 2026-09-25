@@ -425,12 +425,21 @@ SPA_PATHS = {
 
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_shell(full_path: str):
-    """Serve the SPA shell for known view routes; 404 otherwise.
-    The optional /demo prefix maps onto the same views (hardcoded demo mode)."""
+    """Serve the SPA shell for known view routes; 200 healthcheck otherwise."""
+    index_file = STATIC_DIR / "index.html"
+    if not index_file.exists():
+        if full_path == "":
+            return {
+                "status": "ok",
+                "service": "DeepSentinel Neural Engine",
+                "dashboard": "/gradio",
+                "endpoints": ["/detect", "/detect/stream", "/health", "/warmup/status"],
+            }
+        raise HTTPException(status_code=404, detail="SPA static frontend is served by Vercel.")
     p = "/" + full_path
     if p == "/demo" or p.startswith("/demo/"):
         p = p[len("/demo"):] or "/"
     if p in SPA_PATHS or full_path == "":
         # never cache the shell so updated css/js are always picked up
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
+        return FileResponse(index_file, headers={"Cache-Control": "no-store"})
     raise HTTPException(status_code=404, detail="Not found")
