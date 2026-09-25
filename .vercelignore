@@ -1,0 +1,45 @@
+# ==============================================================================
+# Vercel Deployment Ignore Configuration
+# DeepSentinel — Pure Static Frontend Deployment
+# ==============================================================================
+# Exclude Python runtime, dependencies, and virtual environments to prevent
+# Vercel from treating the project as a Python Serverless Function backend.
+*.py
+*.pyc
+*.pyd
+*.pyo
+__pycache__/
+requirements*.txt
+pyproject.toml
+Pipfile*
+poetry.lock
+.venv/
+venv/
+env/
+ENV/
+
+# Exclude all Deep Learning models, checkpoints, weights, and large data files
+checkpoints/
+data/
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+*.tar
+*.tar.gz
+*.gz
+*.zip
+*.7z
+
+# Exclude backend services, generator pipelines, evaluation scripts, and tools
+generator/
+src/
+scripts/
+tools/
+deploy/
+tests/
+notebooks/
+docs/
+scratch/
+run_generator.*
