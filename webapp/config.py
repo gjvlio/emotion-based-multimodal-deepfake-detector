@@ -122,6 +122,11 @@ class Settings:
     # High-arousal negative emotion compensation (e.g. intense anger/shouting):
     # Prevents organic facial contortions and vocal strain from triggering false positives. Default: 2.70.
     arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.70"))
+    # Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
+    # In authentic deadpan sarcasm (Castro et al., 2019 MUStARD), the speaker intentionally
+    # delivers sarcastic vocal prosody with an unreactive/neutral poker face.
+    # When P(sarcasm) >= 0.50, the irony filter scales an authenticity bonus to prevent false alarms.
+    irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "3.20"))
     synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.75"))
     synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.070"))
     sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))

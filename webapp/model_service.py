@@ -416,7 +416,22 @@ class ModelService:
             # and sincere delivery (p_sarc < 0.25), compensate for organic arousal strain.
             if top_a_idx == 3 and top_b_idx == 3 and max_d <= 0.20 and p_sarc < 0.25:
                 harmony_bonus = settings.arousal_harmony_bonus
-            # 2. General / Conversational Harmony Gating:
+            # 2. Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
+            # In authentic deadpan sarcasm (Castro et al., 2019 MUStARD), the speaker intentionally
+            # delivers sarcastic vocal prosody with an unreactive/neutral poker face (top_a_idx != top_b_idx).
+            # Deepfake detectors trained on sincere talking-heads mistake this intentional affective
+            # discordance for synthetic manipulation seams. When P(sarcasm) >= 0.50, compensate for
+            # intentional deadpan divergence proportionally to sarcasm confidence, protecting authentic
+            # irony from false deepfake alarms while preserving detection on actual synthetic fakes.
+            elif p_sarc >= 0.50 and top_a_idx != top_b_idx:
+                sarc_intensity = min(1.0, max(0.0, (p_sarc - 0.50) / 0.50))
+                if top_b_idx == 0:
+                    # Deadpan delivery with neutral poker face: full irony compensation
+                    harmony_bonus = settings.irony_harmony_bonus * sarc_intensity
+                else:
+                    # Discordant delivery: scaled irony compensation
+                    harmony_bonus = (settings.irony_harmony_bonus * 0.75) * sarc_intensity
+            # 3. General / Conversational Harmony Gating:
             # For conversational speech (happy, neutral, calm), deepfake generators (Wav2Lip,
             # SadTalker) frequently match smiling moods. Never apply harmony bonuses if the
             # neural backbone detects manipulation artifacts (raw_val > logit_0).
